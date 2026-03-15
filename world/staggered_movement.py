@@ -10,7 +10,7 @@ DRIVE_DELAY = 2.0
 
 
 def _staggered_walk_callback(obj_id, dest_id):
-    """Called after WALK_DELAY: perform the actual move."""
+    """Called after WALK_DELAY: perform the actual move. Drags grappled victim if mover is grappler."""
     try:
         objs = search_object("#%s" % obj_id)
         dests = search_object("#%s" % dest_id)
@@ -20,6 +20,14 @@ def _staggered_walk_callback(obj_id, dest_id):
         if not obj or not dest or not hasattr(obj, "move_to"):
             return
         obj.move_to(dest)
+        # If grappler: bring grappled victim along
+        victim = getattr(getattr(obj, "db", None), "grappling", None)
+        if victim and hasattr(victim, "move_to"):
+            victim.move_to(dest)
+            dest.msg_contents(
+                "%s is dragged in by %s." % (victim.name, obj.name),
+                exclude=(obj, victim),
+            )
     except Exception as e:
         from evennia.utils import logger
         logger.log_trace("staggered_movement._staggered_walk_callback: %s" % e)

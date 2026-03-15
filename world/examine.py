@@ -54,11 +54,14 @@ def get_usage_hints(obj):
                     hints.append(hint)
         except Exception as e:
             logger.log_trace("examine.get_usage_hints: is_typeclass(%s): %s" % (typeclass_path, e))
-    # Medical tools: use <tool> on <target>, medical [target]
+    # Medical tools: use <tool> on <target> (operating table has its own hint below)
     try:
-        if getattr(obj, "db", None) and getattr(obj.db, "medical_tool_type", None):
+        from typeclasses.medical_tools import OperatingTable
+        if isinstance(obj, OperatingTable):
+            pass  # hint added in OperatingTable block below
+        elif getattr(obj, "db", None) and getattr(obj.db, "medical_tool_type", None):
             key = getattr(obj, "key", "tool")
-            hints.append(f"|wuse {key} on <target>|n, |wmedical [target]|n")
+            hints.append(f"|wuse {key} on <target>|n")
     except Exception as e:
         logger.log_trace("examine.get_usage_hints: medical_tool_type: %s" % e)
     # Defibrillator: defib <target> or use on dead target
@@ -69,6 +72,30 @@ def get_usage_hints(obj):
             hints.append(f"|wdefib <target>|n, |wuse {key} on <target>|n (target must be in arrest)")
     except Exception as e:
         logger.log_trace("examine.get_usage_hints: Defibrillator: %s" % e)
+    # Seat: sit on it
+    try:
+        from typeclasses.seats import Seat
+        if isinstance(obj, Seat):
+            key = getattr(obj, "key", "seat")
+            hints.append(f"|wsit on {key}|n")
+    except Exception as e:
+        logger.log_trace("examine.get_usage_hints: Seat: %s" % e)
+    # Bed: lie on it
+    try:
+        from typeclasses.seats import Bed
+        if isinstance(obj, Bed):
+            key = getattr(obj, "key", "bed")
+            hints.append(f"|wlie on {key}|n")
+    except Exception as e:
+        logger.log_trace("examine.get_usage_hints: Bed: %s" % e)
+    # Operating table: lie on it (patient), surgery <organ> (surgeon)
+    try:
+        from typeclasses.medical_tools import OperatingTable
+        if isinstance(obj, OperatingTable):
+            key = getattr(obj, "key", "operating table")
+            hints.append(f"Patient: |wlie on {key}|n. Surgeon: |wsurgery <organ>|n (e.g. surgery heart, surgery liver)")
+    except Exception as e:
+        logger.log_trace("examine.get_usage_hints: OperatingTable: %s" % e)
 
     # Generic fallback for portable objects
     try:

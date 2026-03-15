@@ -30,6 +30,16 @@ class Exit(ObjectParent, DefaultExit):
         if not destination:
             super().at_traverse(traversing_object, destination)
             return
+        # Voided characters cannot leave the void room
+        if getattr(traversing_object.db, "voided", False):
+            try:
+                from evennia.server.models import ServerConfig
+                void_id = ServerConfig.objects.conf("VOID_ROOM_ID", default=None)
+                if void_id is not None and getattr(destination, "id", None) != int(void_id):
+                    traversing_object.msg("|rYou cannot leave the void.|n")
+                    return
+            except Exception:
+                pass
         direction = (self.key or "away").strip()
         traversing_object.msg(f"You begin walking {direction}.")
         loc = traversing_object.location
@@ -42,4 +52,11 @@ class Exit(ObjectParent, DefaultExit):
             delay(WALK_DELAY, _staggered_walk_callback, traversing_object.id, destination.id)
         else:
             traversing_object.move_to(destination)
+            victim = getattr(getattr(traversing_object, "db", None), "grappling", None)
+            if victim and hasattr(victim, "move_to"):
+                victim.move_to(destination)
+                destination.msg_contents(
+                    "%s is dragged in by %s." % (victim.name, traversing_object.name),
+                    exclude=(traversing_object, victim),
+                )
         return

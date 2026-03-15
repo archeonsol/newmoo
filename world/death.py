@@ -72,9 +72,12 @@ LOGGED_OFF_TAKE_AFTER_SECONDS = 30 * 60  # 30 minutes
 
 
 def is_character_logged_off(character):
-    """True if character has no connected sessions (player is logged off / sleeping)."""
+    """True if character has no connected sessions (player is logged off / sleeping).
+    NPCs are always treated as present (never logged off) for combat, get-from, etc."""
     if not character or not getattr(character, "sessions", None):
         return True
+    if getattr(character.db, "is_npc", False):
+        return False  # NPCs act like they are always logged on
     try:
         return not character.sessions.get()
     except Exception:

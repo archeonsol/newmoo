@@ -38,10 +38,14 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         super().at_cmdset_creation()
 
         from commands.command import (
-            CmdStats, CmdAttack, CmdStance, CmdStop, CmdExecute, CmdDiagnose, CmdUse, CmdApply, CmdStabilize, CmdEat, CmdDrink, CmdWield, CmdUnwield, CmdFreehands, CmdInventory, CmdReload, CmdUnload, CmdCheckAmmo,
+            CmdStats, CmdAttack, CmdStance, CmdStop, CmdExecute, CmdGrapple, CmdLetGo, CmdResist, CmdDiagnose, CmdUse, CmdApply, CmdStabilize, CmdEat, CmdDrink, CmdWield, CmdUnwield, CmdFreehands, CmdInventory, CmdReload, CmdUnload, CmdCheckAmmo,
             CmdWear, CmdRemove, CmdStrip, CmdLoot, CmdFrisk, CmdGet, CmdTailor, CmdTease, CmdXp,
             CmdDescribeBodypart, CmdBody, CmdLookPlace, CmdSleepPlace, CmdWakeMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch,
             CmdEmoteDebug, CmdSpawn, CmdDespawn, CmdHeal, CmdGiveXp, CmdCreateItem, CmdTypeclasses, CmdSpawnVehicle, CmdSpawnMedical, CmdSpawnOR, CmdDefib,
+            CmdSit, CmdLieOnTable, CmdGetOffTable, CmdSurgery,
+            CmdStaffSheet, CmdStaffSetStat, CmdStaffSetSkill, CmdMakeNpc, CmdNpcSet, CmdGoto, CmdSummon,
+            CmdSetVoid, CmdVoid, CmdRelease, CmdBoot, CmdFind, CmdAnnounce, CmdRestore,
+            CmdSpawnSeat, CmdSpawnBed,
             CmdEnterVehicle, CmdExitVehicle, CmdStartEngine, CmdStopEngine, CmdShutoffEngine, CmdDrive,
             CmdVehicleStatus, CmdRepairPart, CmdDamageVehicle,
             CmdExamine,
@@ -61,6 +65,13 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdUse())
         self.add(CmdApply())
         self.add(CmdStabilize())
+        self.add(CmdGrapple())
+        self.add(CmdLetGo())
+        self.add(CmdResist())
+        self.add(CmdSit())
+        self.add(CmdLieOnTable())
+        self.add(CmdGetOffTable())
+        self.add(CmdSurgery())
         self.add(CmdEat())
         self.add(CmdDrink())
         self.add(CmdDefib())
@@ -114,6 +125,22 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdDamageVehicle())
         self.add(CmdSpawnMedical())
         self.add(CmdSpawnOR())
+        self.add(CmdStaffSheet())
+        self.add(CmdStaffSetStat())
+        self.add(CmdStaffSetSkill())
+        self.add(CmdMakeNpc())
+        self.add(CmdNpcSet())
+        self.add(CmdGoto())
+        self.add(CmdSummon())
+        self.add(CmdSetVoid())
+        self.add(CmdVoid())
+        self.add(CmdRelease())
+        self.add(CmdBoot())
+        self.add(CmdFind())
+        self.add(CmdAnnounce())
+        self.add(CmdRestore())
+        self.add(CmdSpawnSeat())
+        self.add(CmdSpawnBed())
 
 class AdminOnlyIC(CmdIC):
     """IC/puppet: staff only (one character per account for players)."""

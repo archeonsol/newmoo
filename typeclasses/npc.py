@@ -3,8 +3,10 @@ from typeclasses.characters import Character
 import random
 
 class NPC(Character):
+    """Staff-created character. Same stats/skills as PC but does not show as sleeping when unpuppeted."""
     def at_object_creation(self):
         super().at_object_creation()
+        self.db.is_npc = True
         # Stats 0-300, skills 0-150: random low-mid range
         for stat in self.db.stats:
             self.db.stats[stat] = random.randint(30, 140)

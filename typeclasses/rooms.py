@@ -39,6 +39,33 @@ def _is_corpse(obj):
         return False
 
 
+def _is_operating_table(obj):
+    """True if obj is an OperatingTable (patient lies on it; show 'X is lying on the operating table')."""
+    try:
+        from typeclasses.medical_tools import OperatingTable
+        return isinstance(obj, OperatingTable)
+    except ImportError:
+        return False
+
+
+def _is_seat(obj):
+    """True if obj is a Seat (chair, couch; show 'X is sitting on Y')."""
+    try:
+        from typeclasses.seats import Seat
+        return isinstance(obj, Seat)
+    except ImportError:
+        return False
+
+
+def _is_bed(obj):
+    """True if obj is a Bed (bed, cot; show 'X is lying on Y')."""
+    try:
+        from typeclasses.seats import Bed
+        return isinstance(obj, Bed)
+    except ImportError:
+        return False
+
+
 class Room(ObjectParent, DefaultRoom):
     """
     Rooms are like any Object, except their location is None
@@ -161,8 +188,66 @@ class Room(ObjectParent, DefaultRoom):
         if vehicle_pose_parts:
             first_para_parts.append(" ".join(vehicle_pose_parts))
         first_para = " ".join(filter(None, first_para_parts)).strip()
+        # Patients lying on an operating table (db.lying_on_table = table; they stay in room)
+        table_pose_parts = []
+        on_table = set()  # characters shown in "lying on table" so we skip them in normal poses
+        for obj in self.contents:
+            if not _is_operating_table(obj) or not self.filter_visible([obj], looker, **kwargs):
+                continue
+            for char in characters:
+                if getattr(char.db, "lying_on_table", None) != obj:
+                    continue
+                if not self.filter_visible([char], looker, **kwargs):
+                    continue
+                on_table.add(char)
+                name = char.get_display_name(looker, **kwargs)
+                table_name = obj.get_display_name(looker, **kwargs)
+                table_pose_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{name}|n is lying on {ROOM_DESC_OBJECT_NAME_COLOR}{table_name}|n.")
+        # Sitting on seats (chair, couch, etc.)
+        sitting_parts = []
+        sitting_set = set()
+        for obj in self.contents:
+            if not _is_seat(obj) or not self.filter_visible([obj], looker, **kwargs):
+                continue
+            for char in characters:
+                if getattr(char.db, "sitting_on", None) != obj:
+                    continue
+                if not self.filter_visible([char], looker, **kwargs):
+                    continue
+                sitting_set.add(char)
+                cname = char.get_display_name(looker, **kwargs)
+                sname = obj.get_display_name(looker, **kwargs)
+                sitting_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{cname}|n is sitting on {ROOM_DESC_OBJECT_NAME_COLOR}{sname}|n.")
+        # Lying on beds (bed, cot, etc. — not operating table)
+        lying_parts = []
+        lying_set = set()
+        for obj in self.contents:
+            if not _is_bed(obj) or not self.filter_visible([obj], looker, **kwargs):
+                continue
+            for char in characters:
+                if getattr(char.db, "lying_on", None) != obj:
+                    continue
+                if not self.filter_visible([char], looker, **kwargs):
+                    continue
+                lying_set.add(char)
+                cname = char.get_display_name(looker, **kwargs)
+                bname = obj.get_display_name(looker, **kwargs)
+                lying_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{cname}|n is lying on {ROOM_DESC_OBJECT_NAME_COLOR}{bname}|n.")
+        # Grappled: "X is locked in the grasp of Y"
+        grappled_parts = []
+        grappled_set = set()
+        for char in characters:
+            holder = getattr(char.db, "grappled_by", None)
+            if not holder or not self.filter_visible([char, holder], looker, **kwargs):
+                continue
+            grappled_set.add(char)
+            vname = char.get_display_name(looker, **kwargs)
+            hname = holder.get_display_name(looker, **kwargs)
+            grappled_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{vname}|n is locked in the grasp of {ROOM_DESC_CHARACTER_NAME_COLOR}{hname}|n.")
         char_pose_parts = []
         for char in characters:
+            if char in on_table or char in sitting_set or char in lying_set or char in grappled_set:
+                continue
             logged_off = False
             if is_flatlined(char):
                 pose = "lying here, dead."
@@ -171,6 +256,8 @@ class Room(ObjectParent, DefaultRoom):
                     logged_off = not (getattr(char, "sessions", None) and char.sessions.get())
                 except Exception:
                     pass
+                if getattr(char.db, "is_npc", False):
+                    logged_off = False  # NPCs never show as sleeping when unpuppeted
                 if logged_off:
                     pose = getattr(char.db, "sleep_place", None) or "sleeping here"
                 else:
@@ -189,6 +276,14 @@ class Room(ObjectParent, DefaultRoom):
             else:
                 char_pose_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{name}|n is {pose}.")
         char_pose_line = " ".join(char_pose_parts) if char_pose_parts else ""
+        if sitting_parts:
+            char_pose_line = " ".join(filter(None, [char_pose_line, " ".join(sitting_parts)]))
+        if lying_parts:
+            char_pose_line = " ".join(filter(None, [char_pose_line, " ".join(lying_parts)]))
+        if grappled_parts:
+            char_pose_line = " ".join(filter(None, [char_pose_line, " ".join(grappled_parts)]))
+        if table_pose_parts:
+            char_pose_line = " ".join(filter(None, [char_pose_line, " ".join(table_pose_parts)]))
         parts = []
         if first_para:
             parts.append(first_para)

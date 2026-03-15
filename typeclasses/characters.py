@@ -74,6 +74,8 @@ class Character(DefaultCharacter):
         self.db.pronoun = "neutral"
         # XP: gained every 6h while eligible (max 4 drops/24h), cap ~1 year of daily play
         self.db.xp = 0
+        # PC vs NPC: NPCs do not show as "sleeping" when unpuppeted; set True for staff-created NPCs
+        self.db.is_npc = False
 
     def get_body_descriptions(self):
         """
@@ -175,14 +177,29 @@ class Character(DefaultCharacter):
             xp_granted, drops = grant_pending_xp(self)
             if xp_granted > 0 and drops > 0:
                 self.msg("|gYou gain {} XP from {} neural-link sync(s) (max 4 per 24h).|n".format(xp_granted, drops))
+            # Personal login message (only to the player)
+            self.msg("|cYou open your eyes and return to the world, awake.|n")
+            # Wake-up message to room when logging in (not during first-time chargen)
+            if self.location:
+                try:
+                    from world.crafting import substitute_clothing_desc
+                    msg = getattr(self.db, "wake_up_message", None) or "$N wakes up."
+                    msg = substitute_clothing_desc(msg, self)
+                    if msg:
+                        self.location.msg_contents(msg, exclude=[self])
+                except Exception:
+                    pass
 
     def at_post_unpuppet(self, account=None, session=None, **kwargs):
         """
         When you stop controlling this character (e.g. log off, @ic another), they stay in the room.
-        Room sees the customizable fall-asleep message.
+        PCs: room sees fall-asleep message and "sleeping here" on look. NPCs: no sleep state.
         """
-        import time
         if not self.sessions.count():
+            if getattr(self.db, "is_npc", False):
+                # NPCs do not go to logged-off/sleep state; they stay "present" with room_pose
+                return
+            import time
             self.db.last_logout_time = time.time()  # for 30-min rule: get/strip from logged-off only after this
             if self.location:
                 try:
@@ -195,18 +212,6 @@ class Character(DefaultCharacter):
                     pass
                 self.db.prelogout_location = self.location
             # Do NOT set self.location = None; character stays in the room.
-
-    def at_post_puppet(self, **kwargs):
-        """When someone starts controlling this character (log on), room sees the customizable wake-up message."""
-        if self.location:
-            try:
-                from world.crafting import substitute_clothing_desc
-                msg = getattr(self.db, "wake_up_message", None) or "$N wakes up."
-                msg = substitute_clothing_desc(msg, self)
-                if msg:
-                    self.location.msg_contents(msg, exclude=[self])
-            except Exception:
-                pass
 
     # ==========================================
     # DERIVED STATS (Dynamic Calculation)

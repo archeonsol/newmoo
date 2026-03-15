@@ -129,18 +129,43 @@ class SurgicalKit(MedicalTool):
 
 class ORStation(MedicalTool):
     """
-    Operating room surgical station: full surgical capability, room-only.
-    Cannot be carried; placed in an OR. Provides surgical_kit capability to anyone in the room.
+    Legacy operating room surgical station (operating theatre). Use OperatingTable for new spawns.
     """
     def at_object_creation(self):
         super().at_object_creation()
         self.db.medical_tool_type = TOOL_SURGICAL_KIT
-        self.db.uses_remaining = None  # unlimited in OR
+        self.db.uses_remaining = None
         self.db.stationary_medical = True
         self.locks.add("get:false()")
 
     def get_display_name(self, looker):
         return getattr(self.db, "desc", None) or self.key or "operating theatre (surgical station)"
+
+
+class OperatingTable(MedicalTool):
+    """
+    Operating table: patients lie down on it for surgery. Room look shows "X is lying on the operating table".
+    Provides surgical capability; use the surgery command for organ procedures with narrative and skill checks.
+    """
+    def at_object_creation(self):
+        super().at_object_creation()
+        self.db.medical_tool_type = TOOL_SURGICAL_KIT
+        self.db.uses_remaining = None
+        self.db.stationary_medical = True
+        self.locks.add("get:false()")
+
+    def get_display_name(self, looker):
+        return getattr(self.db, "desc", None) or self.key or "operating table"
+
+    def get_patient(self):
+        """Return the character lying on this table (db.lying_on_table == self), or None. Character stays in room."""
+        room = self.location
+        if not room:
+            return None
+        for char in room.contents_get(content_type="character"):
+            if getattr(char.db, "lying_on_table", None) == self:
+                return char
+        return None
 
 
 def get_medical_tools_from_inventory(character):

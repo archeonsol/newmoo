@@ -40,6 +40,16 @@ AUTO_CREATE_CHARACTER_WITH_ACCOUNT = True
 AUTO_PUPPET_ON_LOGIN = True
 MAX_NR_CHARACTERS = 1
 
+# Prefer Argon2 for password hashing (requires: pip install argon2-cffi).
+# Existing PBKDF2 hashes still work; new/changed passwords use Argon2.
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",
+    "django.contrib.auth.hashers.ScryptPasswordHasher",
+]
+
 ######################################################################
 # Settings given in secret_settings.py override those in this file.
 ######################################################################

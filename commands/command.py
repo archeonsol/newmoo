@@ -369,6 +369,94 @@ class CmdStop(Command):
         stop_combat_ticker(caller, target)
 
 
+class CmdGrapple(Command):
+    """
+    Grapple a character: agility vs perception (see it coming), then agility vs agility (land the grab).
+    If you win, they are locked in your grasp and you can drag them when you move.
+    Usage: grapple <target>
+    """
+    key = "grapple"
+    aliases = ["grab", "grasp"]
+    locks = "cmd:all()"
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Grapple who? Usage: grapple <target>")
+            return
+        target = caller.search(args, location=caller.location)
+        if not target:
+            return
+        from world.grapple import attempt_grapple
+        success, msg = attempt_grapple(caller, target)
+        if success:
+            caller.msg("|g%s|n" % msg)
+            if target != caller:
+                target.msg("|r%s has you locked in their grasp! You can try |wresist|n to break free.|n" % caller.name)
+            if caller.location:
+                caller.location.msg_contents(
+                    "%s locks %s in their grasp." % (caller.name, target.name),
+                    exclude=(caller, target),
+                )
+        else:
+            caller.msg("|r%s|n" % msg)
+
+
+class CmdLetGo(Command):
+    """
+    Release the character you are grappling.
+    Usage: letgo
+    """
+    key = "letgo"
+    aliases = ["let go", "release grapple", "ungrapple"]
+    locks = "cmd:all()"
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        victim = getattr(caller.db, "grappling", None)
+        from world.grapple import release_grapple
+        success, msg = release_grapple(caller)
+        if success:
+            caller.msg("|g%s|n" % msg)
+            if victim:
+                victim.msg("|gYou are released.|n")
+                if caller.location:
+                    caller.location.msg_contents(
+                        "%s releases %s." % (caller.name, victim.name),
+                        exclude=(caller, victim),
+                    )
+        else:
+            caller.msg("|r%s|n" % msg)
+
+
+class CmdResist(Command):
+    """
+    Try to break out of a grapple. Strength + unarmed vs the holder; each attempt weakens their hold.
+    Usage: resist
+    """
+    key = "resist"
+    aliases = ["break free", "struggle"]
+    locks = "cmd:all()"
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        grappler = getattr(caller.db, "grappled_by", None)
+        from world.grapple import attempt_resist
+        freed, msg_you, msg_holder = attempt_resist(caller)
+        caller.msg("|g%s|n" % msg_you if freed else "|r%s|n" % msg_you)
+        if grappler and msg_holder:
+            grappler.msg("|r%s|n" % msg_holder if freed else "|y%s|n" % msg_holder)
+        if freed and caller.location:
+            caller.location.msg_contents(
+                "%s breaks free of %s's grasp!" % (caller.name, grappler.name) if grappler else "%s breaks free!" % caller.name,
+                exclude=(caller, grappler) if grappler else (caller,),
+            )
+
+
 class CmdExecute(Command):
     """
     End a dying (flatlined) character permanently. They become a corpse and cannot be revived.
@@ -1002,12 +1090,12 @@ class CmdSpawnMedical(Command):
 
 class CmdSpawnOR(Command):
     """
-    Create an operating room surgical station in the current room. Builder/Admin only.
-    The station cannot be carried; it provides full surgical capability to anyone in the room.
+    Create an operating table in the current room. Builder/Admin only.
+    Patients lie on it with |wlie on operating table|n; surgery with |wsurgery <organ>|n.
     Usage: spawnor
     """
     key = "spawnor"
-    aliases = ["spawn or", "spawn operating room"]
+    aliases = ["spawn or", "spawn operating room", "spawn table"]
     locks = "cmd:perm(Builder)"
     help_category = "Admin"
 
@@ -1015,14 +1103,223 @@ class CmdSpawnOR(Command):
         caller = self.caller
         from evennia.utils.create import create_object
         try:
+            from typeclasses.medical_tools import OperatingTable
             obj = create_object(
-                "typeclasses.medical_tools.ORStation",
-                key="operating theatre",
+                "typeclasses.medical_tools.OperatingTable",
+                key="operating table",
                 location=caller.location,
             )
-            caller.msg("|gOperating theatre (surgical station) created in this room. Anyone here can use full surgical options: |wwield|n a tool, then |wapply to <target>|n or |wstabilize <target>|n.|n")
+            caller.msg("|gOperating table created here. Patients: |wlie on operating table|n. Surgeon: |wsurgery <organ>|n (patient must be on the table).|n")
         except Exception as e:
-            caller.msg(f"|rCould not create OR station: {e}|n")
+            caller.msg(f"|rCould not create operating table: {e}|n")
+
+
+class CmdSpawnSeat(Command):
+    """
+    Create a seat (chair, couch, bench) in the room. Builder+.
+    Usage: spawnseat [name]
+    """
+    key = "spawnseat"
+    aliases = ["spawn seat", "spawn chair", "spawn couch"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        name = (self.args or "chair").strip()
+        from evennia.utils.create import create_object
+        try:
+            from typeclasses.seats import Seat
+            create_object("typeclasses.seats.Seat", key=name, location=caller.location)
+            caller.msg("|gSeat |w%s|n created here. Players can |wsit on %s|n.|n" % (name, name))
+        except Exception as e:
+            caller.msg("|rCould not create seat: %s|n" % e)
+
+
+class CmdSpawnBed(Command):
+    """
+    Create a bed (or cot, sofa) in the room. Builder+.
+    Usage: spawnbed [name]
+    """
+    key = "spawnbed"
+    aliases = ["spawn bed", "spawn cot"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        name = (self.args or "bed").strip()
+        from evennia.utils.create import create_object
+        try:
+            from typeclasses.seats import Bed
+            create_object("typeclasses.seats.Bed", key=name, location=caller.location)
+            caller.msg("|gBed |w%s|n created here. Players can |wlie on %s|n.|n" % (name, name))
+        except Exception as e:
+            caller.msg("|rCould not create bed: %s|n" % e)
+
+
+class CmdSit(Command):
+    """
+    Sit on a seat (chair, couch, bench, etc.).
+    Usage: sit <seat> / sit on <seat>
+    """
+    key = "sit"
+    aliases = ["sit on"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if args.lower().startswith("on "):
+            args = args[3:].strip()
+        if not args:
+            caller.msg("Sit on what? Usage: sit <seat>")
+            return
+        from typeclasses.seats import Seat
+        seat = caller.search(args, location=caller.location)
+        if not seat:
+            return
+        if not isinstance(seat, Seat):
+            caller.msg("You can only sit on a chair, couch, or similar seat.")
+            return
+        if seat.get_sitter():
+            caller.msg("Someone is already sitting there.")
+            return
+        caller.db.sitting_on = seat
+        sname = seat.get_display_name(caller)
+        caller.msg("|wYou sit down on %s.|n" % sname)
+        if caller.location:
+            caller.location.msg_contents(
+                "%s sits down on %s." % (caller.name, sname),
+                exclude=caller,
+            )
+
+
+class CmdLieOnTable(Command):
+    """
+    Lie down on an operating table (for surgery) or a bed/cot (for rest).
+    Usage: lie on <table|bed> / lie down on <table|bed>
+    """
+    key = "lie"
+    aliases = ["lie down", "lie on"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if args.lower().startswith("on "):
+            args = args[3:].strip()
+        if not args:
+            caller.msg("Lie on what? Usage: lie on <operating table|bed>")
+            return
+        from typeclasses.medical_tools import OperatingTable
+        from typeclasses.seats import Bed
+        obj = caller.search(args, location=caller.location)
+        if not obj:
+            return
+        if isinstance(obj, OperatingTable):
+            if obj.get_patient():
+                caller.msg("Someone is already on the table. Wait for them to get up.")
+                return
+            caller.db.lying_on_table = obj
+            caller.msg("|wYou lie down on the operating table. The metal is cold.|n")
+            if caller.location:
+                caller.location.msg_contents(
+                    "%s lies down on the operating table." % caller.name,
+                    exclude=caller,
+                )
+        elif isinstance(obj, Bed):
+            if obj.get_occupant():
+                caller.msg("Someone is already lying there.")
+                return
+            caller.db.lying_on = obj
+            bname = obj.get_display_name(caller)
+            caller.msg("|wYou lie down on %s.|n" % bname)
+            if caller.location:
+                caller.location.msg_contents(
+                    "%s lies down on %s." % (caller.name, bname),
+                    exclude=caller,
+                )
+        else:
+            caller.msg("You can only lie on an operating table or a bed.")
+
+
+class CmdGetOffTable(Command):
+    """
+    Get up from a seat, bed, or operating table.
+    Usage: getup / get up / stand
+    """
+    key = "getup"
+    aliases = ["get up", "get off", "get off table", "stand up", "stand"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        cleared = []
+        if getattr(caller.db, "lying_on_table", None):
+            cleared.append("operating table")
+            del caller.db.lying_on_table
+        if getattr(caller.db, "sitting_on", None):
+            cleared.append("seat")
+            del caller.db.sitting_on
+        if getattr(caller.db, "lying_on", None):
+            cleared.append("bed")
+            del caller.db.lying_on
+        if not cleared:
+            caller.msg("You are not sitting or lying on anything.")
+            return
+        caller.msg("|wYou get up.|n")
+        if caller.location:
+            caller.location.msg_contents(
+                "%s gets up." % caller.name,
+                exclude=caller,
+            )
+
+
+class CmdSurgery(Command):
+    """
+    Perform organ surgery on a patient lying on the operating table.
+    Long narrative sequence with skill check; severe organ damage only.
+    Usage: surgery <organ>
+    """
+    key = "surgery"
+    aliases = ["operate"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Surgery on what organ? Usage: surgery <organ> (e.g. surgery heart, surgery liver)")
+            return
+        from world.medical_treatment import ORGAN_ALIASES
+        organ_arg = args.strip().lower()
+        organ_key = ORGAN_ALIASES.get(organ_arg, organ_arg.replace(" ", "_"))
+        from typeclasses.medical_tools import OperatingTable
+        table = None
+        for obj in caller.location.contents:
+            if isinstance(obj, OperatingTable):
+                table = obj
+                break
+        if not table:
+            caller.msg("There is no operating table here. The patient must lie on the table first.")
+            return
+        patient = table.get_patient()
+        if not patient:
+            caller.msg("No one is on the operating table. They must use 'lie on operating table' first.")
+            return
+        from world.medical_surgery import start_surgery_sequence
+        from world.medical import ORGAN_INFO
+        if organ_key not in ORGAN_INFO:
+            caller.msg("Unknown organ. Try: brain, eyes, throat, carotid, heart, lungs, spine_cord, liver, spleen, stomach, kidneys, pelvic_organs, collarbone_area.")
+            return
+        started, err = start_surgery_sequence(caller, patient, table, organ_key)
+        if not started:
+            caller.msg(err or "You cannot perform that surgery now.")
 
 
 class CmdDefib(Command):
@@ -1058,6 +1355,490 @@ class CmdDefib(Command):
         started, err = start_defib_sequence(caller, target, defib)
         if not started:
             caller.msg(err if err else "You cannot do that right now.")
+
+
+# -----------------------------------------------------------------------------
+# Staff suite: sheet, setstat, setskill, makenpc, npcset, goto, summon
+# -----------------------------------------------------------------------------
+
+class CmdStaffSheet(Command):
+    """
+    View any character's full sheet (stats, skills, vitals). Builder+.
+    Usage: charsheet <character>
+    """
+    key = "charsheet"
+    aliases = ["staffsheet", "viewsheet", "sheet"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Usage: charsheet <character>")
+            return
+        target = caller.search(args, global_search=True)
+        if not target:
+            return
+        if not hasattr(target, "db") or not hasattr(target.db, "stats"):
+            caller.msg("That is not a character with a sheet.")
+            return
+        from world.chargen import STAT_KEYS
+        from world.skills import SKILL_KEYS, SKILL_DISPLAY_NAMES
+        from world.levels import level_to_letter, MAX_STAT_LEVEL, MAX_LEVEL
+        stats = target.db.stats or {}
+        skills = target.db.skills or {}
+        bg = target.db.background or "Unknown"
+        try:
+            hp_str = "{} / {}".format(target.hp, target.max_hp)
+            st_str = "{} / {}".format(target.stamina, target.max_stamina)
+            load_str = "{} kg".format(target.carry_capacity)
+        except Exception:
+            hp_str = st_str = load_str = "---"
+        w = 50
+        line = "|c+" + "=" * (w - 2) + "+|n"
+        thin = "|c|" + "-" * (w - 2) + "||n"
+        npc_tag = " |r[NPC]|n" if getattr(target.db, "is_npc", False) else ""
+        output = line + "\n"
+        output += "|c||n  |W STAFF READOUT |w {}|n{}\n".format((target.name or "Unknown"), npc_tag)
+        output += "|c|||n  |wOrigin|n " + bg + "\n"
+        output += thin + "\n"
+        output += "|c|||n  |rVitality|n " + hp_str.ljust(12) + " |yStamina|n " + st_str.ljust(12) + " |gLoad|n " + load_str + "\n"
+        output += thin + "\n"
+        output += "|c|||n  |W S P E C I A L|n\n"
+        for key in STAT_KEYS:
+            lv = stats.get(key, 0)
+            letter = level_to_letter(lv, MAX_STAT_LEVEL)
+            adj = target.get_stat_grade_adjective(letter, key) if hasattr(target, "get_stat_grade_adjective") else letter
+            output += "|c|||n    |w{}|n  |w[{}]|n {} ({})\n".format(key.capitalize().ljust(12), letter, adj, lv)
+        output += thin + "\n"
+        output += "|c|||n  |W SKILLS|n\n"
+        for key in SKILL_KEYS:
+            lv = skills.get(key, 0)
+            letter = level_to_letter(lv, MAX_LEVEL)
+            adj = target.get_skill_grade_adjective(letter) if hasattr(target, "get_skill_grade_adjective") else letter
+            label = SKILL_DISPLAY_NAMES.get(key, key.replace("_", " ").title())
+            output += "|c|||n    |w{}|n  |w[{}]|n {} ({})\n".format(label.ljust(20), letter, adj, lv)
+        output += line + "\n"
+        caller.msg(output)
+
+
+class CmdStaffSetStat(Command):
+    """
+    Set a character's stat value (0-300). Builder+.
+    Usage: setstat <character> <stat> <value>
+    """
+    key = "setstat"
+    aliases = ["staffstat"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        parts = (self.args or "").strip().split()
+        if len(parts) < 3:
+            caller.msg("Usage: setstat <character> <stat> <value>")
+            return
+        target = caller.search(parts[0], global_search=True)
+        if not target or not hasattr(target, "db"):
+            return
+        from world.chargen import STAT_KEYS
+        stat_key = None
+        for s in STAT_KEYS:
+            if s.startswith(parts[1].lower()) or parts[1].lower() == s:
+                stat_key = s
+                break
+        if not stat_key:
+            caller.msg("Unknown stat. Use one of: {}.".format(", ".join(STAT_KEYS)))
+            return
+        try:
+            value = int(parts[2])
+            value = max(0, min(300, value))
+        except ValueError:
+            caller.msg("Value must be a number (0-300).")
+            return
+        if not target.db.stats:
+            target.db.stats = {}
+        target.db.stats[stat_key] = value
+        caller.msg("|g{}'s {} set to {}.|n".format(target.name, stat_key, value))
+        try:
+            _ = target.max_hp
+            _ = target.max_stamina
+        except Exception:
+            pass
+
+
+class CmdStaffSetSkill(Command):
+    """
+    Set a character's skill value (0-150). Builder+.
+    Usage: setskill <character> <skill> <value>
+    """
+    key = "setskill"
+    aliases = ["staffskill"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        parts = (self.args or "").strip().split()
+        if len(parts) < 3:
+            caller.msg("Usage: setskill <character> <skill> <value>")
+            return
+        target = caller.search(parts[0], global_search=True)
+        if not target or not hasattr(target, "db"):
+            return
+        from world.skills import SKILL_KEYS, SKILL_DISPLAY_NAMES
+        skill_key = None
+        for s in SKILL_KEYS:
+            if s.startswith(parts[1].lower().replace(" ", "_")) or parts[1].lower().replace(" ", "_") == s:
+                skill_key = s
+                break
+        if not skill_key:
+            caller.msg("Unknown skill. Use one of: {}.".format(", ".join(SKILL_KEYS)))
+            return
+        try:
+            value = int(parts[2])
+            value = max(0, min(150, value))
+        except ValueError:
+            caller.msg("Value must be a number (0-150).")
+            return
+        if not target.db.skills:
+            target.db.skills = {}
+        target.db.skills[skill_key] = value
+        label = SKILL_DISPLAY_NAMES.get(skill_key, skill_key)
+        caller.msg("|g{}'s {} set to {}.|n".format(target.name, label, value))
+
+
+class CmdMakeNpc(Command):
+    """
+    Create an NPC (staff-controlled character) in the current room. Builder+.
+    NPCs use the same stats/skills as PCs but do not show as sleeping when unpuppeted.
+    Usage: makenpc <name>
+    """
+    key = "makenpc"
+    aliases = ["createnpc", "npccreate"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        name = (self.args or "").strip()
+        if not name:
+            caller.msg("Usage: makenpc <name>")
+            return
+        from evennia.utils.create import create_object
+        try:
+            from typeclasses.npc import NPC
+            obj = create_object(
+                "typeclasses.npc.NPC",
+                key=name,
+                location=caller.location,
+            )
+            caller.msg("|gNPC |w{}|n created here. Use |wic {}|n to puppet.|n".format(name, name))
+        except Exception as e:
+            caller.msg("|rCould not create NPC: {}|n".format(e))
+
+
+class CmdNpcSet(Command):
+    """
+    Set a character as NPC or PC. NPCs do not show as sleeping when unpuppeted. Builder+.
+    Usage: npcset <character> npc|pc
+    """
+    key = "npcset"
+    aliases = ["setnpc"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        parts = (self.args or "").strip().split(None, 1)
+        if len(parts) < 2:
+            caller.msg("Usage: npcset <character> npc|pc")
+            return
+        target = caller.search(parts[0], global_search=True)
+        if not target or not hasattr(target, "db"):
+            return
+        mode = parts[1].strip().lower()
+        if mode not in ("npc", "pc"):
+            caller.msg("Use npc or pc.")
+            return
+        target.db.is_npc = (mode == "npc")
+        caller.msg("|g{} is now a {}.|n".format(target.name, mode.upper()))
+
+
+class CmdGoto(Command):
+    """
+    Teleport yourself to a character's location. Builder+.
+    Usage: goto <character>
+    """
+    key = "goto"
+    aliases = ["teleport", "tpto"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Usage: goto <character>")
+            return
+        target = caller.search(args, global_search=True)
+        if not target:
+            return
+        loc = getattr(target, "location", None)
+        if not loc:
+            caller.msg("That character has no location.")
+            return
+        caller.move_to(loc)
+        caller.msg("|gYou go to {}.|n".format(target.name))
+
+
+class CmdSummon(Command):
+    """
+    Bring a character to your location. Builder+.
+    Usage: summon <character>
+    """
+    key = "summon"
+    aliases = ["bring", "fetch"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Usage: summon <character>")
+            return
+        target = caller.search(args, global_search=True)
+        if not target:
+            return
+        if not hasattr(target, "move_to"):
+            caller.msg("That object cannot be moved.")
+            return
+        dest = caller.location
+        if not dest:
+            caller.msg("You have no location.")
+            return
+        target.move_to(dest)
+        caller.msg("|gYou summon {} here.|n".format(target.name))
+        target.msg("|yYou have been summoned to {}.|n".format(caller.name))
+
+
+class CmdSetVoid(Command):
+    """
+    Set the current room as the void (discipline holding room). Builder+.
+    Voided characters are moved here and cannot leave until released.
+    Usage: setvoid
+    """
+    key = "setvoid"
+    aliases = ["voidroom"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        loc = caller.location
+        if not loc:
+            caller.msg("You have no location.")
+            return
+        try:
+            from evennia.server.models import ServerConfig
+            ServerConfig.objects.conf("VOID_ROOM_ID", loc.id)
+            caller.msg("|gThis room is now the void. Use |wvoid <character> [reason]|n to send someone here, |wrelease <character>|n to free them.|n")
+        except Exception as e:
+            caller.msg("|rCould not set void room: {}|n".format(e))
+
+
+class CmdVoid(Command):
+    """
+    Send a character to the void (discipline room). They cannot leave until released. Builder+.
+    Set the void room first with |wsetvoid|n in that room.
+    Usage: void <character> [reason]
+    """
+    key = "void"
+    aliases = ["jail", "timeout", "discipline"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        parts = (self.args or "").strip().split(None, 1)
+        if not parts:
+            caller.msg("Usage: void <character> [reason]")
+            return
+        target = caller.search(parts[0], global_search=True)
+        if not target or not hasattr(target, "move_to"):
+            return
+        reason = parts[1].strip() if len(parts) > 1 else ""
+        try:
+            from evennia.server.models import ServerConfig
+            void_id = ServerConfig.objects.conf("VOID_ROOM_ID", default=None)
+        except Exception:
+            void_id = None
+        if void_id is None:
+            caller.msg("|rNo void room set. Go to the discipline room and use |wsetvoid|n first.|n")
+            return
+        from evennia.utils.search import search_object
+        void_room = search_object("#%s" % int(void_id))
+        if not void_room:
+            void_room = search_object(int(void_id))
+        if not void_room:
+            caller.msg("|rVoid room no longer exists. Use |wsetvoid|n in the discipline room again.|n")
+            return
+        void_room = void_room[0] if isinstance(void_room, list) else void_room
+        target.db.voided = True
+        target.db.voided_reason = reason
+        target.db.voided_at = __import__("time", fromlist=["time"]).time()
+        target.move_to(void_room)
+        caller.msg("|g{} has been sent to the void.{}|n".format(target.name, " Reason: " + reason if reason else ""))
+        target.msg("|rYou have been moved to the void.{}|n".format(" " + reason if reason else " A staff member will release you when appropriate."))
+
+
+class CmdRelease(Command):
+    """
+    Release a character from the void and bring them to your location. Builder+.
+    Usage: release <character>
+    """
+    key = "release"
+    aliases = ["unvoid", "free", "unjail"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Usage: release <character>")
+            return
+        target = caller.search(args, global_search=True)
+        if not target or not hasattr(target, "db"):
+            return
+        if not getattr(target.db, "voided", False):
+            caller.msg("{} is not in the void.".format(target.name))
+            return
+        dest = caller.location
+        if not dest or not hasattr(target, "move_to"):
+            caller.msg("You have no location to release them to.")
+            return
+        target.db.voided = False
+        for key in ("voided_reason", "voided_at"):
+            if hasattr(target.db, key):
+                del target.db[key]
+        target.move_to(dest)
+        caller.msg("|g{} has been released here.|n".format(target.name))
+        target.msg("|gYou have been released from the void.|n")
+
+
+class CmdBoot(Command):
+    """
+    Disconnect a character's session(s) and send them to the login screen. Builder+.
+    Usage: boot <character> [message]
+    """
+    key = "boot"
+    aliases = ["kick", "disconnect"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        parts = (self.args or "").strip().split(None, 1)
+        if not parts:
+            caller.msg("Usage: boot <character> [message]")
+            return
+        target = caller.search(parts[0], global_search=True)
+        if not target:
+            return
+        msg = parts[1].strip() if len(parts) > 1 else "You have been disconnected by staff."
+        try:
+            for session in target.sessions.get():
+                session.msg("|r%s|n" % msg)
+                session.sessionhandler.disconnect(session, reason=msg)
+            caller.msg("|gBooted {} (all sessions).|n".format(target.name))
+        except Exception as e:
+            caller.msg("|rCould not boot: {}|n".format(e))
+
+
+class CmdFind(Command):
+    """
+    Find where a character is (room name and id). Builder+.
+    Usage: find <character>
+    """
+    key = "find"
+    aliases = ["where", "locate"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Usage: find <character>")
+            return
+        target = caller.search(args, global_search=True)
+        if not target:
+            return
+        loc = getattr(target, "location", None)
+        if not loc:
+            caller.msg("{} has no location.".format(target.name))
+            return
+        voided = " |r[VOIDED]|n" if getattr(target.db, "voided", False) else ""
+        caller.msg("|w{}|n is at: |w{}|n (#{}){}".format(target.name, loc.name or loc.key, getattr(loc, "id", "?"), voided))
+
+
+class CmdAnnounce(Command):
+    """
+    Send a message to everyone in the game (all connected characters). Builder+.
+    Usage: announce <message>
+    """
+    key = "announce"
+    aliases = ["broadcast", "shout"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        msg = (self.args or "").strip()
+        if not msg:
+            caller.msg("Usage: announce <message>")
+            return
+        import evennia
+        sent = 0
+        for session in evennia.SESSION_HANDLER.get_sessions():
+            puppet = getattr(session, "puppet", None)
+            if puppet and hasattr(puppet, "msg") and puppet != caller:
+                puppet.msg("|y[ANNOUNCE]|n %s" % msg)
+                sent += 1
+        caller.msg("|gAnnouncement sent to {} recipient(s).|n".format(sent))
+
+
+class CmdRestore(Command):
+    """
+    Restore a character's HP and stamina to full. Builder+.
+    Usage: restore <character>
+    """
+    key = "restore"
+    aliases = ["fullheal", "healup"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Usage: restore <character>")
+            return
+        target = caller.search(args, global_search=True)
+        if not target or not hasattr(target, "db"):
+            return
+        try:
+            mx = target.max_hp
+            target.db.current_hp = mx
+            target.db.current_stamina = target.max_stamina
+            caller.msg("|g{} restored to full HP and stamina.|n".format(target.name))
+            if target != caller:
+                target.msg("|gYou have been restored to full health and stamina.|n")
+        except Exception as e:
+            caller.msg("|rCould not restore: {}|n".format(e))
 
 
 class CmdExamine(Command):
