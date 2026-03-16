@@ -72,6 +72,13 @@ def node_puppet_character(caller, raw_string, **kwargs):
         return "node_start"
     session = sessions[0]
 
+    # If we are already puppeting this character, just close the menu and return.
+    current = getattr(session, "puppet", None)
+    if current is char:
+        caller.msg("\n|gReturning to your body...|n\n")
+        # Let EvMenu exit naturally; nothing else to do.
+        return "", None
+
     caller.msg("\n|gReturning to your body...|n\n")
 
     try:
@@ -81,6 +88,7 @@ def node_puppet_character(caller, raw_string, **kwargs):
         caller.msg("|rThat body is no longer available.|n")
         return "node_start"
 
+    # We're now puppeting; return an empty node so EvMenu exits cleanly.
     return "", None
 
 

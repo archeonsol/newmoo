@@ -172,7 +172,8 @@ class Account(DefaultAccount):
     def at_post_login(self, session=None, **kwargs):
         """
         After login: first-time with one unfinished character -> puppet straight into
-        chargen. Otherwise show Soul Registry menu.
+        chargen. If there is exactly one finished character, auto-puppet into it
+        and skip the Soul Registry menu. Otherwise show the Soul Registry.
         """
         protocol_flags = self.attributes.get("_saved_protocol_flags", {})
         if session and protocol_flags:
@@ -184,19 +185,25 @@ class Account(DefaultAccount):
         # Mandatory subscribe to Help (xhelp) so staff can reply; players only see their own messages and staff's private xhelp/Name replies
         _auto_subscribe_help_channel(self)
 
-        # First login + exactly one character that still needs chargen -> skip menu, go straight to Rite
-        if getattr(self.db, "FIRST_LOGIN", False) and session:
-            chars = list(self.characters.all()) if hasattr(self, "characters") else []
-            if len(chars) == 1:
-                char = chars[0]
+        # Character selection logic:
+        # - If exactly one character and it still needs chargen -> auto-puppet into chargen.
+        # - If exactly one finished character -> auto-puppet into it and skip Soul Registry.
+        # - Otherwise (0 or multiple) -> show the Soul Registry menu.
+        chars = list(self.characters.all()) if hasattr(self, "characters") else []
+        if session and len(chars) == 1:
+            char = chars[0]
+            try:
+                # Needs chargen: go straight into chargen on first login.
                 if getattr(char.db, "needs_chargen", False):
-                    try:
-                        char.db._suppress_become_message = True  # no "You become X" before chargen
-                        self.puppet_object(session, char)
-                    except Exception:
-                        pass
-                    else:
-                        return  # chargen will run in Character.at_post_puppet
+                    char.db._suppress_become_message = True  # no "You become X" before chargen
+                    self.puppet_object(session, char)
+                    return  # chargen runs in Character.at_post_puppet
+                # Finished character: just puppet into the world.
+                char.db._suppress_become_message = True
+                self.puppet_object(session, char)
+                return
+            except Exception:
+                pass
 
         from world.main_menu import start_main_menu
         start_main_menu(self)

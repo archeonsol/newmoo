@@ -1,0 +1,60 @@
+/* Gutterpunk Terminal Theme */
+:root {
+    --bg-color: #050505;
+    --primary-red: #bb0000;
+    --dim-red: #440000;
+    --glitch-color: #ff0000;
+    --font-stack: 'Courier New', Courier, monospace;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--primary-red);
+    font-family: var(--font-stack);
+    /* CRT Scanline Effect */
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    background-size: 100% 4px, 3px 100%;
+    text-shadow: 0 0 5px var(--primary-red);
+}
+
+/* The Glitch Animation */
+@keyframes flicker {
+    0% { opacity: 0.9; }
+    5% { opacity: 0.5; }
+    10% { opacity: 0.9; }
+    100% { opacity: 1; }
+}
+
+.terminal-header {
+    border-bottom: 2px solid var(--primary-red);
+    padding: 20px;
+    animation: flicker 0.2s infinite secondary;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+}
+
+/* Customizing Buttons to look like physical switches */
+.btn-primary {
+    background-color: transparent;
+    border: 1px solid var(--primary-red);
+    color: var(--primary-red);
+    border-radius: 0;
+    transition: all 0.3s;
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-red);
+    color: var(--bg-color);
+    box-shadow: 0 0 15px var(--primary-red);
+}
+
+/* Make the navbar look like part of a machine interface */
+.navbar {
+    background-color: var(--dim-red) !important;
+    border-bottom: 1px solid var(--primary-red);
+}
+
+.navbar-brand, .nav-link {
+    color: var(--primary-red) !important;
+}
