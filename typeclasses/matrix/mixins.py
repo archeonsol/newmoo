@@ -28,6 +28,7 @@ class NetworkedMixin:
         self.db.connection_type = "wireless"
         self.db.device_type = "device"
         self.db.matrix_node = None
+        self.db.ephemeral_node = False  # Whether Matrix node is ephemeral (default: persistent)
         self.db.security_level = 0
         self.db.has_storage = False
         self.db.has_controls = False

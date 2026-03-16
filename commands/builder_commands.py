@@ -4,6 +4,8 @@ Prefixed with 'bu' to leave short names free. Locked to Builder only.
 """
 from evennia import Command
 from evennia.utils.create import create_object
+from typeclasses.matrix.rooms import MatrixNode
+from typeclasses.matrix.exits import MatrixExit
 
 
 class CmdTag(Command):
@@ -351,11 +353,94 @@ class CmdName(Command):
         caller.msg("Renamed %s to |w%s|n." % (old, new_name))
 
 
+class CmdMatrixDig(Command):
+    """
+    Create a new Matrix room and link it with exits. Creates MatrixNode/MatrixExit.
+    Usage: mdig <room name> = <exit out>[, <exit back>]
+    Exit format: name or name;alias1;alias2  (e.g. west;w  or south;s;down)
+    Example: mdig The Cortex = entrance;in, exit;out
+    Use /tel to teleport to the new room after creating.
+    """
+    key = "mdig"
+    switch_options = ("tel", "teleport")
+    locks = "cmd:perm(Builder)"
+    help_category = "Building"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        teleport = "tel" in getattr(self, "switches", []) or "teleport" in getattr(self, "switches", [])
+        if "=" not in args:
+            caller.msg("Usage: |wmdig <room name> = <exit out>[, <exit back>]|n  Exits: |wname;alias|n e.g. mdig The Cortex = entrance;in, exit;out")
+            return
+        room_spec, exit_spec = args.split("=", 1)
+        room_name = room_spec.strip()
+        exit_spec = exit_spec.strip()
+        if not room_name:
+            caller.msg("Give a room name.")
+            return
+        if not exit_spec:
+            caller.msg("Give at least one exit name after =.")
+            return
+        parts = [p.strip() for p in exit_spec.split(",")]
+        out_spec = parts[0] if parts else "out"
+        back_spec = parts[1] if len(parts) > 1 else None
+        exit_out, out_aliases = _parse_exit_spec(out_spec)
+        exit_back, back_aliases = _parse_exit_spec(back_spec) if back_spec else (None, [])
+        loc = caller.location
+        if not loc:
+            caller.msg("You are nowhere.")
+            return
+
+        # Verify current location is a Matrix room
+        if not isinstance(loc, MatrixNode):
+            caller.msg("You must be in a Matrix room to use mdig. Use budig for meatspace rooms.")
+            return
+
+        new_room = create_object(MatrixNode, key=room_name, location=None)
+        if not new_room:
+            caller.msg("Could not create Matrix room.")
+            return
+
+        out_exit = create_object(MatrixExit, key=exit_out, location=loc, destination=new_room)
+        if not out_exit:
+            caller.msg("Matrix room created but could not create exit.")
+            return
+        for al in out_aliases:
+            try:
+                out_exit.aliases.add(al)
+            except Exception:
+                pass
+
+        if exit_back:
+            back_exit = create_object(MatrixExit, key=exit_back, location=new_room, destination=loc)
+            if back_exit:
+                for al in back_aliases:
+                    try:
+                        back_exit.aliases.add(al)
+                    except Exception:
+                        pass
+
+        msg = "Created Matrix room |m%s|n (#%s) with exit |w%s|n from here." % (room_name, new_room.id, exit_out)
+        if out_aliases:
+            msg += " (|w%s|n)" % ", ".join(out_aliases)
+        if exit_back:
+            msg += " Exit |w%s|n leads back." % exit_back
+            if back_aliases:
+                msg += " (|w%s|n)" % ", ".join(back_aliases)
+        caller.msg(msg)
+        if teleport:
+            caller.move_to(new_room)
+            caller.msg("You teleport to the new Matrix room.")
+
+
 class CmdOpen(Command):
     """
     Create an exit from the current room to a destination.
     Usage: buopen <exit name> = <destination>
     Destination can be room name, #dbref, or "here" for current room (one-way).
+
+    Note: Cannot create exits between Matrix and meatspace rooms.
     """
     key = "buopen"
     locks = "cmd:perm(Builder)"
@@ -365,7 +450,7 @@ class CmdOpen(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if "=" not in args:
-            caller.msg("Usage: |wopen <exit name> = <destination>|n")
+            caller.msg("Usage: |wbuopen <exit name> = <destination>|n")
             return
         exit_name, dest_spec = args.split("=", 1)
         exit_name = exit_name.strip()
@@ -383,9 +468,22 @@ class CmdOpen(Command):
             dest = caller.search(dest_spec, global_search=True)
             if not dest:
                 return
+
+        # Prevent cross-realm exits
+        loc_is_matrix = isinstance(loc, MatrixNode)
+        dest_is_matrix = isinstance(dest, MatrixNode) if dest else loc_is_matrix
+
+        if loc_is_matrix != dest_is_matrix:
+            caller.msg("Cannot create exits between Matrix and meatspace rooms.")
+            return
+
         try:
-            from typeclasses.exits import Exit
-            ex = create_object(Exit, key=exit_name, location=loc, destination=dest)
+            if loc_is_matrix:
+                ex = create_object(MatrixExit, key=exit_name, location=loc, destination=dest)
+            else:
+                from typeclasses.exits import Exit
+                ex = create_object(Exit, key=exit_name, location=loc, destination=dest)
+
             if ex:
                 caller.msg("Created exit |w%s|n from here to %s." % (exit_name, dest.get_display_name(caller) if dest else "nowhere (unlinked)"))
             else:

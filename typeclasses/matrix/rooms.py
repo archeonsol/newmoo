@@ -5,8 +5,8 @@ Virtual locations within the Matrix. These nodes exist in virtual space and can 
 be accessed by diving (via avatar objects). They form the navigable geography
 of the city's cyberspace.
 
-All Matrix nodes are persistent - device nodes exist as long as the device exists,
-and spine nodes are permanent infrastructure.
+Nodes can be persistent (customizable spaces that survive between visits) or
+ephemeral (template-based interfaces that are cleaned up when empty).
 
 MatrixNode - All virtual Matrix locations (spines, hubs, devices, public spaces)
 MatrixExit - Connections between Matrix locations
@@ -26,20 +26,23 @@ class MatrixNode(Room):
     - Device nodes (interface spaces for cameras, terminals, etc.)
     - Public spaces (the Cortex, shops, clubs)
 
-    All nodes are persistent. Device nodes exist as long as their parent device
-    exists. Spine nodes and public spaces are permanent infrastructure.
+    Nodes can be persistent (customizable, survive between visits) or ephemeral
+    (template-based, cleaned up when empty). Most nodes are persistent - spine nodes,
+    public spaces, and complex devices. Simple devices (cameras, locks, stock handsets)
+    use ephemeral nodes.
 
     Attributes:
         security_level (int): Security clearance required (0-10, 0=public, 10=maximum)
         parent_object (obj): The physical device/object this node represents (if any)
         node_type (str): Type of node (spine, hub, device, public, etc.)
         relay_key (str): Key of the relay this node is associated with (if any)
+        ephemeral (bool): Whether this node is ephemeral (False = persistent, default)
     """
 
     default_description = "A vast data space, humming with virtual activity."
 
     # Matrix nodes have a different color scheme to distinguish from meatspace
-    matrix_name_color = "|c"  # cyan for matrix locations
+    matrix_name_color = "|m"  # purple/magenta for matrix locations
 
     def at_object_creation(self):
         """Called when the node is first created."""
@@ -48,6 +51,7 @@ class MatrixNode(Room):
         self.db.parent_object = None
         self.db.node_type = "standard"
         self.db.relay_key = None
+        self.db.ephemeral = False  # Defaults to persistent (not ephemeral)
 
     def get_display_header(self, looker, **kwargs):
         """Matrix node names use different coloring to distinguish from meatspace."""
