@@ -5,9 +5,13 @@ Virtual locations within the Matrix. These rooms exist in virtual space and can 
 be accessed by diving (via avatar objects). They form the navigable geography
 of the city's cyberspace.
 
+All Matrix locations are persistent - device nodes exist as long as the device exists,
+hub nodes exist as long as the physical space exists, and spine nodes are permanent
+infrastructure.
+
 MatrixRoom - Base class for all virtual Matrix locations
-MatrixNode - Persistent virtual locations (spines, corporate networks, shops, etc.)
-MatrixDevice - Temporary rooms for simple device dives (cameras, locks, etc.)
+MatrixNode - All Matrix locations (spines, hubs, devices, etc.)
+MatrixExit - Connections between Matrix locations
 """
 
 from typeclasses.rooms import Room
@@ -24,8 +28,7 @@ class MatrixRoom(Room):
 
     Attributes:
         security_level (int): Security clearance required (0-10, 0=public, 10=maximum)
-        is_temporary (bool): If True, room is dynamically created and should be cleaned up
-        parent_device (obj): For temporary rooms, the physical device this represents
+        parent_object (obj): The physical object/device this node represents (if any)
     """
 
     default_description = "A featureless virtual space, devoid of detail."
@@ -37,8 +40,7 @@ class MatrixRoom(Room):
         """Called when the room is first created."""
         super().at_object_creation()
         self.db.security_level = 0
-        self.db.is_temporary = False
-        self.db.parent_device = None
+        self.db.parent_object = None
 
     def get_display_header(self, looker, **kwargs):
         """Matrix room names use different coloring to distinguish from meatspace."""
@@ -50,53 +52,37 @@ class MatrixRoom(Room):
         """
         Called when an object enters this room.
 
-        For now, just standard behavior. In the future this could:
-        - Check security clearance
-        - Alert ICE
-        - Log access attempts
+        Future implementation will add:
+        - Security clearance checks
+        - ICE alerts
+        - Access logging
         """
         super().at_object_receive(moved_obj, source_location, **kwargs)
 
         # TODO: Security checks for future implementation
         # if self.db.security_level > 0:
         #     # Check if moved_obj has clearance
+        #     # Alert ICE if unauthorized
         #     pass
-
-    def cleanup(self):
-        """
-        Clean up temporary rooms and their contents.
-
-        Called when a temporary device interface room is no longer needed.
-        Should destroy ICE and any dynamically created objects.
-        """
-        if not self.db.is_temporary:
-            return
-
-        # Destroy all contents (ICE, control objects, etc.)
-        for obj in self.contents:
-            # Don't delete avatars, just move them out
-            if hasattr(obj, 'typeclass_path') and 'avatar' in obj.typeclass_path.lower():
-                # Force disconnect the avatar
-                if hasattr(obj, 'force_disconnect'):
-                    obj.force_disconnect()
-            else:
-                obj.delete()
-
-        # Delete the room itself
-        self.delete()
 
 
 class MatrixNode(MatrixRoom):
     """
-    Persistent virtual location in the Matrix.
+    Virtual location in the Matrix.
 
-    These are the major locations in Matrix geography: district spines,
-    corporate networks, virtual storefronts, media hubs, the Cortex, etc.
-    They are permanent and persist across server restarts.
+    These represent all types of Matrix locations:
+    - Spine nodes (relay rooms along the network backbone)
+    - Hub nodes (private network spaces for homes/offices)
+    - Device nodes (interface spaces for cameras, terminals, etc.)
+    - Public spaces (the Cortex, shops, clubs)
+
+    All nodes are persistent. Device nodes exist as long as their parent device
+    exists. Hub nodes exist as long as their physical space exists. Spine nodes
+    are permanent infrastructure.
 
     Attributes:
-        node_type (str): Type of node (spine, corporate, shop, media, etc.)
-        district (str): Physical district this node serves (for spine nodes)
+        node_type (str): Type of node (spine, hub, device, public, etc.)
+        relay_key (str): Key of the relay this node is associated with (if any)
     """
 
     default_description = "A vast data space, humming with virtual activity."
@@ -104,54 +90,59 @@ class MatrixNode(MatrixRoom):
     def at_object_creation(self):
         """Called when the node is first created."""
         super().at_object_creation()
-        self.db.is_temporary = False  # Nodes are persistent
         self.db.node_type = "standard"
-        self.db.district = None
-
-
-class MatrixDevice(MatrixRoom):
-    """
-    Temporary virtual location representing a device's interface.
-
-    These rooms are dynamically created when diving into cameras, locks,
-    terminals, and other simple devices. They should be cleaned up when
-    the dive ends.
-
-    The appearance is minimal and functional, appropriate to the device type.
-    """
-
-    default_description = "A sterile control interface."
-
-    def at_object_creation(self):
-        """Called when the interface room is created."""
-        super().at_object_creation()
-        self.db.is_temporary = True
-        self.db.security_level = 0  # Most simple devices have minimal security
+        self.db.relay_key = None
 
     @classmethod
     def create_for_device(cls, device, **kwargs):
         """
-        Factory method to create a temporary interface room for a device.
+        Factory method to create a node for a physical device.
 
         Args:
-            device: The physical device object this interface represents
+            device: The physical device object this node represents
             **kwargs: Additional room creation parameters
 
         Returns:
-            MatrixDevice: The created temporary room
+            MatrixNode: The created node
         """
         device_type = device.typename if hasattr(device, 'typename') else "device"
         room_name = f"Interface: {device.get_display_name(device)}"
 
-        # Create the room
-        room = cls.create(room_name, **kwargs)
-        room.db.parent_device = device
+        # Create the node
+        node = cls.create(room_name, **kwargs)
+        node.db.parent_object = device
+        node.db.node_type = "device"
 
         # Set description based on device type
-        # TODO: Make this more sophisticated with device-specific descriptions
-        room.db.desc = f"A sterile virtual space. {device_type.capitalize()} controls are present."
+        node.db.desc = f"A sterile virtual space. {device_type.capitalize()} controls shimmer in the void."
 
-        return room
+        return node
+
+    @classmethod
+    def create_for_hub(cls, location, owner=None, **kwargs):
+        """
+        Factory method to create a hub node for a physical location.
+
+        Args:
+            location: The physical room this hub serves
+            owner: Optional owner of the hub
+            **kwargs: Additional room creation parameters
+
+        Returns:
+            MatrixNode: The created hub node
+        """
+        room_name = f"Node: {location.get_display_name(location)}"
+
+        # Create the node
+        node = cls.create(room_name, **kwargs)
+        node.db.parent_object = location
+        node.db.node_type = "hub"
+        node.db.owner = owner
+
+        # Basic hub description
+        node.db.desc = "A private network space. Basic security daemons patrol the perimeter."
+
+        return node
 
 
 class MatrixExit(Exit):
@@ -160,12 +151,12 @@ class MatrixExit(Exit):
 
     These exits connect virtual rooms in the Matrix. They can have different
     behavior than physical exits, including security checks, routing through
-    the Cortex, and access logging.
+    the network, and access logging.
 
     Attributes:
         security_clearance (int): Clearance level required to traverse (0-10)
         requires_credentials (bool): If True, requires valid credentials to pass
-        routes_through_cortex (bool): If True, logs routing through central hub
+        is_routing (bool): If True, this is a dynamic routing connection (not a permanent exit)
     """
 
     def at_object_creation(self):
@@ -173,18 +164,18 @@ class MatrixExit(Exit):
         super().at_object_creation()
         self.db.security_clearance = 0
         self.db.requires_credentials = False
-        self.db.routes_through_cortex = False
+        self.db.is_routing = False
 
     def at_traverse(self, traversing_object, destination):
         """
         Called when someone attempts to traverse this exit.
 
-        For now, behaves like normal exits but instantaneous (no walking delay).
+        Matrix navigation is instantaneous (no walking delay).
         Future implementation will add:
         - Security clearance checks
         - Credential verification
-        - Cortex routing and logging
         - ICE alerts on unauthorized access
+        - Routing logs
         """
         if not destination:
             super().at_traverse(traversing_object, destination)
@@ -193,6 +184,7 @@ class MatrixExit(Exit):
         # TODO: Security checks for future implementation
         # if self.db.security_clearance > 0:
         #     # Check traversing_object has required clearance
+        #     # Alert ICE if unauthorized
         #     pass
 
         # Matrix navigation is instantaneous - no delay like physical movement
