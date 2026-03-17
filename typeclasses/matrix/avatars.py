@@ -96,7 +96,9 @@ class MatrixAvatar(DefaultCharacter):
         if self.db.real_character:
             self.msg(f"|rDISCO:|n {reason}")
 
-            # Apply consequences based on severity
+            # Apply consequences immediately (even if player is linkdead)
+            character = self.db.real_character
+
             if severity >= JACKOUT_FATAL:
                 # Fatal jackout - avatar death causes real death
                 # The dying consciousness is violently shoved back into the body
@@ -104,19 +106,30 @@ class MatrixAvatar(DefaultCharacter):
                 self.msg("|rFor a brief, terrible moment, you see reality again—|n")
                 self.msg("|rYour body in the rig, convulsing—|n")
                 self.msg("|rThen nothing.|n")
-                # TODO: Kill the real character
-                # TODO: Apply fatal consequences (permadeath or severe penalty)
-                pass
-            elif severity >= JACKOUT_FORCED:
-                # Violent disconnect - physical damage
-                # TODO: Apply physical damage to real character
-                pass
-            elif severity >= JACKOUT_EMERGENCY:
-                # Uncontrolled disconnect - minor penalties
-                # TODO: Apply minor penalties (disorientation, stamina loss, etc.)
-                pass
 
-            # TODO: Return control to real character
+                # Kill the character immediately
+                if character:
+                    # TODO: Hook into your death system here
+                    # character.die() or however your death system works
+                    # For now, just send a message if they're connected
+                    if character.sessions.get():
+                        character.msg("|rYour consciousness is violently ejected. Your body dies.|n")
+
+            elif severity >= JACKOUT_FORCED:
+                # Violent disconnect - apply physical damage immediately
+                if character:
+                    # TODO: Apply actual physical damage using your damage system
+                    # For now, just send a message if they're connected
+                    if character.sessions.get():
+                        character.msg("|rViolent pain wracks your body as you're torn from the Matrix.|n")
+
+            elif severity >= JACKOUT_EMERGENCY:
+                # Uncontrolled disconnect - apply minor penalties immediately
+                if character:
+                    # TODO: Apply minor penalties (disorientation, stamina loss, etc.)
+                    # For now, just send a message if they're connected
+                    if character.sessions.get():
+                        character.msg("|yYou feel disoriented as the connection fails.|n")
 
         # Mark as idle for cleanup later
         self.db.idle = True
