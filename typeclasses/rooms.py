@@ -242,7 +242,7 @@ class Room(ObjectParent, DefaultRoom):
         # Be defensive: only treat true Characters (avoid edge cases where non-characters slip in)
         try:
             from evennia.utils.utils import inherits_from
-            characters = [c for c in characters if inherits_from(c, "typeclasses.characters.Character")]
+            characters = [c for c in characters if inherits_from(c, "evennia.objects.objects.DefaultCharacter")]
         except Exception:
             pass
         # Corpses are objects, not character poses; show them in "You see" line only
@@ -409,7 +409,7 @@ class Room(ObjectParent, DefaultRoom):
         # Be defensive: only treat true Characters (avoid edge cases where non-characters slip in)
         try:
             from evennia.utils.utils import inherits_from
-            characters = [c for c in characters if inherits_from(c, "typeclasses.characters.Character")]
+            characters = [c for c in characters if inherits_from(c, "evennia.objects.objects.DefaultCharacter")]
         except Exception:
             pass
         lines = []
