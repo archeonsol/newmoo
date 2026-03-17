@@ -406,9 +406,12 @@ class Room(ObjectParent, DefaultRoom):
         characters = self.filter_visible(
             self.contents_get(content_type="character"), looker, **kwargs
         )
-        from evennia.utils.utils import inherits_from
-        # Accept both Character and DefaultCharacter subclasses
-        characters = [c for c in characters if inherits_from(c, "evennia.objects.objects.DefaultCharacter")]
+        # Be defensive: only treat true Characters (avoid edge cases where non-characters slip in)
+        try:
+            from evennia.utils.utils import inherits_from
+            characters = [c for c in characters if inherits_from(c, "typeclasses.characters.Character")]
+        except Exception:
+            pass
         lines = []
         for obj in self.contents:
             if not (_is_seat(obj) or _is_bed(obj)):
