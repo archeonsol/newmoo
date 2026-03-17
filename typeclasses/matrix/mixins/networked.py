@@ -25,9 +25,8 @@ class NetworkedMixin:
 
         Should be called in at_object_creation() after super().
         """
-        self.db.connection_type = "wireless"
-        self.db.device_type = "device"
-        self.db.matrix_node = None
+        self.db.device_type = "device"  # Override in subclasses (e.g., "camera", "terminal", "hub")
+        self.db.matrix_node = None  # Cached reference to this device's Matrix node
         self.db.ephemeral_node = False  # Whether Matrix node is ephemeral (default: persistent)
         self.db.security_level = 0
         self.db.has_storage = False

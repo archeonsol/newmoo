@@ -22,7 +22,6 @@ class NetworkedObject(NetworkedMixin, Object):
     cyberspace. When someone dives into the device, they enter its node.
 
     Attributes:
-        connection_type (str): "wireless" or "hardwired"
         device_type (str): Type of device (hub, camera, terminal, console, etc.)
         matrix_node (MatrixNode): The virtual room representing this device in the Matrix
         security_level (int): Security clearance required to access (0-10)

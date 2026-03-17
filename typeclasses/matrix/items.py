@@ -22,7 +22,6 @@ class NetworkedItem(NetworkedMixin, Item):
     Unlike NetworkedObject, these are portable items rather than fixed objects.
 
     Attributes:
-        connection_type (str): "wireless" or "hardwired"
         device_type (str): Type of device (handset, tablet, console, etc.)
         matrix_node (MatrixNode): The virtual room representing this device in the Matrix
         security_level (int): Security clearance required to access (0-10)
