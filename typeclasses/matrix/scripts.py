@@ -71,3 +71,50 @@ class MatrixCleanupScript(DefaultScript):
         """Called when script stops."""
         from evennia.utils import logger
         logger.log_info("Matrix cleanup script stopped")
+
+
+class MatrixConnectionScript(DefaultScript):
+    """
+    Global script that periodically checks Matrix avatar connections.
+
+    Runs every few seconds and verifies that each active avatar still has
+    a valid connection to meatspace (character in rig, rig connected, etc.).
+    Disconnects avatars whose physical connection has been severed.
+    """
+
+    def at_script_creation(self):
+        """Called when script is first created."""
+        self.key = "matrix_connection_check"
+        self.desc = "Checks Matrix avatar connections periodically"
+        self.interval = 10  # Run every 10 seconds
+        self.repeats = 0  # Run forever
+        self.persistent = True  # Survive server restarts
+        self.start_delay = True  # Wait one interval before first run
+
+    def at_repeat(self):
+        """Called every interval. Checks all active avatar connections."""
+        from typeclasses.matrix.avatars import MatrixAvatar
+
+        # Find all non-idle Matrix avatars
+        avatars = MatrixAvatar.objects.filter(db_idle=False)
+
+        disconnected_count = 0
+        for avatar in avatars:
+            # Check connection validity
+            if not avatar.check_connection():
+                disconnected_count += 1
+
+        # Optional: log disconnection activity
+        if disconnected_count > 0:
+            from evennia.utils import logger
+            logger.log_info(f"Matrix connection check: disconnected {disconnected_count} avatar(s)")
+
+    def at_start(self):
+        """Called when script starts (including after server restart)."""
+        from evennia.utils import logger
+        logger.log_info("Matrix connection check script started")
+
+    def at_stop(self):
+        """Called when script stops."""
+        from evennia.utils import logger
+        logger.log_info("Matrix connection check script stopped")

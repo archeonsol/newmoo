@@ -155,4 +155,4 @@ class StaffPendingScript(Script):
 
 
 # Matrix scripts
-from typeclasses.matrix.scripts import MatrixCleanupScript
+from typeclasses.matrix.scripts import MatrixCleanupScript, MatrixConnectionScript

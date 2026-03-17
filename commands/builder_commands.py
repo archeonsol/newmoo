@@ -594,18 +594,18 @@ class CmdDestroy(Command):
 
 class CmdMatrixLink(Command):
     """
-    Link the current room to a network relay.
+    Link the current room to a network router.
 
     Usage:
-        mlink <relay_key>
-        mlink              (view current relay)
-        mlink/clear        (remove relay link)
+        mlink <router_key>
+        mlink              (view current router)
+        mlink/clear        (remove router link)
 
-    Sets the network_relay attribute on the current room, which determines
+    Sets the network_router attribute on the current room, which determines
     whether networked devices in this room can connect to the Matrix.
 
     Example:
-        mlink downtown_relay_01
+        mlink downtown_router
     """
     key = "mlink"
     locks = "cmd:perm(Builder)"
@@ -622,22 +622,22 @@ class CmdMatrixLink(Command):
             caller.msg("You are nowhere.")
             return
 
-        # View current relay
+        # View current router
         if not args and not clear:
-            current = getattr(loc.db, 'network_relay', None)
+            current = getattr(loc.db, 'network_router', None)
             if current:
-                caller.msg(f"This room is linked to relay: |w{current}|n")
+                caller.msg(f"This room is linked to router: |w{current}|n")
             else:
-                caller.msg("This room has no network relay link.")
+                caller.msg("This room has no network router link.")
             return
 
-        # Clear relay
+        # Clear router
         if clear:
-            loc.db.network_relay = None
-            caller.msg("Network relay link cleared from this room.")
+            loc.db.network_router = None
+            caller.msg("Network router link cleared from this room.")
             return
 
-        # Set relay
-        relay_key = args
-        loc.db.network_relay = relay_key
-        caller.msg(f"Room linked to relay |w{relay_key}|n. Networked devices here will use this relay.")
+        # Set router
+        router_key = args
+        loc.db.network_router = router_key
+        caller.msg(f"Room linked to router |w{router_key}|n. Networked devices here will use this router.")

@@ -31,6 +31,47 @@ class MatrixAvatar(DefaultCharacter):
         super().at_object_creation()
         self.db.real_character = None
         self.db.entry_device = None
+        self.db.idle = False
+
+    def check_connection(self):
+        """
+        Verify the physical connection to meatspace is still valid.
+
+        Checks if:
+        - Character still exists
+        - Character is still sitting in the rig
+        - Rig is still connected to the Matrix
+
+        Returns:
+            bool: True if connection is valid, False if disconnected
+        """
+        # Skip check if idle (not actively connected)
+        if self.db.idle:
+            return True
+
+        character = self.db.real_character
+        if not character or not character.pk:
+            # Character deleted/invalid
+            self.jack_out(reason="Physical body lost", severity=JACKOUT_FORCED)
+            return False
+
+        rig = self.db.entry_device
+        if not rig or not rig.pk:
+            # Rig deleted/invalid
+            self.jack_out(reason="Connection device lost", severity=JACKOUT_FORCED)
+            return False
+
+        # Is character still sitting in the rig?
+        if character.db.sitting_on != rig:
+            self.jack_out(reason="Physical connection severed", severity=JACKOUT_FORCED)
+            return False
+
+        # Is the rig still connected to the Matrix?
+        if not rig.is_connected():
+            self.jack_out(reason="Network connection lost", severity=JACKOUT_EMERGENCY)
+            return False
+
+        return True
 
     def jack_out(self, reason="Disconnecting", severity=JACKOUT_NORMAL):
         """

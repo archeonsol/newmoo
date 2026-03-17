@@ -69,3 +69,65 @@ class MatrixObject(Object):
         - Trigger security alerts
         """
         super().at_object_receive(moved_obj, source_location, **kwargs)
+
+
+class Router(MatrixObject):
+    """
+    Virtual router/relay providing network connectivity.
+
+    Routers are virtual objects in the Matrix that act as relay points
+    for meatspace locations. Meatspace rooms link to routers via their
+    network_relay attribute. All networked devices in those rooms use
+    the router for connectivity.
+
+    Routers exist in the Matrix and can be accessed/hacked by avatars.
+
+    Attributes:
+        online (bool): Whether the router is currently operational
+        max_bandwidth (int): Maximum connections (for future implementation)
+        linked_rooms (list): List of room references using this router (for monitoring)
+    """
+
+    def at_object_creation(self):
+        """Called when the router is first created."""
+        super().at_object_creation()
+
+        self.db.object_type = "router"
+        self.db.online = True  # Default to online
+        self.db.max_bandwidth = 100  # Placeholder for future
+        self.db.linked_rooms = []  # Track which rooms use this router
+        self.db.is_portable = False  # Routers can't be picked up
+
+        # Lock it so it can't be picked up
+        self.locks.add("get:false()")
+
+    def set_online(self, online=True):
+        """
+        Set the router online or offline.
+
+        When a router goes offline, all devices using it lose connectivity.
+
+        Args:
+            online (bool): True to bring online, False to take offline
+        """
+        old_state = self.db.online
+        self.db.online = online
+
+        if old_state != online:
+            if online:
+                self.location.msg_contents(f"{self.key} comes online with a soft hum.")
+            else:
+                self.location.msg_contents(f"{self.key} goes offline. Network connectivity lost.")
+                # TODO: Notify/disconnect any devices using this router
+
+    def get_status(self):
+        """
+        Get a status string for this router.
+
+        Returns:
+            str: Status description
+        """
+        if self.db.online:
+            return f"|g[ONLINE]|n {self.key}"
+        else:
+            return f"|r[OFFLINE]|n {self.key}"

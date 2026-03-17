@@ -35,7 +35,6 @@ class DiveRig(Seat, NetworkedObject):
         # DiveRig specific attributes
         self.db.device_type = "dive_rig"
         self.db.ephemeral_node = False  # Rigs connect to persistent nodes
-        self.db.target_node = None
         self.db.jack_in_message = "jacks into the Matrix"
         self.db.jack_out_message = "disconnects from the Matrix"
 
@@ -43,7 +42,8 @@ class DiveRig(Seat, NetworkedObject):
         """
         Jack a character into the Matrix.
 
-        Creates an avatar in the target node and switches the player's puppet.
+        Creates an avatar at the router's location and switches the player's puppet.
+        The router must exist in a Matrix node for this to work.
 
         Args:
             character (Character): The character jacking in
@@ -57,46 +57,88 @@ class DiveRig(Seat, NetworkedObject):
                 character.msg("You must be sitting in the dive rig first.")
             return False
 
-        # Verify rig has a target node
-        if not self.db.target_node:
+        # Get the router
+        router = self.get_relay()
+        if not router:
             if hasattr(character, 'msg'):
-                character.msg("This dive rig is not linked to a Matrix node.")
+                character.msg("No Matrix connection available. Room not linked to a router.")
             return False
 
-        # Verify rig is connected to the Matrix
-        if not self.is_connected():
+        # Check if router is online
+        if not router.db.online:
             if hasattr(character, 'msg'):
-                character.msg("No Matrix connection available.")
+                character.msg("Router is offline. No Matrix connection available.")
             return False
 
-        # Check if character already has an avatar (shouldn't happen, but safety check)
-        if hasattr(character.db, 'matrix_avatar') and character.db.matrix_avatar:
+        # Get target node from router's location
+        target_node = router.location
+        if not target_node:
             if hasattr(character, 'msg'):
-                character.msg("You are already jacked in.")
+                character.msg("Router is not properly configured (no Matrix location).")
             return False
 
-        # Create the avatar
-        avatar_name = f"{character.key} (Avatar)"
-        avatar = MatrixAvatar.create(
-            key=avatar_name,
-            location=self.db.target_node
-        )
+        # Find or create persistent avatar
+        avatar = character.db.matrix_avatar
 
+        # Check if avatar reference exists and is valid
+        if avatar:
+            if not avatar.pk:
+                # Stale reference, clear it
+                avatar = None
+                character.db.matrix_avatar = None
+
+        # Determine if we need to respawn avatar
+        needs_respawn = False
+        if avatar:
+            # Check if avatar is dead
+            if getattr(avatar.db, 'dead', False):
+                needs_respawn = True
+                # Dump inventory into the room before deleting
+                if avatar.location:
+                    for item in avatar.contents:
+                        item.move_to(avatar.location, quiet=True)
+                # Clean up old dead avatar
+                avatar.delete()
+                avatar = None
+                character.db.matrix_avatar = None
+            # Check if avatar's location still exists
+            elif not avatar.location or not avatar.location.pk:
+                needs_respawn = True
+                # Location vanished, respawn at entry point
+                avatar.location = target_node
+
+        # Create avatar if it doesn't exist or needs respawn
         if not avatar:
-            if hasattr(character, 'msg'):
-                character.msg("Failed to create Matrix avatar.")
-            return False
+            avatar_name = f"{character.key} (Avatar)"
+            from evennia.utils.create import create_object
+            avatar = create_object(
+                MatrixAvatar,
+                key=avatar_name,
+                location=target_node
+            )
 
-        # Link avatar and character
-        avatar.db.real_character = character
-        avatar.db.entry_device = self
-        character.db.matrix_avatar = avatar
+            if not avatar:
+                if hasattr(character, 'msg'):
+                    character.msg("Failed to create Matrix avatar.")
+                return False
 
-        # Copy appearance/description if desired
-        if hasattr(character.db, 'matrix_desc'):
-            avatar.db.desc = character.db.matrix_desc
+            # Link avatar and character
+            avatar.db.real_character = character
+            avatar.db.entry_device = self
+            character.db.matrix_avatar = avatar
 
-        # Show jack-in message to room
+            # Set initial avatar description
+            avatar.db.desc = "A formless blob of data with limitless potential, waiting to be shaped into something interesting."
+
+            if needs_respawn:
+                character.msg("|yYour previous avatar was lost. Respawning...|n")
+        else:
+            # Avatar exists and is valid, just reconnecting at current location
+            avatar.db.entry_device = self
+            avatar.db.idle = False
+
+        # Show jack-in message to character and room
+        character.msg("|gJacking in...|n")
         character.location.msg_contents(
             f"{character.name} {self.db.jack_in_message}.",
             exclude=character
@@ -105,9 +147,9 @@ class DiveRig(Seat, NetworkedObject):
         # Switch puppet to avatar
         account = character.account
         if account:
-            account.puppet_object(character.sessions.get(), avatar)
-            avatar.msg("|gJacking in...|n")
-            avatar.execute_cmd("look")
+            session = character.sessions.all()[0] if character.sessions.all() else None
+            if session:
+                account.puppet_object(session, avatar)
 
         return True
 
@@ -126,8 +168,8 @@ class DiveRig(Seat, NetworkedObject):
         if not avatar:
             return
 
-        # Get the account before we do anything else
-        account = character.account
+        # Get the account and session from avatar (since that's what's currently puppeted)
+        account = avatar.account if hasattr(avatar, 'account') else None
 
         # Jack out the avatar (handles consequences based on severity)
         avatar.jack_out(reason=reason, severity=severity)
@@ -136,16 +178,21 @@ class DiveRig(Seat, NetworkedObject):
         character.db.matrix_avatar = None
 
         # Switch puppet back to character
+        # Session is attached to avatar, not character
         if account:
-            account.puppet_object(character.sessions.get(), character)
-            character.msg("|rJacked out.|n")
-            character.execute_cmd("look")
+            sessions = avatar.sessions.all()
+            session = sessions[0] if sessions else None
+            if session:
+                account.puppet_object(session, character)
+                character.msg("|rJacked out.|n")
+                character.execute_cmd("look")
 
-        # Show message to room
-        character.location.msg_contents(
-            f"{character.name} {self.db.jack_out_message}.",
-            exclude=character
-        )
+        # Show message to meatspace room where character's body is
+        if character.location:
+            character.location.msg_contents(
+                f"{character.name} {self.db.jack_out_message}.",
+                exclude=character
+            )
 
     def at_object_delete(self):
         """Clean up when rig is destroyed."""

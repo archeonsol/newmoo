@@ -56,20 +56,21 @@ class NetworkedMixin:
         Rooms define network coverage via their network_relay attribute.
 
         Returns:
-            Relay: The relay this device connects through, or None if not connected
+            Router: The router this device connects through, or None if not connected
         """
         room = self.location
         if not room:
             return None
 
-        # Get relay key from room
-        relay_key = getattr(room.db, 'network_relay', None)
+        # Get router key from room
+        relay_key = getattr(room.db, 'network_router', None)
         if not relay_key:
             return None
 
-        # Look up relay by key
-        from typeclasses.matrix.relays import RelayManager
-        return RelayManager.get_relay_by_key(relay_key)
+        # Look up router by key
+        from evennia.utils.search import search_object
+        results = search_object(relay_key)
+        return results[0] if results else None
 
     def is_connected(self):
         """
