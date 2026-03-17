@@ -336,3 +336,24 @@ ALCO_MUTAGENIC_BREW = {
         ),
     ],
 }
+
+
+# ---------------------------------------------------------------------------
+# Performance: instruments for composed performances (performance play ... with guitar)
+# Spawn with: spawnitem GUITAR_WASTES
+# ---------------------------------------------------------------------------
+
+GUITAR_WASTES = {
+    "prototype_key": "GUITAR_WASTES",
+    "key": "wastes guitar",
+    "typeclass": "typeclasses.items.Item",
+    "tags": [("guitar", "performance_instrument")],
+    "attrs": [
+        (
+            "desc",
+            "A six-string put together from salvage: rust-scabbed body, re-purposed wiring for frets, "
+            "and a neck that has seen more knocks than tunes. It still holds its pitch. In the right hands "
+            "it can make the tunnels echo.",
+        ),
+    ],
+}

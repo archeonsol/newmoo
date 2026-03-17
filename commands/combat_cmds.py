@@ -4,7 +4,7 @@ Combat commands: CmdAttack, CmdStop, CmdFlee, CmdStance, CmdGrapple, CmdLetGo, C
 
 from evennia.utils import logger
 from commands.base_cmds import Command, _command_character
-from world.combat import start_combat_ticker, stop_combat_ticker, _get_combat_target
+from world.combat import start_combat_ticker, stop_combat_ticker, _get_combat_target, _combat_display_name
 
 
 def _combat_caller(cmd_self):
@@ -77,14 +77,15 @@ class CmdAttack(Command):
                 caller.msg("Kill them when they wake up. It's more fun that way.")
                 return
             if is_permanently_dead(target):
-                caller.msg(f"|r{target.name} is already dead.|n")
+                caller.msg(f"|r{_combat_display_name(target, caller)} is already dead.|n")
                 return
             if is_flatlined(target):
-                caller.msg(f"|r{target.name} is down and dying. Use |wexecute {target.name}|n to end them.|n")
+                tname = _combat_display_name(target, caller)
+                caller.msg(f"|r{tname} is down and dying. Use |wexecute {tname}|n to end them.|n")
                 return
         except ImportError:
             if getattr(target.db, "current_hp", None) is not None and target.db.current_hp <= 0:
-                caller.msg(f"|r{target.name} is already dead.|n")
+                caller.msg(f"|r{_combat_display_name(target, caller)} is already dead.|n")
                 return
         try:
             from world.stamina import is_exhausted
@@ -109,7 +110,7 @@ class CmdAttack(Command):
             return
         if current and current != target:
             stop_combat_ticker(caller, current)
-            caller.msg(f"|yYou switch targets to {target.name}.|n")
+            caller.msg(f"|yYou switch targets to {_combat_display_name(target, caller)}.|n")
         start_combat_ticker(caller, target)
         # If target is a creature, set its target to you and start its AI so it fights back
         if getattr(target.db, "is_creature", False):
@@ -214,11 +215,11 @@ class CmdFlee(Command):
         if flee_val <= opp_val:
             caller.msg("|rYou couldn't break away!|n")
             opponent.msg("|gThey tried to flee but you keep them in the fight.|n")
-            if loc:
-                loc.msg_contents(
-                    "%s tries to flee but %s keeps them in the fight." % (caller.name, opponent.name),
-                    exclude=(caller, opponent),
-                )
+            if loc and hasattr(loc, "contents_get"):
+                for v in loc.contents_get(content_type="character"):
+                    if v in (caller, opponent):
+                        continue
+                    v.msg("%s tries to flee but %s keeps them in the fight." % (_combat_display_name(caller, v), _combat_display_name(opponent, v)))
             return
         remove_both_combat_tickers(caller, opponent)
         victim = getattr(caller.db, "grappling", None)
@@ -230,13 +231,23 @@ class CmdFlee(Command):
         caller.move_to(dest)
         if victim and hasattr(victim, "move_to"):
             victim.move_to(dest)
-            dest.msg_contents("%s is dragged in by %s." % (victim.name, caller.name), exclude=(caller, victim))
+            if dest and hasattr(dest, "contents_get"):
+                for v in dest.contents_get(content_type="character"):
+                    if v in (caller, victim):
+                        continue
+                    v.msg("%s is dragged in by %s." % (_combat_display_name(victim, v), _combat_display_name(caller, v)))
         caller.msg("|gYou break away and flee %s!|n" % dir_name)
-        opponent.msg("|r%s breaks away and flees %s!|n" % (caller.name, dir_name))
-        if loc:
-            loc.msg_contents("%s breaks away and flees %s!" % (caller.name, dir_name), exclude=(caller,))
-        if dest:
-            dest.msg_contents("%s bursts in from %s, out of breath." % (caller.name, dir_name), exclude=(caller,))
+        opponent.msg("|r%s breaks away and flees %s!|n" % (_combat_display_name(caller, opponent), dir_name))
+        if loc and hasattr(loc, "contents_get"):
+            for v in loc.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s breaks away and flees %s!" % (_combat_display_name(caller, v), dir_name))
+        if dest and hasattr(dest, "contents_get"):
+            for v in dest.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s bursts in from %s, out of breath." % (_combat_display_name(caller, v), dir_name))
 
 
 class CmdGrapple(Command):
@@ -298,11 +309,11 @@ class CmdLetGo(Command):
             caller.msg("|g%s|n" % msg)
             if victim:
                 victim.msg("|gYou are released.|n")
-                if caller.location:
-                    caller.location.msg_contents(
-                        "%s releases %s." % (caller.name, victim.name),
-                        exclude=(caller, victim),
-                    )
+                if caller.location and hasattr(caller.location, "contents_get"):
+                    for v in caller.location.contents_get(content_type="character"):
+                        if v in (caller, victim):
+                            continue
+                        v.msg("%s releases %s." % (_combat_display_name(caller, v), _combat_display_name(victim, v)))
         else:
             caller.msg("|r%s|n" % msg)
 
@@ -328,11 +339,14 @@ class CmdResist(Command):
         caller.msg("|g%s|n" % msg_you if freed else "|r%s|n" % msg_you)
         if grappler and msg_holder:
             grappler.msg("|r%s|n" % msg_holder if freed else "|y%s|n" % msg_holder)
-        if freed and caller.location:
-            caller.location.msg_contents(
-                "%s breaks free of %s's grasp!" % (caller.name, grappler.name) if grappler else "%s breaks free!" % caller.name,
-                exclude=(caller, grappler) if grappler else (caller,),
-            )
+        if freed and caller.location and hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v == caller or (grappler and v == grappler):
+                    continue
+                if grappler:
+                    v.msg("%s breaks free of %s's grasp!" % (_combat_display_name(caller, v), _combat_display_name(grappler, v)))
+                else:
+                    v.msg("%s breaks free!" % _combat_display_name(caller, v))
 
 
 class CmdExecute(Command):

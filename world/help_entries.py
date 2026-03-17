@@ -73,6 +73,46 @@ HELP_ENTRY_DICTS = [
         """,
     },
     {
+        "key": "performance",
+        "aliases": ["perform", "compose", "improvise", "performance play", "performance stop"],
+        "category": "Roleplay",
+        "text": """
+            Compose set pieces, play them with a guitar, or improvise live. The crowd reacts—good or bad—and anyone can try.
+            You can store a limited number of compositions (minimum 5); the limit goes up with your Performance skill.
+
+            # performance list
+
+            Shows your stored compositions and how many slots you have. Use this to see what you can play or to check your limit before composing.
+
+            # performance delete <name>
+
+            Permanently remove one of your stored compositions. Use |wperformance list|n to see names.
+
+            # performance compose <name>
+
+            Opens the editor so you can write a performance. Each line becomes one pose when you play it.
+            Use the usual pose tricks: |w.verb|n, leading |w,|n for scene-setting. Save with |w:wq|n.
+
+            # performance play <name> with guitar
+
+            Perform something you've composed. You need a guitar (in hand or in the room). The crowd reacts
+            and your lines play out automatically until the piece ends or you stop.
+
+            # performance improvise with guitar
+
+            Go live with a guitar. Your poses and says show up in bright white and get audience reactions.
+            Use |wperformance stop|n when you're done.
+
+            # performance stop
+
+            Ends a performance or improvise.
+
+            # Getting a guitar
+
+            Staff can spawn one with |wspawnitem GUITAR_WASTES|n. Otherwise find or buy one in the game.
+        """,
+    },
+    {
         "key": "evennia",
         "aliases": ["ev"],
         "category": "General",

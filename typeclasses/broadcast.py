@@ -10,9 +10,21 @@ Recording and broadcast system: Camera, Television, Cassette.
 """
 import time
 from evennia.objects.objects import DefaultObject
+from evennia.utils.ansi import strip_ansi
 from evennia.utils.create import create_object
 
 from .objects import ObjectParent
+
+# Prefix added by Television.display_broadcast; if we see it (after stripping ANSI),
+# do not re-feed to cameras or we get infinite "On the television you see: ..." nesting.
+_TV_PREFIX = "On the television you see:"
+
+
+def _is_television_output(text):
+    """True if text is already TV output (possibly with leading ANSI)."""
+    if not text or not isinstance(text, str):
+        return False
+    return strip_ansi(text).strip().startswith(_TV_PREFIX)
 
 
 def _get_object_by_id(dbref):
@@ -37,6 +49,8 @@ def feed_cameras_in_location(location, text):
     if not text or not isinstance(text, str) or not text.strip():
         return
     if not location:
+        return
+    if _is_television_output(text):
         return
     from evennia.utils.utils import make_iter
     # Cameras (and any object with capture_room_message) in the room
@@ -86,8 +100,7 @@ class Camera(ObjectParent, DefaultObject):
             text = text[0]
         if not text or not isinstance(text, str):
             return
-        # Prevent infinite loop if TV and camera are in same room (camera would hear TV broadcast)
-        if text.startswith("On the television you see:"):
+        if _is_television_output(text):
             return
         if from_obj == self:
             return
@@ -96,6 +109,8 @@ class Camera(ObjectParent, DefaultObject):
     def capture_room_message(self, text):
         """Called by the room when msg_contents is used. text is the message string."""
         if not text or not isinstance(text, str):
+            return
+        if _is_television_output(text):
             return
         mode = getattr(self.db, "mode", "off")
         if mode == "off":

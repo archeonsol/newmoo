@@ -8,6 +8,12 @@ from evennia.utils import delay
 from evennia.utils.search import search_object
 from evennia import TICKER_HANDLER as ticker
 
+try:
+    from world.combat import _combat_display_name
+except ImportError:
+    def _combat_display_name(char, viewer):
+        return getattr(char, "name", None) or getattr(char, "key", None) or "Someone"
+
 # Seconds per "tick" for creature telegraphs (wind-up then execute).
 CREATURE_TICK_INTERVAL = 3.0
 # Seconds between creature AI decisions when it has a target.
@@ -171,8 +177,6 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
     if not spec:
         return False
 
-    name = creature.name
-    target_name = target.name
     # Use both so telegraph execution still has a room if creature/target moved
     loc = getattr(creature, "location", None) or getattr(target, "location", None)
     damage = int(spec.get("damage", 0))
@@ -180,12 +184,15 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
 
     # Attack announcement: prefer the move's flavor (msg/execute_msg/msg_hit) so we never show generic when the move has flavor
     attack_msg = spec.get("msg") or spec.get("execute_msg") or spec.get("msg_hit") or spec.get("msg_attack") or "{name} attacks {target}!"
-    attack_text = attack_msg.format(name=name, target=target_name)
     used_hit_flavor_for_announce = not spec.get("msg_attack")
     if loc:
-        loc.msg_contents(attack_text, exclude=(creature,))
+        for v in loc.contents_get(content_type="character"):
+            if v == creature:
+                continue
+            attack_text = attack_msg.format(name=_combat_display_name(creature, v), target=_combat_display_name(target, v))
+            v.msg(attack_text)
     if hasattr(creature, "msg"):
-        creature.msg(attack_text)
+        creature.msg(attack_msg.format(name=_combat_display_name(creature, creature), target=_combat_display_name(target, creature)))
 
     # Evasion: creature attack vs target dodge (attack_value used for body part + multiplier)
     hit, attack_value = _resolve_creature_attack(creature, target)
@@ -193,11 +200,13 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
     if not hit:
         # Miss: message only, no damage. Room sees it (exclude only creature so target gets room message).
         msg_miss = spec.get("msg_miss") or DEFAULT_CREATURE_MISS_MSG
-        msg_text = msg_miss.format(name=name, target=target_name)
         if loc:
-            loc.msg_contents(msg_text, exclude=(creature,))
+            for v in loc.contents_get(content_type="character"):
+                if v == creature:
+                    continue
+                v.msg(msg_miss.format(name=_combat_display_name(creature, v), target=_combat_display_name(target, v)))
         if hasattr(creature, "msg"):
-            creature.msg(msg_text)
+            creature.msg(msg_miss.format(name=_combat_display_name(creature, creature), target=_combat_display_name(target, creature)))
         return True
 
     # Hit: body part and damage multiplier (same as regular combat)
@@ -243,24 +252,28 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
     if absorbed_fully and damage <= 0:
         # Armor absorbed the blow
         if loc:
-            loc.msg_contents(
-                "|cThe blow lands on %s's %s but their armor absorbs it.|n" % (target_name, body_part),
-                exclude=(creature,),
-            )
+            for v in loc.contents_get(content_type="character"):
+                if v == creature:
+                    continue
+                tname = _combat_display_name(target, v)
+                cname = _combat_display_name(creature, v)
+                v.msg("|cThe blow lands on %s's %s but their armor absorbs it.|n" % (tname, body_part))
         if hasattr(creature, "msg"):
-            creature.msg("|cYour strike hits %s's %s — their armor takes it.|n" % (target_name, body_part))
+            creature.msg("|cYour strike hits %s's %s — their armor takes it.|n" % (_combat_display_name(target, creature), body_part))
         if hasattr(target, "msg"):
-            target.msg("|c%s's strike hits your %s; your armor takes it.|n" % (name, body_part))
+            target.msg("|c%s's strike hits your %s; your armor takes it.|n" % (_combat_display_name(creature, target), body_part))
         return True
 
     # Main hit message (creature move flavor). Skip room if we already used this line as the attack announcement.
     hit_msg = spec.get("msg_hit") or spec.get("execute_msg") or spec.get("msg") or "{name} hits {target}!"
-    msg_text = hit_msg.format(name=name, target=target_name)
     if not used_hit_flavor_for_announce:
         if loc:
-            loc.msg_contents(msg_text, exclude=(creature,))
+            for v in loc.contents_get(content_type="character"):
+                if v == creature:
+                    continue
+                v.msg(hit_msg.format(name=_combat_display_name(creature, v), target=_combat_display_name(target, v)))
     if hasattr(creature, "msg"):
-        creature.msg(msg_text)
+        creature.msg(hit_msg.format(name=_combat_display_name(creature, creature), target=_combat_display_name(target, creature)))
 
     # Trauma (organs, fractures, bleeding) and injury display — same as regular combat
     trauma_result = {}
@@ -272,25 +285,27 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
                 target, body_part, damage, is_critical,
                 weapon_key=weapon_key, weapon_obj=None,
             )
+            target_name_for_tgt = _combat_display_name(target, target)
+            creature_name_for_tgt = _combat_display_name(creature, target)
             _, flavor_def = get_brutal_hit_flavor(
-                weapon_key, body_part, trauma_result, target_name, name, is_critical, weapon_obj=None,
+                weapon_key, body_part, trauma_result, target_name_for_tgt, creature_name_for_tgt, is_critical, weapon_obj=None,
             )
             if flavor_def and hasattr(target, "msg"):
                 target.msg(flavor_def)
             if trauma_result.get("organ") or trauma_result.get("fracture") or trauma_result.get("bleeding"):
                 if loc:
-                    loc.msg_contents(
-                        "|rThe blow tears into %s's %s — blood splashes everywhere like a waterfall|n" % (target_name, body_part),
-                        exclude=(creature,),
-                    )
+                    for v in loc.contents_get(content_type="character"):
+                        if v == creature:
+                            continue
+                        v.msg("|rThe blow tears into %s's %s — blood splashes everywhere like a waterfall|n" % (_combat_display_name(target, v), body_part))
                 trauma_room_sent = True
         except Exception:
             pass
         if loc and not trauma_room_sent:
-            loc.msg_contents(
-                "|yThe blow lands on %s's %s.|n" % (target_name, body_part),
-                exclude=(creature,),
-            )
+            for v in loc.contents_get(content_type="character"):
+                if v == creature:
+                    continue
+                v.msg("|yThe blow lands on %s's %s.|n" % (_combat_display_name(target, v), body_part))
         target.at_damage(creature, damage, body_part=body_part, weapon_key=weapon_key, weapon_obj=None)
 
     return True
@@ -308,12 +323,12 @@ def start_telegraph(creature, target, move_key, move_spec):
     creature.db.ticks_to_strike = ticks
     creature.db.ai_state = "winding_up"
     creature.db.current_target = target
-    # Telegraph message
+    # Telegraph message (per-viewer so sdesc/recog respected)
     telegraph_msg = move_spec.get("telegraph_msg")
     if telegraph_msg and creature.location:
-        name = creature.name
-        target_name = target.name
-        creature.location.msg_contents(telegraph_msg.format(name=name, target=target_name), exclude=())
+        loc = creature.location
+        for v in loc.contents_get(content_type="character"):
+            v.msg(telegraph_msg.format(name=_combat_display_name(creature, v), target=_combat_display_name(target, v)))
     # Schedule execute after ticks * CREATURE_TICK_INTERVAL
     delay_secs = max(0.5, ticks * CREATURE_TICK_INTERVAL)
     delay(delay_secs, _execute_telegraph_callback, creature.id, target.id, move_key)

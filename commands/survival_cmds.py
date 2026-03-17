@@ -57,7 +57,13 @@ class CmdEat(Command):
             return
         name = obj.get_display_name(caller) if hasattr(obj, "get_display_name") else obj.name
         caller.msg("You eat |w%s|n." % name)
-        caller.location.msg_contents("%s eats %s." % (caller.name, name), exclude=caller)
+        if hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s eats %s." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name, name))
+        else:
+            caller.location.msg_contents("%s eats %s." % (caller.name, name), exclude=caller)
         # Apply survival effects: hunger and nutrition.
         from world.survival import apply_food_effects
         apply_food_effects(caller, obj)
@@ -110,7 +116,13 @@ class CmdDrink(Command):
             return
         name = obj.get_display_name(caller) if hasattr(obj, "get_display_name") else obj.name
         caller.msg("You drink |w%s|n." % name)
-        caller.location.msg_contents("%s drinks %s." % (caller.name, name), exclude=caller)
+        if hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s drinks %s." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name, name))
+        else:
+            caller.location.msg_contents("%s drinks %s." % (caller.name, name), exclude=caller)
         # Apply survival effects: thirst and/or alcohol.
         from world.survival import apply_drink_effects
         apply_drink_effects(caller, obj)

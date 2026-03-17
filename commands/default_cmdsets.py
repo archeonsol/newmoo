@@ -105,8 +105,9 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         from commands.inventory_cmds import CmdWield, CmdUnwield, CmdFreehands, CmdInventory, CmdReload, CmdUnload, CmdCheckAmmo, CmdWear, CmdRemove, CmdStrip, CmdFrisk
         from commands.crafting_cmds import CmdSurvey, CmdRepairArmor, CmdTailor
         from commands.media_cmds import CmdCamera, CmdTuneTelevision, CmdLabel
-        from commands.roleplay_cmds import CmdTease, CmdDescribeBodypart, CmdDescribeMeAs, CmdBody, CmdVoice, CmdSdesc, CmdPending, CmdLookPlace, CmdSleepPlace, CmdWakeMsg, CmdFlatlineMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch
+        from commands.roleplay_cmds import CmdTease, CmdDescribeBodypart, CmdDescribeMeAs, CmdBody, CmdVoice, CmdSdesc, CmdPending, CmdLookPlace, CmdSleepPlace, CmdWakeMsg, CmdFlatlineMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch, CmdCount, CmdRecog
         from commands.roleplay_cmds import CmdSit, CmdLieOnTable, CmdGetOffTable
+        from commands.performance_cmds import CmdPerformance
         from commands.death_cmds import CmdGoOOC, CmdReturnIC, CmdEnterPod, CmdLeavePod, CmdSplinterMe
         from commands.vehicle_cmds import CmdEnterVehicle, CmdExitVehicle, CmdStartEngine, CmdStopEngine, CmdShutoffEngine, CmdDrive, CmdVehicleStatus, CmdRepairPart
         from commands.staff_cmds import (
@@ -195,7 +196,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdPose())
         self.add(CmdPronoun())
         self.add(CmdEmote())
+        self.add(CmdCount())
+        self.add(CmdRecog())
         self.add(CmdNoMatch())
+        self.add(CmdPerformance())
         self.add(CmdExamine())
         self.add(CmdTag())
         self.add(CmdHere())

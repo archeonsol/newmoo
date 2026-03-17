@@ -57,7 +57,7 @@ def _spirit_account(caller):
 
 
 def _get_pod_from_caller(caller):
-    """If caller is inside a splinter pod interior, return the pod object; else None."""
+    """If caller is inside a splinter pod interior, return that pod; else None."""
     loc = getattr(caller, "location", None)
     if not loc:
         return None
@@ -67,7 +67,7 @@ def _get_pod_from_caller(caller):
     try:
         from evennia.utils.search import search_typeclass
         for p in search_typeclass("typeclasses.splinter_pod.SplinterPod"):
-            if getattr(p.db, "interior", None) is loc:
+            if getattr(p, "interior", None) is loc:
                 return p
     except Exception as e:
         logger.log_trace("death_cmds._get_pod_from_caller: %s" % e)
@@ -179,8 +179,11 @@ class CmdGoOOC(Command):
         caller.db.ooc_previous_location_id = here.id
         caller.move_to(ooc_room)
         self.caller.msg("|gYou step OOC. Use |w@ic|n to return.|n")
-        if here:
-            here.msg_contents("%s steps out of the world for a moment." % caller.name, exclude=(caller,))
+        if here and hasattr(here, "contents_get"):
+            for v in here.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s steps out of the world for a moment." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))
 
 
 class CmdReturnIC(Command):
@@ -219,8 +222,11 @@ class CmdReturnIC(Command):
         del caller.db.ooc_previous_location_id
         caller.move_to(dest)
         self.caller.msg("|gYou step back into the world.|n")
-        if dest:
-            dest.msg_contents("%s steps back into the world." % caller.name, exclude=(caller,))
+        if dest and hasattr(dest, "contents_get"):
+            for v in dest.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s steps back into the world." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))
 
 
 class CmdEnterPod(Command):
@@ -238,22 +244,39 @@ class CmdEnterPod(Command):
         if _get_pod_from_caller(caller):
             caller.msg("You are already inside a pod. Type |wdone|n to get out first.")
             return
+        try:
+            from typeclasses.splinter_pod import SplinterPod
+        except ImportError:
+            SplinterPod = None
         pod = None
-        for obj in (caller.location.contents if caller.location else []):
-            if getattr(obj, "db", None) and getattr(obj.db, "interior", None):
-                pod = obj
-                break
+        if SplinterPod and caller.location:
+            for obj in caller.location.contents:
+                if isinstance(obj, SplinterPod):
+                    pod = obj
+                    break
         if not pod:
             caller.msg("There is no splinter pod here.")
             return
-        interior = pod.db.interior
+        interior = pod.interior
         if not interior:
             caller.msg("The pod is inert. Nothing to enter.")
             return
+        # One character only inside this pod's interior (items can stay)
+        try:
+            from typeclasses.characters import Character
+            others = [o for o in (interior.contents or []) if o is not caller and isinstance(o, Character)]
+            if others:
+                caller.msg("Someone is already inside the pod. Only one person can be in at a time.")
+                return
+        except ImportError as e:
+            logger.log_trace("death_cmds.CmdEnterPod Character check: %s" % e)
         caller.move_to(interior)
         caller.msg("The seal closes behind you. |xYou are inside.|n Type |wdone|n when you are ready to leave.")
-        if caller.location:
-            caller.location.msg_contents("%s enters the splinter pod." % caller.name, exclude=caller)
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s enters the splinter pod." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))
 
 
 class CmdSplinterMe(Command):
@@ -305,7 +328,11 @@ class CmdLeavePod(Command):
             return
         caller.move_to(dest)
         caller.msg("You step out of the pod.")
-        dest.msg_contents("%s steps out of the splinter pod." % caller.name, exclude=caller)
+        if dest and hasattr(dest, "contents_get"):
+            for v in dest.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s steps out of the splinter pod." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))
 
 
 class CmdGoShard(Command):

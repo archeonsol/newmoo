@@ -2,6 +2,7 @@
 # Gutterpunk/arcanepunk chargen: occult Rite, blood-signs, marks. Dark/red UI. No XP spend; skills by marks.
 import random
 
+from evennia.objects.models import ObjectDB
 from world.levels import MAX_LEVEL, MAX_STAT_LEVEL, level_to_letter
 
 STAT_KEYS = ["strength", "perception", "endurance", "charisma", "intelligence", "agility", "luck"]
@@ -186,6 +187,14 @@ def node_apply_name(caller, raw_string, **kwargs):
         if not (c.isalnum() or c in " -'"):
             caller.msg("|rOnly letters, numbers, spaces, hyphens, apostrophes are allowed in names.|n")
             return node_name(caller, "", **kwargs)
+    # Reject only if another player character already has this name (case-insensitive). Objects/NPCs are allowed to share it.
+    existing = ObjectDB.objects.filter(
+        db_key__iexact=name,
+        db_typeclass_path="typeclasses.characters.Character",
+    ).exclude(id=caller.id)
+    if existing.exists():
+        caller.msg("|rThat name is already taken. Choose another.|n")
+        return node_name(caller, "", **kwargs)
     caller.key = name
     if hasattr(caller, "aliases") and caller.aliases:
         try:

@@ -132,7 +132,7 @@ def node_do_scan(caller, raw_string, **kwargs):
             target_name = out.get("target_name", target.name)
             caller.msg(f"|c[ BIOSCANNER: {target_name} ]|n  {hp}/{max_hp} HP\n\n{detail}")
         if target != caller:
-            target.msg(f"{caller.name} runs a scanner over you. You see the readout in their hands.")
+            target.msg(f"{(caller.get_display_name(target) if hasattr(caller, 'get_display_name') else caller.name)} runs a scanner over you. You see the readout in their hands.")
     else:
         caller.msg(out)
 
@@ -165,11 +165,11 @@ def node_do_treatment(caller, raw_string, **kwargs):
     if success:
         caller.msg("|g" + msg + "|n")
         if target != caller:
-            target.msg("|g" + f"{caller.name} works on you: {msg[:70]}..." + "|n")
+            target.msg("|g" + f"{(caller.get_display_name(target) if hasattr(caller, 'get_display_name') else caller.name)} works on you: {msg[:70]}..." + "|n")
     else:
         caller.msg("|r" + msg + "|n")
         if target != caller:
-            target.msg("|r" + f"{caller.name} tries to help: {msg[:70]}..." + "|n")
+            target.msg("|r" + f"{(caller.get_display_name(target) if hasattr(caller, 'get_display_name') else caller.name)} tries to help: {msg[:70]}..." + "|n")
 
     # Return compact menu (options only, no full readout) so the result message stays visible
     return node_medical_main(caller, raw_string, target=target, compact=True)

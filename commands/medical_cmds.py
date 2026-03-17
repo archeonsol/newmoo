@@ -133,7 +133,7 @@ class CmdUse(Command):
             else:
                 caller.msg(out)
             if target != caller:
-                target.msg(f"{caller.name} runs a scanner over you.")
+                target.msg(f"{(caller.get_display_name(target) if hasattr(caller, 'get_display_name') else caller.name)} runs a scanner over you.")
             return
 
         # Other medical tools: treatment is done via "apply <item> to <target>" with tool wielded
@@ -214,11 +214,11 @@ class CmdStabilize(Command):
         if success:
             caller.msg("|g" + msg + "|n")
             if target != caller:
-                target.msg("|g%s works to control the bleeding: %s|n" % (caller.name, msg[:60] + ("..." if len(msg) > 60 else "")))
+                target.msg("|g%s works to control the bleeding: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
         else:
             caller.msg("|r" + msg + "|n")
             if target != caller:
-                target.msg("|r%s tries to stem the bleed: %s|n" % (caller.name, msg[:60] + ("..." if len(msg) > 60 else "")))
+                target.msg("|r%s tries to stem the bleed: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
 
 
 class CmdApply(Command):
@@ -343,11 +343,11 @@ class CmdApply(Command):
         if success:
             caller.msg("|g" + msg + "|n")
             if target != caller:
-                target.msg("|g%s works on you: %s|n" % (caller.name, msg[:70] + ("..." if len(msg) > 70 else "")))
+                target.msg("|g%s works on you: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
         else:
             caller.msg("|r" + msg + "|n")
             if target != caller:
-                target.msg("|r%s tries to help: %s|n" % (caller.name, msg[:70] + ("..." if len(msg) > 70 else "")))
+                target.msg("|r%s tries to help: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
 
 
 class CmdSurgery(Command):

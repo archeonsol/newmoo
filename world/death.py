@@ -205,19 +205,23 @@ def make_flatlined(character, attacker):
         character.cmdset.add("commands.default_cmdsets.FlatlinedCmdSet", persistent=False)
     except Exception:
         pass
-    # Echo customizable message to the room
+    # Echo customizable message to the room (per-viewer so sdesc/recog respected)
     loc = character.location
-    if loc and hasattr(loc, "msg_contents"):
+    if loc and hasattr(loc, "contents_get"):
         template = getattr(character.db, "flatline_room_msg", None) or DEFAULT_FLATLINE_ROOM_MSG
-        name = character.get_display_name(character) if hasattr(character, "get_display_name") else character.name
-        try:
-            room_msg = template.format(name=name)
-        except (KeyError, ValueError):
-            room_msg = template.replace("{name}", name)
-        loc.msg_contents(room_msg, exclude=(character,))
+        for v in loc.contents_get(content_type="character"):
+            if v == character:
+                continue
+            name = character.get_display_name(v) if hasattr(character, "get_display_name") else character.name
+            try:
+                room_msg = template.format(name=name)
+            except (KeyError, ValueError):
+                room_msg = template.replace("{name}", name)
+            v.msg(room_msg)
     character.msg(FLATLINE_MESSAGE)
     if attacker and attacker != character and hasattr(attacker, "msg"):
-        attacker.msg(FLATLINE_ATTACKER_MESSAGE.format(name=character.name))
+        name_for_attacker = character.get_display_name(attacker) if hasattr(character, "get_display_name") else character.name
+        attacker.msg(FLATLINE_ATTACKER_MESSAGE.format(name=name_for_attacker))
     try:
         from world.combat import remove_both_combat_tickers
         other = attacker if attacker else getattr(character.db, "combat_target", None)
@@ -228,10 +232,11 @@ def make_flatlined(character, attacker):
         from world.grapple import release_grapple_forced
         victim = getattr(character.db, "grappling", None)
         if victim:
-            release_grapple_forced(
-                character,
-                room_message="%s's grip goes slack as they collapse; %s is free." % (character.name, victim.name),
-            )
+            def _flatline_grapple_msg(v):
+                cname = character.get_display_name(v) if hasattr(character, "get_display_name") else character.name
+                vname = victim.get_display_name(v) if hasattr(victim, "get_display_name") else victim.name
+                return "%s's grip goes slack as they collapse; %s is free." % (cname, vname)
+            release_grapple_forced(character, room_message=_flatline_grapple_msg)
     except Exception:
         pass
     sec = get_flatline_duration_seconds(character)
@@ -467,19 +472,28 @@ def make_permanent_death(character, attacker=None, reason="executed"):
                 attacker_msg = EXECUTE_ATTACKER_MSG.get(weapon_key, EXECUTE_ATTACKER_MSG["fists"])
                 room_msg = EXECUTE_ROOM_MSG.get(weapon_key, EXECUTE_ROOM_MSG["fists"])
                 if hasattr(attacker, "msg"):
-                    attacker.msg(attacker_msg.format(name=name))
-                loc.msg_contents(
-                    room_msg.format(attacker=attacker.name, name=name),
-                    exclude=(character, attacker),
-                )
+                    name_for_attacker = character.get_display_name(attacker) if hasattr(character, "get_display_name") else name
+                    attacker.msg(attacker_msg.format(name=name_for_attacker))
+                for v in loc.contents_get(content_type="character"):
+                    if v in (character, attacker):
+                        continue
+                    v.msg(room_msg.format(
+                        attacker=attacker.get_display_name(v) if hasattr(attacker, "get_display_name") else attacker.name,
+                        name=character.get_display_name(v) if hasattr(character, "get_display_name") else name,
+                    ))
             else:
-                loc.msg_contents(
-                    "|r%s has slipped away. No pulse. No return. The body is still.|n" % name,
-                    exclude=(character,),
-                )
+                for v in loc.contents_get(content_type="character"):
+                    if v == character:
+                        continue
+                    n = character.get_display_name(v) if hasattr(character, "get_display_name") else name
+                    v.msg("|r%s has slipped away. No pulse. No return. The body is still.|n" % n)
     except Exception as e:
-        if loc:
-            loc.msg_contents("|r%s has died.|n" % name, exclude=(character,))
+        if loc and hasattr(loc, "contents_get"):
+            for v in loc.contents_get(content_type="character"):
+                if v == character:
+                    continue
+                n = character.get_display_name(v) if hasattr(character, "get_display_name") else name
+                v.msg("|r%s has died.|n" % n)
         try:
             from evennia import logger
             logger.log_err("death.make_permanent_death swap_typeclass: %s" % e)
