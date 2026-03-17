@@ -110,12 +110,15 @@ class DiveRig(Seat, NetworkedObject):
         avatar.db.entry_device = self
 
         # Establish active connection
-        from evennia.utils import gametime
+        from evennia.utils import gametime, logger
         self.db.active_connection = {
             'character': character,
             'avatar': avatar,
             'connected_at': gametime.gametime()
         }
+
+        # Log the connection
+        logger.log_info(f"Matrix jack-in: {character.key} -> {avatar.key}")
 
         # Staged jack-in sequence
         character.msg("|gConnecting...|n")
@@ -162,6 +165,12 @@ class DiveRig(Seat, NetworkedObject):
 
         # Send initial DISCO message to avatar
         avatar.msg(f"|rDISCO:|n {reason}")
+
+        # Log the disconnection
+        from evennia.utils import logger
+        severity_names = {0: "NORMAL", 1: "EMERGENCY", 2: "FORCED", 3: "FATAL"}
+        severity_name = severity_names.get(severity, severity)
+        logger.log_info(f"Matrix disconnect: {character.key} severity={severity_name} reason='{reason}'")
 
         # Clear connection immediately to prevent reconnection loop
         self.db.active_connection = None
@@ -295,25 +304,14 @@ class DiveRig(Seat, NetworkedObject):
         Args:
             character (Character): Character being removed
         """
-        from evennia.utils import logger
-        logger.log_info(f"DiveRig.handle_forced_removal called for {character.key} (pk={character.pk})")
-
         conn = self.db.active_connection
-        logger.log_info(f"Active connection: {conn}")
-
         if not conn:
-            logger.log_info("No active connection")
             return
 
         conn_character = conn.get('character')
-        logger.log_info(f"Connection character: {conn_character}, pk={conn_character.pk if conn_character else 'None'}")
-
         # Compare by pk to handle stale references after reloads
         if conn_character and conn_character.pk == character.pk:
-            logger.log_info(f"Match! Triggering forced disconnect")
             self.disconnect(character, severity=JACKOUT_FORCED, reason="Forcibly disconnected!")
-        else:
-            logger.log_info(f"No match - conn_character.pk={conn_character.pk if conn_character else 'None'}, character.pk={character.pk}")
 
     # ========================================
     # Display/Query Methods
@@ -536,6 +534,11 @@ class DiveRig(Seat, NetworkedObject):
         # Different messages based on severity
         if severity >= JACKOUT_FATAL:
             msg = self.db.fatal_jackout_msg or "|rThe world fractures. The Matrix ejects your consciousness like poison—|n"
+            # Add dramatic extra messages for fatal disconnect
+            avatar.msg("|rYour avatar dissolves into static and void.|n")
+            avatar.msg("|rFor a brief, terrible moment, you see reality again—|n")
+            avatar.msg("|rYour body in the rig, convulsing—|n")
+            avatar.msg("|rThen nothing.|n")
         elif severity >= JACKOUT_FORCED:
             msg = self.db.forced_jackout_msg or "|rYou feel your consciousness being violently ripped back!|n"
         elif severity >= JACKOUT_EMERGENCY:
@@ -564,7 +567,7 @@ class DiveRig(Seat, NetworkedObject):
         if severity >= JACKOUT_FATAL:
             # Fatal jackout - character dies
             # TODO: Implement death system
-            character.msg("|rDISCO.|n")
+            character.msg("|rOuch....|n")
             character.msg("|r....|n")
             # For now, just regain consciousness with severe warning
             character.db.conscious = True
