@@ -44,14 +44,16 @@ class CmdXp(Command):
         caller = self.caller
         xp = float(getattr(caller.db, "xp", 0) or 0)
         cap = int(getattr(caller.db, "xp_cap", XP_CAP) or XP_CAP)
+        language_xp_spent = float(getattr(caller.db, "xp_spent_on_languages", 0) or 0)
+        effective_cap = cap + language_xp_spent
 
         if not self.args or self.args.strip().lower() in ("show", ""):
             # Column widths for aligned display (match chargen)
             NAME_W, LETTER_W, ADJ_W = 24, 5, 20
             xp_display = int(xp) if xp == int(xp) else round(xp, 2)
-            cap_display = int(cap) if cap == int(cap) else round(cap, 2)
+            cap_display = int(effective_cap) if effective_cap == int(effective_cap) else round(effective_cap, 2)
             output = "|cXP|n: |w{}|n (cap |w{}|n)".format(xp_display, cap_display)
-            if xp >= cap:
+            if xp >= effective_cap:
                 output += " |x(you are at your XP cap; you will not gain more time-based XP until this cap is raised)|n"
             output += "\n\n"
             output += "|cXP needed for next raise:|n\n\n"
@@ -160,6 +162,10 @@ class CmdXp(Command):
                         langs[attr_key] = int(new_val)
                         setattr(caller.db, db_key, langs)
                         caller.db.xp = xp_now - total_spent
+                        # Language XP does not count toward cap; track so they can earn it back
+                        caller.db.xp_spent_on_languages = float(
+                            getattr(caller.db, "xp_spent_on_languages", 0) or 0
+                        ) + total_spent
                         from world.language import get_language_level_name
 
                         level_name = get_language_level_name(new_val)
