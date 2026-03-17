@@ -83,7 +83,6 @@ class Router(MatrixObject):
 
     Attributes:
         online (bool): Whether the router is currently operational
-        max_bandwidth (int): Maximum connections (for future implementation)
         linked_rooms (list): List of room references using this router (for monitoring)
     """
 
@@ -93,7 +92,6 @@ class Router(MatrixObject):
 
         self.db.object_type = "router"
         self.db.online = True  # Default to online
-        self.db.max_bandwidth = 100  # Placeholder for future
         self.db.linked_rooms = []  # Track which rooms use this router
         self.db.is_portable = False  # Routers can't be picked up
 
