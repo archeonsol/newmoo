@@ -72,11 +72,12 @@ class Bioscanner(MedicalTool):
         hp = getattr(target, "hp", 0)
         mx = getattr(target, "max_hp", 1)
         formatted = get_scanner_readout(target)
+        target_name = target.get_display_name(operator) if hasattr(target, "get_display_name") else target.name
         return True, {
             "hp": hp,
             "max_hp": mx,
             "formatted": formatted,
-            "target_name": target.name,
+            "target_name": target_name,
         }
 
 

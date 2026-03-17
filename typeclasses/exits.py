@@ -39,10 +39,16 @@ class Exit(ObjectParent, DefaultExit):
                 return
         except ImportError:
             pass
-        # In combat: must use flee to try to break away
-        if getattr(traversing_object.db, "combat_target", None) is not None:
-            traversing_object.msg("You're in combat! Use |wflee|n or |wflee <direction>|n to try to break away.")
-            return
+        # In combat (attacking or being attacked): must use flee to try to break away
+        try:
+            from world.combat import is_in_combat
+            if is_in_combat(traversing_object):
+                traversing_object.msg("You're in combat! Use |wflee|n or |wflee <direction>|n to try to break away.")
+                return
+        except ImportError:
+            if getattr(traversing_object.db, "combat_target", None) is not None:
+                traversing_object.msg("You're in combat! Use |wflee|n or |wflee <direction>|n to try to break away.")
+                return
         # Voided characters cannot leave the void room
         if getattr(traversing_object.db, "voided", False):
             try:
@@ -114,8 +120,11 @@ class Exit(ObjectParent, DefaultExit):
             victim = getattr(getattr(traversing_object, "db", None), "grappling", None)
             if victim and hasattr(victim, "move_to"):
                 victim.move_to(destination, quiet=True)
-                destination.msg_contents(
-                    "%s is dragged in by %s." % (victim.name, traversing_object.name),
-                    exclude=(traversing_object, victim),
-                )
+                if destination and hasattr(destination, "contents_get"):
+                    for v in destination.contents_get(content_type="character"):
+                        if v in (traversing_object, victim):
+                            continue
+                        vname = victim.get_display_name(v) if hasattr(victim, "get_display_name") else victim.name
+                        oname = traversing_object.get_display_name(v) if hasattr(traversing_object, "get_display_name") else traversing_object.name
+                        v.msg("%s is dragged in by %s." % (vname, oname))
         return

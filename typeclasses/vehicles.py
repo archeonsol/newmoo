@@ -3,10 +3,17 @@ Vehicles: drivable objects with an interior room. Enter/exit, start/stop engine,
 Uses the driving skill for movement. Interior is a separate room; when you enter you go there,
 when you drive the vehicle moves and exits put you at the vehicle's new location.
 Vehicles have a parts system (engine, transmission, brakes, etc.) that can be damaged and repaired.
+
+Each vehicle has exactly ONE persistent interior (same instance every time). Items dropped inside
+stay when you exit and re-enter. A second vehicle has its own separate interior.
 """
 from evennia import DefaultObject
 from evennia.utils.create import create_object
+from evennia.utils.search import search_tag
 from evennia.objects.objects import DefaultExit
+
+# Tag used to find an interior by vehicle id (category = str(vehicle.id)).
+VEHICLE_INTERIOR_TAG = "vehicle_interior"
 
 from .rooms import Room  # noqa: E402
 
@@ -173,9 +180,30 @@ class Vehicle(DefaultObject):
         self._ensure_interior()
 
     def _ensure_interior(self):
-        """Create or return the interior room for this vehicle."""
-        if self.db.interior:
-            return self.db.interior
+        """Return this vehicle's single persistent interior. Creates once per vehicle; never duplicates."""
+        interior = self.db.interior
+        if interior:
+            # Tag existing interior so we can recover by tag if db.interior is ever lost
+            try:
+                if not interior.tags.has(VEHICLE_INTERIOR_TAG, category=str(self.id)):
+                    interior.tags.add(VEHICLE_INTERIOR_TAG, category=str(self.id))
+            except Exception:
+                pass
+            return interior
+        # Recover by tag in case db.interior was ever lost (e.g. old save)
+        try:
+            found = search_tag(VEHICLE_INTERIOR_TAG, category=str(self.id))
+            if found:
+                candidate = found[0]
+                if getattr(candidate.db, "vehicle", None) is self or getattr(candidate.db, "vehicle", None) == self:
+                    self.db.interior = candidate
+                    return candidate
+                if getattr(candidate.db, "vehicle", None) is None:
+                    candidate.db.vehicle = self
+                    self.db.interior = candidate
+                    return candidate
+        except Exception:
+            pass
         key = f"Inside the {self.key}"
         interior = create_object(
             "typeclasses.vehicles.VehicleInterior",
@@ -185,6 +213,7 @@ class Vehicle(DefaultObject):
         if interior:
             interior.db.vehicle = self
             interior.db.desc = None  # use VehicleInterior.default_description (flavorful)
+            interior.tags.add(VEHICLE_INTERIOR_TAG, category=str(self.id))
             self.db.interior = interior
         return self.db.interior
 

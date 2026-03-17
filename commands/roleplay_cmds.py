@@ -24,8 +24,9 @@ def _body_parts_usage_list():
     return [rev.get(p, p) for p in BODY_PARTS_HEAD_TO_FEET]
 
 
-def _run_emote(caller, text):
-    """Shared emote logic for CmdEmote and CmdNoMatch."""
+def _run_emote(caller, text, improvise=False):
+    """Shared emote logic for CmdEmote and CmdNoMatch. If improvise=True (or caller.ndb.performance_improvising), messages are wrapped in bright white and an audience reaction is echoed."""
+    improvise = improvise or bool(getattr(getattr(caller, "ndb", None), "performance_improvising", False))
     from world.emote import (
         first_to_third,
         first_to_second,
@@ -61,6 +62,7 @@ def _run_emote(caller, text):
         if viewer == caller:
             # --- Improved: handle quote protection, echo to caller cleanly ---
             echo_parts = []
+            caller_targets = []  # (matched_name, char) from third-person segments
             for i, seg in enumerate(segments):
                 # Strip leading comma (no-conjugate marker) so it doesn't appear in echo
                 seg = seg.lstrip().lstrip(",").lstrip() if seg.strip().startswith(",") else seg
@@ -81,12 +83,35 @@ def _run_emote(caller, text):
                 else:
                     converted = converted[0].lower() + converted[1:] if converted else converted
                 echo_parts.append(converted)
+                # Resolve sdesc/target refs for caller's echo (same targets as third-person)
+                third = first_to_third(segments[i].strip(), caller)
+                try:
+                    from world.language import parse_quoted_speech
+                    third, _ = parse_quoted_speech(third)
+                except Exception:
+                    pass
+                seg_targets = find_targets_in_text(third, location.contents_get(content_type="character"), caller)
+                caller_targets.extend(seg_targets)
             # Join and ensure trailing punctuation
             full_echo = ". ".join(echo_parts).strip()
             if not full_echo.endswith((".", "!", "?", '"')):
                 full_echo += "."
             # Capitalize first letter after each ". " (e.g. "calm. you" -> "calm. You")
             full_echo = re.sub(r"\.\s+(\w)", lambda m: ". " + m.group(1).upper(), full_echo)
+            # Replace target refs in caller's echo (sdesc/recog from emitter's perspective)
+            try:
+                from world.rp_features import get_display_name_for_viewer
+            except ImportError:
+                get_display_name_for_viewer = lambda c, v: getattr(c, "key", str(c))
+            for matched_name, char in sorted(caller_targets, key=lambda x: -len(x[0])):
+                if char == caller:
+                    replacement = "you"
+                    full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", "your", full_echo, flags=re.IGNORECASE)
+                    full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, full_echo, flags=re.IGNORECASE)
+                else:
+                    replacement = get_display_name_for_viewer(char, caller)
+                    full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", replacement + "'s", full_echo, flags=re.IGNORECASE)
+                    full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, full_echo, flags=re.IGNORECASE)
             # Comma-start: no "You " prefix; else template adds "You " and we avoid double capital
             if starts_with_comma:
                 body = full_echo
@@ -105,6 +130,8 @@ def _run_emote(caller, text):
                 logger.log_trace("roleplay_cmds._run_emote slur (you): %s" % e)
             if debug_lines is not None:
                 debug_lines.append(("you", msg))
+            if improvise:
+                msg = "|w%s|n" % msg
             caller.msg(msg)
         else:
             # --- THIRD PERSON VIEWERS ---
@@ -112,8 +139,21 @@ def _run_emote(caller, text):
             for seg in segments:
                 # Keep " .word" so first_to_third can conjugate those verbs (dot = verb tell)
                 third = first_to_third(seg.strip(), caller)
+                try:
+                    from world.language import parse_quoted_speech, process_language_for_viewer
+                    third, lang_bits = parse_quoted_speech(third)
+                except Exception:
+                    lang_bits = []
                 targets = find_targets_in_text(third, location.contents_get(content_type="character"), caller)
-                body_parts.append(build_emote_for_viewer(third, viewer, targets, emitter_name))
+                body_part = build_emote_for_viewer(third, viewer, targets, emitter_name)
+                for ph, lang_key, quote_text in lang_bits:
+                    try:
+                        from world.language import process_language_for_viewer
+                        processed = process_language_for_viewer(caller, quote_text, lang_key, viewer)
+                        body_part = body_part.replace(ph, processed)
+                    except Exception:
+                        body_part = body_part.replace(ph, quote_text)
+                body_parts.append(body_part)
             full_body = ". ".join(p.strip() for p in body_parts if p.strip())
             # Capitalize first letter after each ". " (e.g. "clear. he" -> "clear. He")
             full_body = re.sub(r"\.\s+(\w)", lambda m: ". " + m.group(1).upper(), full_body)
@@ -139,6 +179,8 @@ def _run_emote(caller, text):
                 pass
             if debug_lines is not None:
                 debug_lines.append((viewer.get_display_name(viewer), msg))
+            if improvise:
+                msg = "|w%s|n" % msg
             viewer.msg(msg)
 
     # Build one neutral third-person line for cameras (viewer=None so no "you", all names)
@@ -146,8 +188,21 @@ def _run_emote(caller, text):
         body_parts = []
         for seg in segments:
             third = first_to_third(seg.strip(), caller)
+            try:
+                from world.language import parse_quoted_speech, process_language_for_viewer
+                third, lang_bits = parse_quoted_speech(third)
+            except Exception:
+                lang_bits = []
             targets = find_targets_in_text(third, location.contents_get(content_type="character"), caller)
-            body_parts.append(build_emote_for_viewer(third, None, targets, emitter_name))
+            body_part = build_emote_for_viewer(third, None, targets, emitter_name)
+            for ph, lang_key, quote_text in lang_bits:
+                try:
+                    from world.language import process_language_for_viewer
+                    processed = process_language_for_viewer(caller, quote_text, lang_key, None)
+                    body_part = body_part.replace(ph, processed)
+                except Exception:
+                    body_part = body_part.replace(ph, quote_text)
+            body_parts.append(body_part)
         full_body = ". ".join(p.strip() for p in body_parts if p.strip()).strip()
         full_body = re.sub(r"\.\s+(\w)", lambda m: ". " + m.group(1).upper(), full_body)
         if starts_with_comma:
@@ -164,6 +219,13 @@ def _run_emote(caller, text):
             feed_cameras_in_location(location, room_line)
         except Exception as e:
             logger.log_trace("roleplay_cmds._run_emote feed_cameras: %s" % e)
+
+    if improvise and location:
+        try:
+            from commands.performance_cmds import _audience_echo_improvise
+            _audience_echo_improvise(location)
+        except Exception:
+            pass
 
     if debug_lines:
         caller.msg("|w--- Emote debug ---|n")
@@ -292,6 +354,191 @@ class CmdVoice(Command):
             caller.msg("|wYour voice|n: |w%s voice|n" % current)
         else:
             caller.msg("|wYour voice|n: not set. Use |w@voice = <text>|n.")
+
+
+def _count_pluralize(name):
+    """Return a simple plural for count output (e.g. 'pod' -> 'pods')."""
+    if not name:
+        return "things"
+    n = (name or "").strip()
+    if not n:
+        return "things"
+    if " " in n:
+        return "things matching '%s'" % name
+    if n.endswith("s") or n.endswith("x") or n.endswith("ch") or n.endswith("sh"):
+        return n + "es"
+    return n + "s"
+
+
+class CmdCount(Command):
+    """
+    Count how many things or people matching a name are in the room. Use this to
+    see how many pods, chairs, or characters matching 'tall man' are here. When
+    there are multiples, shows 1st, 2nd so you can target them in poses.
+
+    Usage:
+      count <name>
+    """
+    key = "count"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        from collections import defaultdict
+        caller = self.caller
+        location = caller.location
+        if not location:
+            caller.msg("You are not in a location.")
+            return
+        name_arg = (self.args or "").strip()
+        if not name_arg:
+            caller.msg("Usage: count <name> — Count how many things or people matching that name are here (e.g. |wcount pod|n, |wcount tall man|n).")
+            return
+        search = name_arg.lower()
+        ordinals = ("1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th")
+
+        def name_matches(display_name):
+            if not display_name:
+                return False
+            dn = (display_name or "").strip().lower()
+            return search in dn or dn in search
+
+        # Characters in room (excluding caller)
+        try:
+            from evennia.utils.utils import inherits_from
+            all_chars = [
+                c for c in location.contents_get(content_type="character")
+                if c != caller and location.filter_visible([c], caller) and inherits_from(c, "typeclasses.characters.Character")
+            ]
+        except Exception:
+            all_chars = [c for c in location.contents_get(content_type="character") if c != caller and location.filter_visible([c], caller)]
+        matching_chars = []
+        for c in all_chars:
+            name = c.get_display_name(caller) if hasattr(c, "get_display_name") else getattr(c, "key", str(c))
+            if name_matches(name):
+                matching_chars.append((name, c))
+
+        # Objects in room (exclude exits, characters, vehicles)
+        try:
+            from typeclasses.rooms import _is_vehicle, _is_corpse
+        except ImportError:
+            _is_vehicle = lambda o: False
+        all_objs = [
+            o for o in location.contents
+            if o not in all_chars and o != caller
+            and not (getattr(o, "destination", None) is not None)
+            and location.filter_visible([o], caller)
+        ]
+        all_objs = [o for o in all_objs if not _is_vehicle(o)]
+        matching_objs = []
+        for o in all_objs:
+            name = o.get_display_name(caller) if hasattr(o, "get_display_name") else getattr(o, "key", str(o))
+            if name_matches(name):
+                matching_objs.append((name, o))
+
+        lines = []
+        # Report characters that matched
+        if matching_chars:
+            n = len(matching_chars)
+            if n == 1:
+                lines.append("There is 1 person matching |w%s|n here." % name_arg)
+            else:
+                ord_strs = [ordinals[i] if i < len(ordinals) else "%dth" % (i + 1) for i in range(n)]
+                lines.append("There are %d people matching |w%s|n here (|w%s|n)." % (n, name_arg, ", ".join(ord_strs)))
+
+        # Report objects that matched
+        if matching_objs:
+            n = len(matching_objs)
+            plural = _count_pluralize(name_arg)
+            if n == 1:
+                lines.append("There is 1 |w%s|n here." % name_arg)
+            else:
+                ord_strs = [ordinals[i] if i < len(ordinals) else "%dth" % (i + 1) for i in range(n)]
+                lines.append("There are %d %s here (|w%s|n)." % (n, plural, ", ".join(ord_strs)))
+
+        if not lines:
+            caller.msg("No one and nothing here matches |w%s|n." % name_arg)
+        else:
+            caller.msg(" ".join(lines))
+
+
+class CmdRecog(Command):
+    """
+    Recognize someone by their description (sdesc) and give them a name you'll see.
+    Until you recog them, you see their short description (e.g. 'a tall man'); after
+    recog tall man as Bob you see 'Bob'. Use |wcount <sdesc>|n to see how many and 1st/2nd when there are multiples.
+
+    Usage:
+      recog                          - list who you've recognized
+      recog <sdesc> as <name>        - remember this person as <name>
+      forget <name>                  - stop recognizing them (you'll see sdesc again)
+    """
+    key = "recog"
+    aliases = ["recognize", "forget"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        from world.emote import resolve_sdesc_to_characters
+        from world.rp_features import get_display_name_for_viewer
+        caller = self.caller
+        location = caller.location
+        args = (self.args or "").strip()
+        if not location:
+            caller.msg("You need to be in a room.")
+            return
+        chars_here = location.contents_get(content_type="character")
+        chars_here = [c for c in chars_here if c != caller and location.filter_visible([c], caller)]
+        if self.cmdstring == "forget":
+            # forget <name> - clear recog by alias
+            if not args:
+                caller.msg("Usage: forget <name>")
+                return
+            found = None
+            for c in chars_here:
+                if caller.recog.get(c) and args.lower() in (caller.recog.get(c) or "").lower():
+                    found = c
+                    break
+            if not found:
+                caller.msg("You don't recognize anyone by that name.")
+                return
+            caller.recog.remove(found)
+            sdesc = get_display_name_for_viewer(found, caller)
+            caller.msg("You no longer recognize them. You'll see them as: |w%s|n" % sdesc)
+            return
+        if not args:
+            # list recogs
+            all_recogs = caller.recog.all()
+            if not all_recogs:
+                caller.msg("You haven't recognized anyone here. Use |wrecog <sdesc> as <name>|n (e.g. recog tall man as Bob).")
+                return
+            lines = []
+            for recog_name, obj in all_recogs.items():
+                if obj not in chars_here:
+                    continue
+                sdesc = get_display_name_for_viewer(obj, caller)
+                lines.append("  %s (you see: %s)" % (recog_name, sdesc))
+            caller.msg("|wRecognized here|n:\n" + "\n".join(lines) if lines else "|wRecognized here|n: (no one in this room)")
+            return
+        if " as " not in args:
+            caller.msg("Usage: recog <sdesc> as <name>   (e.g. recog tall man as Bob)")
+            return
+        sdesc_part, name_part = [x.strip() for x in args.split(" as ", 1)]
+        if not sdesc_part or not name_part:
+            caller.msg("Usage: recog <sdesc> as <name>")
+            return
+        name_part = name_part.rstrip(".,?!")
+        matches = resolve_sdesc_to_characters(caller, chars_here, sdesc_part)
+        if not matches:
+            caller.msg("No one here matches |w%s|n. Use |wlook|n to see who's here and |wcount <sdesc>|n for 1st/2nd when there are duplicates." % sdesc_part)
+            return
+        if len(matches) > 1:
+            caller.msg("Multiple people match. Be specific: |w1-%s as %s|n or |w2-%s as %s|n etc." % (sdesc_part, name_part, sdesc_part, name_part))
+            return
+        target = matches[0]
+        caller.recog.add(target, name_part)
+        sdesc = get_display_name_for_viewer(target, caller)
+        caller.msg("You'll now see |w%s|n as |w%s|n." % (sdesc, name_part))
 
 
 class CmdBody(Command):
@@ -671,12 +918,14 @@ class CmdNoMatch(Command):
         if raw.startswith("."):
             emote_text = raw[1:].strip()
             if emote_text:
-                _run_emote(self.caller, emote_text)
+                improvise = getattr(self.caller.ndb, "performance_improvising", False)
+                _run_emote(self.caller, emote_text, improvise=improvise)
                 return
         if raw.startswith(","):
             # Comma-start = emote with no-conjugate first segment (pass full string so comma is kept)
             if len(raw) > 1:
-                _run_emote(self.caller, raw)
+                improvise = getattr(self.caller.ndb, "performance_improvising", False)
+                _run_emote(self.caller, raw, improvise=improvise)
                 return
         self.caller.msg(
             "Command '%s' is not available. Type \"help\" for help." % (raw or "(empty)")
@@ -713,7 +962,8 @@ class CmdPose(Command):
             self.args = raw[1:].strip()
 
     def func(self):
-        _run_emote(self.caller, self.args)
+        improvise = getattr(self.caller.ndb, "performance_improvising", False)
+        _run_emote(self.caller, self.args, improvise=improvise)
 
 
 class CmdEmote(Command):
@@ -740,7 +990,16 @@ class CmdEmote(Command):
             return
         name = caller.get_display_name(caller)
         msg = f"{name} {text.rstrip('.')}." if text and not text.endswith((".", "!", "?")) else f"{name} {text}"
-        if caller.location:
+        if getattr(caller.ndb, "performance_improvising", False):
+            msg = "|w%s|n" % msg
+            if caller.location:
+                caller.location.msg_contents(msg)
+                try:
+                    from commands.performance_cmds import _audience_echo_improvise
+                    _audience_echo_improvise(caller.location)
+                except Exception:
+                    pass
+        elif caller.location:
             caller.location.msg_contents(msg)
 
 
@@ -868,11 +1127,11 @@ class CmdSit(Command):
         caller.db.sitting_on = seat
         sname = seat.get_display_name(caller)
         caller.msg("|wYou sit down on %s.|n" % sname)
-        if caller.location:
-            caller.location.msg_contents(
-                "%s sits down on %s." % (caller.name, sname),
-                exclude=caller,
-            )
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s sits down on %s." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name, sname))
 
 
 class CmdLieOnTable(Command):
@@ -904,11 +1163,11 @@ class CmdLieOnTable(Command):
                 return
             caller.db.lying_on_table = obj
             caller.msg("|wYou lie down on the operating table. The metal is cold.|n")
-            if caller.location:
-                caller.location.msg_contents(
-                    "%s lies down on the operating table." % caller.name,
-                    exclude=caller,
-                )
+            if caller.location and hasattr(caller.location, "contents_get"):
+                for v in caller.location.contents_get(content_type="character"):
+                    if v == caller:
+                        continue
+                    v.msg("%s lies down on the operating table." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))
         elif isinstance(obj, Bed):
             if obj.get_occupant():
                 caller.msg("Someone is already lying there.")
@@ -916,11 +1175,11 @@ class CmdLieOnTable(Command):
             caller.db.lying_on = obj
             bname = obj.get_display_name(caller)
             caller.msg("|wYou lie down on %s.|n" % bname)
-            if caller.location:
-                caller.location.msg_contents(
-                    "%s lies down on %s." % (caller.name, bname),
-                    exclude=caller,
-                )
+            if caller.location and hasattr(caller.location, "contents_get"):
+                for v in caller.location.contents_get(content_type="character"):
+                    if v == caller:
+                        continue
+                    v.msg("%s lies down on %s." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name, bname))
         else:
             caller.msg("You can only lie on an operating table or a bed.")
 
@@ -951,8 +1210,8 @@ class CmdGetOffTable(Command):
             caller.msg("You are not sitting or lying on anything.")
             return
         caller.msg("|wYou get up.|n")
-        if caller.location:
-            caller.location.msg_contents(
-                "%s gets up." % caller.name,
-                exclude=caller,
-            )
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s gets up." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))

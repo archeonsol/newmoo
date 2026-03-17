@@ -81,6 +81,64 @@ WEAPON_KEY_TO_SDESC = {
 }
 
 
+def _is_mask_item(obj):
+    """True if this worn item counts as a mask (face-concealing)."""
+    if not obj:
+        return False
+    if getattr(obj.db, "sdesc_mask_type", None) == "mask":
+        return True
+    key = (getattr(obj, "key", None) or "").lower()
+    if "mask" in key or "veil" in key or "balaclava" in key or "bandana" in key:
+        return True
+    try:
+        if hasattr(obj, "tags") and obj.tags.has("mask", category="sdesc"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_helmet_item(obj):
+    """True if this worn item counts as a helmet (head/face coverage, layer 5)."""
+    if not obj:
+        return False
+    try:
+        from typeclasses.armor import Armor
+        if not isinstance(obj, Armor):
+            return False
+    except ImportError:
+        return False
+    layer = int(getattr(obj.db, "armor_layer", 0) or 0)
+    if layer != 5:
+        return False
+    parts = getattr(obj.db, "covered_parts", None) or []
+    head_face = {"head", "face", "neck"}
+    return bool(head_face.intersection(set(p.lower() for p in parts)))
+
+
+def _helmet_or_masked(character):
+    """
+    Return 'masked', 'helmeted', or None based on worn items.
+    Mask takes precedence over helmet if both are worn.
+    """
+    from world.clothing import get_worn_items
+    worn = get_worn_items(character)
+    if not worn:
+        return None
+    for item in worn:
+        if _is_mask_item(item):
+            return "masked"
+    for item in worn:
+        if _is_helmet_item(item):
+            return "helmeted"
+    return None
+
+
+def character_has_mask_or_helmet(character):
+    """True if character is wearing at least one mask or helmet item (recog is hidden from others while worn)."""
+    return _helmet_or_masked(character) is not None
+
+
 def _clothing_state(character):
     """
     Return 'naked', 'topless', or None.
@@ -263,6 +321,9 @@ def get_short_desc(character, looker=None):
 
     article = _article_for(adjective)
     body = article + " " + prefix + adjective
+    helmet_masked = _helmet_or_masked(character)
+    if helmet_masked:
+        body += " " + helmet_masked
     if state == "naked":
         body += " naked " + gender
     elif state == "topless":

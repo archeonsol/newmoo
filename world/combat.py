@@ -53,6 +53,17 @@ WEAPON_HANDS = {
 }
 
 
+def _combat_display_name(char, viewer):
+    """Name for char as seen by viewer (sdesc/recog for Characters, else .name/.key)."""
+    if char is None:
+        return "Someone"
+    if viewer is not None and hasattr(char, "get_display_name"):
+        out = char.get_display_name(viewer)
+        if out:
+            return out
+    return getattr(char, "name", None) or getattr(char, "key", None) or "Someone"
+
+
 def _body_part_and_multiplier(attack_value):
     """
     Map attack roll outcome to body part hit and damage multiplier (0.5 to 1.5).
@@ -456,13 +467,17 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
     if getattr(attacker.db, "combat_ended", False) or getattr(defender.db, "combat_ended", False):
         remove_both_combat_tickers(attacker, defender)
         return
-    # Someone fled or combat was ended elsewhere: don't run this turn, just clean up
+    # Wield/unwield/free hands during combat: skip this attack (distraction)
+    if getattr(attacker.db, "combat_skip_next_turn", False):
+        attacker.attributes.remove("combat_skip_next_turn")
+        attacker.msg("|yYou're too busy adjusting your grip to strike this moment.|n")
+        defender.msg("|y%s is distracted and doesn't strike.|n" % _combat_display_name(attacker, defender))
+        return
+    # Attacker stopped or switched target: remove only this ticker (their attacks); don't end defender's combat.
     if _get_combat_target(attacker) != defender:
         remove_both_combat_tickers(attacker, defender)
         return
-    if not getattr(defender.db, "is_creature", False) and _get_combat_target(defender) != attacker:
-        remove_both_combat_tickers(attacker, defender)
-        return
+    # Defender may have stopped attacking; we still run this turn (attacker strikes defender). Do not remove both tickers.
     # Only treat as dead if current_hp was explicitly set to 0 or below (None = not yet in combat)
     if (attacker.db.current_hp is not None and attacker.db.current_hp <= 0) or (
         defender.db.current_hp is not None and defender.db.current_hp <= 0
@@ -473,7 +488,7 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
     # 1a. Grappled characters cannot strike back
     if getattr(attacker.db, "grappled_by", None):
         attacker.msg("You're locked in their grasp; you can't strike back.")
-        defender.msg(f"{attacker.name} is too restrained to strike.")
+        defender.msg(f"{_combat_display_name(attacker, defender)} is too restrained to strike.")
         return
 
     # 1b. Stamina: exhausted characters cannot attack or defend
@@ -487,7 +502,7 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
         STAMINA_COST_ATTACK = STAMINA_COST_DEFEND = 0
     if not can_fight(attacker):
         attacker.msg("You're too exhausted to strike.")
-        defender.msg(f"{attacker.name} is too exhausted to strike.")
+        defender.msg(f"{_combat_display_name(attacker, defender)} is too exhausted to strike.")
         return
     spend_stamina(attacker, STAMINA_COST_ATTACK)
 
@@ -501,7 +516,7 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
     # 2b. Ranged weapons require ammo
     if is_ranged_weapon(weapon_key) and wielded_obj and (not getattr(wielded_obj, "has_ammo", lambda: True)()):
         attacker.msg("Click. |rempty.|n The mag is dry. |wReload|n or you're dead.")
-        defender.msg(f"{attacker.name} pulls the trigger. Click. Empty. Your turn.")
+        defender.msg(f"{_combat_display_name(attacker, defender)} pulls the trigger. Click. Empty. Your turn.")
         return
 
     # 3. THE MOVE SELECTION (tiered by skill: default 1–3, tier 1 +4–5, C +6)
@@ -514,7 +529,7 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
 
     # 4. RESOLVE THE HIT (or auto-hit if defender too exhausted to defend)
     if not can_fight(defender):
-        attacker.msg(f"{defender.name} is too exhausted to defend. You land a solid blow.")
+        attacker.msg(f"{_combat_display_name(defender, attacker)} is too exhausted to defend. You land a solid blow.")
         defender.msg("You're too exhausted to defend yourself. The blow lands.")
         result, attack_value = "HIT", 10
     else:
@@ -524,52 +539,58 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
     # 5. MESSAGING & DAMAGE (brutal, location-accurate, weapon-specific)
     move_name = attack_move["name"]
     if result == "MISS":
+        def_name = _combat_display_name(defender, attacker)
+        atk_name = _combat_display_name(attacker, defender)
         if weapon_key == "knife":
-            attacker.msg(f"You lunge. |r{defender.name}|n is gone. The blade cuts air. You're open.")
-            defender.msg(f"{attacker.name} thrusts. You're already moving. The knife misses. They |rmiss.|n")
+            attacker.msg(f"You lunge. |r{def_name}|n is gone. The blade cuts air. You're open.")
+            defender.msg(f"{atk_name} thrusts. You're already moving. The knife misses. They |rmiss.|n")
         elif weapon_key == "long_blade":
-            attacker.msg(f"You swing. |r{defender.name}|n steps clear. Your edge finds nothing. You're exposed.")
-            defender.msg(f"The blade comes. You're not there. It passes. {attacker.name} |rmiss.|n")
+            attacker.msg(f"You swing. |r{def_name}|n steps clear. Your edge finds nothing. You're exposed.")
+            defender.msg(f"The blade comes. You're not there. It passes. {atk_name} |rmiss.|n")
         elif weapon_key == "blunt":
-            attacker.msg(f"You swing. |r{defender.name}|n reads it and moves. Your weapon hits empty. You're open.")
-            defender.msg(f"{attacker.name} winds up. You're gone before it lands. They |rmiss.|n")
+            attacker.msg(f"You swing. |r{def_name}|n reads it and moves. Your weapon hits empty. You're open.")
+            defender.msg(f"{atk_name} winds up. You're gone before it lands. They |rmiss.|n")
         elif weapon_key in ("sidearm", "longarm", "automatic"):
-            attacker.msg(f"You fire. |r{defender.name}|n isn't there. The round goes wide. Miss.")
+            attacker.msg(f"You fire. |r{def_name}|n isn't there. The round goes wide. Miss.")
             defender.msg(f"The shot cracks past. You moved. They |rmiss.|n")
         else:
-            attacker.msg(f"Your punch finds air. |r{defender.name}|n slipped it. You're off balance.")
-            defender.msg(f"{attacker.name} throws. You move. They |rmiss.|n")
+            attacker.msg(f"Your punch finds air. |r{def_name}|n slipped it. You're off balance.")
+            defender.msg(f"{atk_name} throws. You move. They |rmiss.|n")
 
     elif result == "PARRIED":
+        def_name = _combat_display_name(defender, attacker)
+        atk_name = _combat_display_name(attacker, defender)
         if weapon_key == "knife":
-            attacker.msg(f"You thrust. |c{defender.name}|n meets it. Steel on steel. Your blade is turned. |cParried.|n")
+            attacker.msg(f"You thrust. |c{def_name}|n meets it. Steel on steel. Your blade is turned. |cParried.|n")
             defender.msg(f"The knife comes in. You block. The blade goes wide. |cParried.|n")
         elif weapon_key == "long_blade":
-            attacker.msg(f"Your blade comes down. |c{defender.name}|n catches it. Impact. They shove it aside. |cParried.|n")
+            attacker.msg(f"Your blade comes down. |c{def_name}|n catches it. Impact. They shove it aside. |cParried.|n")
             defender.msg(f"The edge falls. You meet it. You turn the blow. |cParried.|n")
         elif weapon_key == "blunt":
-            attacker.msg(f"You swing. |c{defender.name}|n blocks. Your strike slides off. |cParried.|n")
-            defender.msg(f"{attacker.name} swings. You block. The blow goes wide. |cParried.|n")
+            attacker.msg(f"You swing. |c{def_name}|n blocks. Your strike slides off. |cParried.|n")
+            defender.msg(f"{atk_name} swings. You block. The blow goes wide. |cParried.|n")
         else:
-            attacker.msg(f"Your punch goes in. |c{defender.name}|n blocks. No contact. |cParried.|n")
-            defender.msg(f"{attacker.name} throws. Your guard is up. The punch is turned. |cParried.|n")
+            attacker.msg(f"Your punch goes in. |c{def_name}|n blocks. No contact. |cParried.|n")
+            defender.msg(f"{atk_name} throws. Your guard is up. The punch is turned. |cParried.|n")
 
     elif result == "DODGED":
+        def_name = _combat_display_name(defender, attacker)
+        atk_name = _combat_display_name(attacker, defender)
         if weapon_key == "knife":
-            attacker.msg(f"You go for the gut. |y{defender.name} rolls.|n The blade misses. You're exposed.")
+            attacker.msg(f"You go for the gut. |y{def_name} rolls.|n The blade misses. You're exposed.")
             defender.msg(f"You see the lunge. You |yroll.|n The knife passes. You're still up.")
         elif weapon_key == "long_blade":
-            attacker.msg(f"Downstroke. |y{defender.name} slips it.|n Your edge hits nothing. You're open.")
+            attacker.msg(f"Downstroke. |y{def_name} slips it.|n Your edge hits nothing. You're open.")
             defender.msg(f"The blade drops. You |yroll clear.|n It misses. You're still standing.")
         elif weapon_key == "blunt":
-            attacker.msg(f"You put your weight into it. |y{defender.name} is gone.|n The blow finds air. You're exposed.")
+            attacker.msg(f"You put your weight into it. |y{def_name} is gone.|n The blow finds air. You're exposed.")
             defender.msg(f"You see it coming. You |yroll.|n The weapon misses. That would have broken you.")
         elif weapon_key in ("sidearm", "longarm", "automatic"):
-            attacker.msg(f"You squeeze. |y{defender.name} is already moving.|n The round goes where they were. Miss.")
+            attacker.msg(f"You squeeze. |y{def_name} is already moving.|n The round goes where they were. Miss.")
             defender.msg(f"Muzzle flash. You |ydive.|n The shot goes past. You're still breathing.")
         else:
-            attacker.msg(f"You commit. |y{defender.name} slips the punch.|n You're open.")
-            defender.msg(f"The punch comes. You |yroll.|n {attacker.name}'s fist misses.")
+            attacker.msg(f"You commit. |y{def_name} slips the punch.|n You're open.")
+            defender.msg(f"The punch comes. You |yroll.|n {atk_name}'s fist misses.")
 
     elif result in ("HIT", "CRITICAL"):
         # Defender already dead this tick (other callback ran first)? Do nothing.
@@ -619,31 +640,46 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
         if absorbed_fully and damage <= 0:
             # Armor completely absorbed the blow: distinct message, no trauma or HP loss
             if hit_shield:
-                attacker.msg(f"|cYour blow lands on {effective_defender.name}'s {body_part} — {defender.name} pulled them in the way — but their armor absorbs it.|n")
-                defender.msg(f"|cYou pull {effective_defender.name} in the way. {attacker.name}'s strike hits them but armor takes it.|n")
-                effective_defender.msg(f"|c{defender.name} uses you as a shield. {attacker.name}'s blow hits your {body_part}; your armor takes it.|n")
+                eff_for_atk = _combat_display_name(effective_defender, attacker)
+                def_for_atk = _combat_display_name(defender, attacker)
+                eff_for_def = _combat_display_name(effective_defender, defender)
+                atk_for_def = _combat_display_name(attacker, defender)
+                eff_for_eff = _combat_display_name(effective_defender, effective_defender)
+                def_for_eff = _combat_display_name(defender, effective_defender)
+                atk_for_eff = _combat_display_name(attacker, effective_defender)
+                attacker.msg(f"|cYour blow lands on {eff_for_atk}'s {body_part} — {def_for_atk} pulled them in the way — but their armor absorbs it.|n")
+                defender.msg(f"|cYou pull {eff_for_def} in the way. {atk_for_def}'s strike hits them but armor takes it.|n")
+                effective_defender.msg(f"|c{def_for_eff} uses you as a shield. {atk_for_eff}'s blow hits your {body_part}; your armor takes it.|n")
             else:
-                attacker.msg(f"|cYour blow lands on {defender.name}'s {body_part} but their armor absorbs it.|n")
-                defender.msg(f"|c{attacker.name}'s strike hits your {body_part}; your armor takes it.|n")
+                attacker.msg(f"|cYour blow lands on {_combat_display_name(defender, attacker)}'s {body_part} but their armor absorbs it.|n")
+                defender.msg(f"|c{_combat_display_name(attacker, defender)}'s strike hits your {body_part}; your armor takes it.|n")
         else:
             from world.medical import apply_trauma, get_brutal_hit_flavor
             trauma_result = apply_trauma(effective_defender, body_part, damage, is_critical, weapon_key=weapon_key, weapon_obj=wielded_obj)
+            def_for_atk = _combat_display_name(defender, attacker)
+            atk_for_def = _combat_display_name(attacker, defender)
+            eff_for_atk = _combat_display_name(effective_defender, attacker)
+            eff_for_def = _combat_display_name(effective_defender, defender)
+            eff_for_eff = _combat_display_name(effective_defender, effective_defender)
+            def_for_eff = _combat_display_name(defender, effective_defender)
+            atk_for_eff = _combat_display_name(attacker, effective_defender)
             if hit_shield:
-                attacker.msg(f"|r{defender.name} pulls {effective_defender.name} in the way! Your blow lands on {effective_defender.name}'s {body_part}.|n")
-                defender.msg(f"|yYou pull {effective_defender.name} in the way. The blow hits them.|n")
-                main_shield, _ = _hit_message(
-                    weapon_key, body_part, effective_defender.name, attacker.name, is_critical
+                attacker.msg(f"|r{def_for_atk} pulls {eff_for_atk} in the way! Your blow lands on {eff_for_atk}'s {body_part}.|n")
+                defender.msg(f"|yYou pull {eff_for_def} in the way. The blow hits them.|n")
+                _, def_line_shield = _hit_message(
+                    weapon_key, body_part, eff_for_atk, atk_for_eff, is_critical
                 )
+                eff_self = _combat_display_name(effective_defender, effective_defender)
                 flavor_atk, flavor_shield = get_brutal_hit_flavor(
-                    weapon_key, body_part, trauma_result, effective_defender.name, attacker.name, is_critical, weapon_obj=wielded_obj
+                    weapon_key, body_part, trauma_result, eff_self, atk_for_eff, is_critical, weapon_obj=wielded_obj
                 )
-                effective_defender.msg(f"|r{defender.name} uses you as a shield! {attacker.name}'s blow hits you — {main_shield} {flavor_shield}".strip())
+                effective_defender.msg(f"|r{def_for_eff} uses you as a shield! {atk_for_eff}'s blow hits you — {def_line_shield} {flavor_shield}".strip())
             else:
                 main_atk, main_def = _hit_message(
-                    weapon_key, body_part, defender.name, attacker.name, is_critical
+                    weapon_key, body_part, def_for_atk, atk_for_def, is_critical
                 )
                 flavor_atk, flavor_def = get_brutal_hit_flavor(
-                    weapon_key, body_part, trauma_result, defender.name, attacker.name, is_critical, weapon_obj=wielded_obj
+                    weapon_key, body_part, trauma_result, def_for_atk, atk_for_def, is_critical, weapon_obj=wielded_obj
                 )
                 attacker.msg(f"{main_atk} {flavor_atk}".strip())
                 defender.msg(f"{main_def} {flavor_def}".strip())
@@ -661,6 +697,27 @@ from evennia import TICKER_HANDLER as ticker
 def _get_combat_target(caller):
     """Return the character caller is currently in combat with, or None."""
     return getattr(caller.db, "combat_target", None)
+
+
+def is_being_attacked(character, location=None):
+    """True if any other character in the same room has character as their combat_target (they are attacking this one)."""
+    if not character or not hasattr(character, "location"):
+        return False
+    loc = location or getattr(character, "location", None)
+    if not loc or not hasattr(loc, "contents_get"):
+        return False
+    for other in loc.contents_get(content_type="character"):
+        if other is character:
+            continue
+        if getattr(other.db, "combat_target", None) == character:
+            return True
+    return False
+
+
+def is_in_combat(character):
+    """True if character is attacking someone or is being attacked (movement should use flee)."""
+    return (_get_combat_target(character) is not None or
+            is_being_attacked(character))
 
 
 def _set_combat_target(caller, target):
@@ -787,25 +844,27 @@ def start_combat_ticker(attacker, target):
 
     weapon_key = _get_attacker_weapon_key(attacker)
     ready_attacker = COMBAT_READY_ATTACKER_MSG.get(weapon_key, COMBAT_READY_ATTACKER_MSG["fists"])
-    attacker.msg(ready_attacker.format(target=target.name))
+    attacker.msg(ready_attacker.format(target=_combat_display_name(target, attacker)))
     target.msg(COMBAT_READY_DEFENDER_MSG)
     if target.location:
-        target.location.msg_contents(
-            COMBAT_READY_ROOM_MSG.format(defender=target.name),
-            exclude=(target,),
-        )
-        target.location.msg_contents(
-            COMBAT_READY_ATTACKER_ROOM_MSG.format(attacker=attacker.name, target=target.name),
-            exclude=(attacker,),
-        )
+        loc = target.location
+        viewers_def = [c for c in loc.contents_get(content_type="character") if c != target]
+        for v in viewers_def:
+            v.msg(COMBAT_READY_ROOM_MSG.format(defender=_combat_display_name(target, v)))
+        viewers_atk = [c for c in loc.contents_get(content_type="character") if c != attacker]
+        for v in viewers_atk:
+            v.msg(COMBAT_READY_ATTACKER_ROOM_MSG.format(attacker=_combat_display_name(attacker, v), target=_combat_display_name(target, v)))
 
     sec = random.uniform(COMBAT_START_DELAY_MIN, COMBAT_START_DELAY_MAX)
     delay(sec, _start_first_round, attacker.id, target.id)
 
 
 def stop_combat_ticker(attacker, target):
-    """Stop only your attacks; the other can keep attacking until someone dies."""
+    """Stop only your attacks on this target; they can keep attacking until they stop too."""
     if not attacker or not target:
+        return
+    if _get_combat_target(attacker) != target:
+        attacker.msg("|yYou're not attacking them.|n")
         return
     id_me = _ticker_id(attacker, target)
     if not id_me:
@@ -814,7 +873,8 @@ def stop_combat_ticker(attacker, target):
     try:
         ticker.remove(COMBAT_INTERVAL, execute_combat_turn, idstring=id_me, persistent=True)
         _set_combat_target(attacker, None)
-        # Do not clear target's combat_target; they may still be attacking us (e.g. we swapped targets).
-        attacker.msg(f"|yYou pull back from the fight with {target.name}.|n")
+        # Do not clear target's combat_target; they may still be attacking us.
+        attacker.msg(f"|yYou pull back from the fight with {_combat_display_name(target, attacker)}.|n")
     except KeyError:
-        attacker.msg("|yYou are not in a fight.|n")
+        _set_combat_target(attacker, None)
+        attacker.msg("|yYou pull back from the fight.|n")

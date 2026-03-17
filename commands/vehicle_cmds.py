@@ -42,7 +42,15 @@ class CmdEnterVehicle(Command):
         caller.move_to(vehicle.interior)
         caller.db.in_vehicle = vehicle
         caller.msg(f"You enter {vehicle.key}. You're inside. Use |wstart|n to start the engine, |wdrive <direction>|n to move, |wexit|n to get out.")
-        caller.location.msg_contents(f"{caller.key} enters.", exclude=caller)
+        # Announce to the room where the vehicle is (exterior), not the interior
+        exterior = getattr(vehicle, "location", None)
+        if exterior and hasattr(exterior, "contents_get"):
+            for v in exterior.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg(f"{caller.get_display_name(v) if hasattr(caller, 'get_display_name') else caller.key} enters.")
+        elif exterior:
+            exterior.msg_contents(f"{caller.key} enters.", exclude=caller)
 
 
 class CmdExitVehicle(Command):
@@ -69,7 +77,13 @@ class CmdExitVehicle(Command):
         caller.db.in_vehicle = None
         caller.move_to(dest)
         caller.msg(f"You get out of {vehicle.key}.")
-        dest.msg_contents(f"{caller.key} gets out of {vehicle.key}.", exclude=caller)
+        if dest and hasattr(dest, "contents_get"):
+            for v in dest.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg(f"{caller.get_display_name(v) if hasattr(caller, 'get_display_name') else caller.key} gets out of {vehicle.key}.")
+        else:
+            dest.msg_contents(f"{caller.key} gets out of {vehicle.key}.", exclude=caller)
 
 
 class CmdStartEngine(Command):

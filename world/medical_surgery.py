@@ -124,11 +124,15 @@ def _surgery_msg(caller, target, table, organ_key, step):
     caller.msg("|w%s|n" % narratives[step])
     # To room (short)
     loc = table.location if table else caller.location
-    if loc and target != caller:
-        loc.msg_contents(
-            "%s works over %s — %s. The theatre reeks of blood and antiseptic." % (caller.name, target.name, organ_name),
-            exclude=(caller, target),
-        )
+    if loc and target != caller and hasattr(loc, "contents_get"):
+        for v in loc.contents_get(content_type="character"):
+            if v in (caller, target):
+                continue
+            v.msg("%s works over %s — %s. The theatre reeks of blood and antiseptic." % (
+                caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name,
+                target.get_display_name(v) if hasattr(target, "get_display_name") else target.name,
+                organ_name,
+            ))
 
 
 def _surgery_finish(ids, organ_key):
@@ -172,11 +176,14 @@ def _surgery_finish(ids, organ_key):
 
     if success_level == 0:
         caller.msg("|rYou do what you can. The damage is too deep, or your hands betray you. The organ does not hold. They will need more — or they will not make it.|n")
-        if target != caller and target.location:
-            target.location.msg_contents(
-                "%s steps back from the table. The surgery did not take. %s lies still." % (caller.name, target.name),
-                exclude=(caller, target),
-            )
+        if target != caller and target.location and hasattr(target.location, "contents_get"):
+            for v in target.location.contents_get(content_type="character"):
+                if v in (caller, target):
+                    continue
+                v.msg("%s steps back from the table. The surgery did not take. %s lies still." % (
+                    caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name,
+                    target.get_display_name(v) if hasattr(target, "get_display_name") else target.name,
+                ))
         return
 
     target.db.organ_damage[organ_key] = severity - 1
@@ -193,13 +200,16 @@ def _surgery_finish(ids, organ_key):
             break
 
     caller.msg("|gThe organ holds. You have done what you could. They may yet live.|n")
-    if target != caller:
-        target.msg("|gYou drift back. The pain is still there, but the worst has passed. Someone has pulled you through.|n")
-        if target.location:
-            target.location.msg_contents(
-                "|g%s finishes the procedure. %s lies still on the table — alive.|n" % (caller.name, target.name),
-                exclude=(caller, target),
-            )
+        if target != caller:
+            target.msg("|gYou drift back. The pain is still there, but the worst has passed. Someone has pulled you through.|n")
+            if target.location and hasattr(target.location, "contents_get"):
+                for v in target.location.contents_get(content_type="character"):
+                    if v in (caller, target):
+                        continue
+                    v.msg("|g%s finishes the procedure. %s lies still on the table — alive.|n" % (
+                        caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name,
+                        target.get_display_name(v) if hasattr(target, "get_display_name") else target.name,
+                    ))
 
 
 def start_surgery_sequence(caller, target, table, organ_key):

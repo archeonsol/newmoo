@@ -25,10 +25,13 @@ def _staggered_walk_callback(obj_id, dest_id):
         victim = getattr(getattr(obj, "db", None), "grappling", None)
         if victim and hasattr(victim, "move_to"):
             victim.move_to(dest, quiet=True)
-            dest.msg_contents(
-                "%s is dragged in by %s." % (victim.name, obj.name),
-                exclude=(obj, victim),
-            )
+            if dest and hasattr(dest, "contents_get"):
+                for v in dest.contents_get(content_type="character"):
+                    if v in (obj, victim):
+                        continue
+                    vname = victim.get_display_name(v) if hasattr(victim, "get_display_name") else victim.name
+                    oname = obj.get_display_name(v) if hasattr(obj, "get_display_name") else obj.name
+                    v.msg("%s is dragged in by %s." % (vname, oname))
     except Exception as e:
         from evennia.utils import logger
         logger.log_trace("staggered_movement._staggered_walk_callback: %s" % e)

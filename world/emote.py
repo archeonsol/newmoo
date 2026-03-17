@@ -1,4 +1,5 @@
 import re
+from collections import defaultdict
 
 PRONOUN_MAP = {
     "male": ("he", "his", "him"),
@@ -82,12 +83,174 @@ def split_emote_segments(text):
     """Split on ' . ' (space dot space) so '.look' in the middle stays part of the pose."""
     return [s.strip() for s in re.split(r" \.\s+", text) if s.strip()]
 
+def _normalize_sdesc_for_match(name):
+    """Strip leading article and lowercase for matching in emotes."""
+    if not name:
+        return ""
+    s = name.strip().lower()
+    for prefix in ("the ", "a ", "an "):
+        if s.startswith(prefix):
+            s = s[len(prefix):].strip()
+            break
+    return s
+
+
 def find_targets_in_text(text, character_list, emitter):
+    """
+    Find character targets mentioned in emote text. Matches by key (name), by full sdesc,
+    or by any word in the sdesc (e.g. "grin at average" matches "an average naked person").
+    When multiple characters share the same sdesc/word, use 1-average, 2-average etc.;
+    if no number is given, default to the first in room order.
+    Returns list of (matched_string, char) for pronoun resolution and viewer replacement.
+    """
+    from world.rp_features import get_display_name_for_viewer
     targets = []
+    if not text or not character_list:
+        return targets
+    # Build (char, display_name, norm) in room order (character_list order)
+    candidates = []
     for char in character_list:
-        if char != emitter and re.search(r"\b" + re.escape(char.key) + r"\b", text, re.IGNORECASE):
-            targets.append((char.key, char))
+        if char == emitter:
+            continue
+        name = get_display_name_for_viewer(char, emitter)
+        if not name:
+            continue
+        norm = _normalize_sdesc_for_match(name)
+        if norm:
+            candidates.append((char, name, norm))
+    if not candidates:
+        return targets
+    # Group by full phrase (for "average naked person") and build word->chars for partial match
+    by_phrase = defaultdict(list)
+    word_to_chars = defaultdict(list)
+    for char, name, norm in candidates:
+        phrase = norm
+        words = phrase.split()
+        by_phrase[phrase].append((char, name))
+    # word_to_chars[word] = [(char, phrase, idx_in_phrase_group), ...] in room order
+    for phrase, char_list in by_phrase.items():
+        for idx, (char, name) in enumerate(char_list):
+            for word in phrase.split():
+                word_to_chars[word].append((char, phrase, idx))
+    # Build match specs: full phrase + each word. For multiples, default to first (num=None), and 1-, 2- for explicit
+    match_specs = []
+    for phrase, char_list in by_phrase.items():
+        if len(char_list) == 1:
+            (char, _) = char_list[0]
+            match_specs.append((phrase, char, None))
+        else:
+            for idx, (char, _) in enumerate(char_list):
+                match_specs.append((phrase, char, idx + 1))
+    for word, group in word_to_chars.items():
+        if len(group) == 1:
+            (char, _, _) = group[0]
+            match_specs.append((word, char, None))
+        else:
+            first_char = group[0][0]
+            match_specs.append((word, first_char, None))
+            for char, phrase, idx in group:
+                match_specs.append((word, char, idx + 1))
+    # Sort so longer patterns match first; numbered (1-word) before unnumbered so "1-average" beats "average"
+    def _spec_sort_key(spec):
+        phrase_or_word, _char, num = spec
+        if num is not None:
+            effective_len = len("%d-%s" % (num, phrase_or_word))
+        else:
+            effective_len = len(phrase_or_word)
+        return (-effective_len, phrase_or_word, num or 0)
+    match_specs.sort(key=_spec_sort_key)
+    _RE_FLAGS = re.IGNORECASE | re.UNICODE
+    seen_positions = set()
+
+    def _overlaps(s, e):
+        for (a, b) in seen_positions:
+            if not (e <= a or s >= b):
+                return True
+        return False
+
+    # Use (?<!\w)(?!\w) instead of \b so numbered refs like "1-average" match (Python \b is unreliable with digits+hyphen)
+    for phrase_or_word, char, num in match_specs:
+        esc = re.escape(phrase_or_word)
+        if num is not None:
+            pattern = r"(?<!\w)(%d-\s*(?:the\s+|a\s+|an\s+)?%s)(?!\w)" % (num, esc)
+        else:
+            pattern = r"(?<!\w)(?:the\s+|a\s+|an\s+)?(%s)(?!\w)" % esc
+        for m in re.finditer(pattern, text, _RE_FLAGS):
+            start, end = m.start(), m.end()
+            if _overlaps(start, end):
+                continue
+            seen_positions.add((start, end))
+            matched = m.group(0)
+            targets.append((matched, char))
+    # Match by character key (name) so "Bob" works when recog'd
+    for char in character_list:
+        if char == emitter:
+            continue
+        key = (getattr(char, "key", None) or "").strip()
+        if not key:
+            continue
+        for m in re.finditer(r"(?<!\w)" + re.escape(key) + r"(?!\w)", text, re.IGNORECASE):
+            start, end = m.start(), m.end()
+            if _overlaps(start, end):
+                continue
+            seen_positions.add((start, end))
+            targets.append((m.group(0), char))
+    def pos_key(t):
+        pos = text.lower().find(t[0].lower())
+        return (pos, -len(t[0]))
+    targets.sort(key=pos_key)
     return targets
+
+
+def resolve_sdesc_to_characters(emitter, character_list, search_string):
+    """
+    Resolve a search string like "tall man" or "1-tall man" to a list of matching characters.
+    Used by recog command and by look/search. Returns empty list if no match, [char] or [c1, c2, ...] if match.
+    """
+    from world.rp_features import get_display_name_for_viewer
+    if not search_string or not character_list or not emitter:
+        return []
+    search_string = search_string.strip()
+    if not search_string:
+        return []
+    # Parse optional "N-" prefix
+    num = None
+    phrase = search_string
+    import re
+    m = re.match(r"^(\d+)[-\s]+(.+)$", search_string, re.IGNORECASE)
+    if m:
+        num = int(m.group(1))
+        phrase = m.group(2).strip()
+    phrase_norm = _normalize_sdesc_for_match(phrase)
+    if not phrase_norm:
+        return []
+    candidates = []
+    for char in character_list:
+        if char == emitter:
+            continue
+        name = get_display_name_for_viewer(char, emitter)
+        if not name:
+            continue
+        norm = _normalize_sdesc_for_match(name)
+        if not norm:
+            continue
+        if phrase_norm in norm or norm == phrase_norm:
+            candidates.append((char, norm))
+    if not candidates:
+        return []
+    # If phrase matches multiple, we need num to disambiguate
+    by_phrase = defaultdict(list)
+    for char, norm in candidates:
+        by_phrase[norm].append(char)
+    matches = []
+    for norm, chars in by_phrase.items():
+        if phrase_norm == norm or phrase_norm in norm:
+            matches.extend(chars)
+    if num is not None:
+        if 1 <= num <= len(matches):
+            return [matches[num - 1]]
+        return []
+    return matches
 
 def _pronoun_set(char):
     return (getattr(char.db, "pronoun", "neutral") or "neutral").lower()
@@ -168,11 +331,21 @@ def build_emote_for_viewer(text, viewer, targets, emitter_name):
         placeholders.append((ph, referent, form_type, original, suffix))
         tail = (" " + suffix if suffix else "")
         text = text[:start] + ph + tail + text[end:]
-    # 2. Name replacement for viewer (you/your when viewer is that target)
-    for name, char in targets:
+    # 2. Name replacement: each target's matched string -> "you" for viewer, else viewer's display name for that char
+    try:
+        from world.rp_features import get_display_name_for_viewer
+    except ImportError:
+        get_display_name_for_viewer = lambda c, v: getattr(c, "key", str(c))
+    # Use (?<!\w)(?!\w) instead of \b so "1-average" etc. are replaced correctly (Python \b + digits+hyphen is unreliable)
+    for matched_name, char in sorted(targets, key=lambda t: -len(t[0])):
         if char == viewer:
-            text = re.sub(r"\b" + re.escape(name) + r"'s\b", "your", text, flags=re.IGNORECASE)
-            text = re.sub(r"\b" + re.escape(name) + r"\b", "you", text, flags=re.IGNORECASE)
+            replacement = "you"
+            text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", "your", text, flags=re.IGNORECASE)
+            text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, text, flags=re.IGNORECASE)
+        else:
+            replacement = get_display_name_for_viewer(char, viewer)
+            text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", replacement + "'s", text, flags=re.IGNORECASE)
+            text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, text, flags=re.IGNORECASE)
     # 3. Replace placeholders: you/your/yours if referent is viewer, else original (suffix " hand" already in text for poss_det)
     for ph, referent, form_type, original, suffix in placeholders:
         if referent is not None and referent == viewer:

@@ -144,6 +144,8 @@ class CmdWield(Command):
             else:
                 caller.db.left_hand_obj = target
         _update_primary_wielded(caller)
+        if getattr(caller.db, "combat_target", None) is not None:
+            caller.db.combat_skip_next_turn = True
         caller.msg(f"You shift your grip and wield |w{target.name}|n.")
 
 
@@ -183,6 +185,8 @@ class CmdUnwield(Command):
         if getattr(caller.db, "right_hand_obj", None) is target:
             caller.db.right_hand_obj = None
         _update_primary_wielded(caller)
+        if getattr(caller.db, "combat_target", None) is not None:
+            caller.db.combat_skip_next_turn = True
         caller.msg(f"You stop wielding |w{target.name}|n and put it away.")
 
 
@@ -211,6 +215,8 @@ class CmdFreehands(Command):
         caller.db.left_hand_obj = None
         caller.db.right_hand_obj = None
         _update_primary_wielded(caller)
+        if getattr(caller.db, "combat_target", None) is not None:
+            caller.db.combat_skip_next_turn = True
         caller.msg(f"You put away {' and '.join('|w' + n + '|n' for n in names)}.")
 
 

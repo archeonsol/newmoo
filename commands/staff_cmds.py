@@ -665,7 +665,7 @@ class CmdSummon(Command):
             return
         target.move_to(dest)
         caller.msg("|gYou summon {} here.|n".format(target.name))
-        target.msg("|yYou have been summoned to {}.|n".format(caller.name))
+        target.msg("|yYou have been summoned to {}.|n".format(caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name))
 
 
 class CmdSetVoid(Command):
@@ -1503,11 +1503,16 @@ class CmdDespawn(Command):
             return
 
         name = target.name
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                dname = target.get_display_name(v) if hasattr(target, "get_display_name") else name
+                v.msg(f"The individual known as {dname} vanishes as the simulation recalibrates.")
         # Permanently delete from the database
         target.delete()
 
         caller.msg(f"|y[SYSTEM]|n Entity '|w{name}|n' has been purged from the sector.")
-        caller.location.msg_contents(f"The individual known as {name} vanishes as the simulation recalibrates.", exclude=caller)
 
 
 class CmdNpc(Command):
@@ -1583,7 +1588,13 @@ class CmdNpc(Command):
             caller.msg("|rFailed to create NPC.|n")
             return
         caller.msg("|gSummoned:|n %s." % npc.name)
-        loc.msg_contents("%s appears." % npc.name, exclude=caller)
+        if hasattr(loc, "contents_get"):
+            for v in loc.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s appears." % (npc.get_display_name(v) if hasattr(npc, "get_display_name") else npc.name))
+        else:
+            loc.msg_contents("%s appears." % npc.name, exclude=caller)
 
     def _do_unsummon(self, caller, rest):
         if not rest:
@@ -1596,10 +1607,13 @@ class CmdNpc(Command):
             caller.msg("|rCannot unsummon a player character.|n")
             return
         name = target.name
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v == caller:
+                    continue
+                v.msg("%s vanishes." % (target.get_display_name(v) if hasattr(target, "get_display_name") else name))
         target.delete()
         caller.msg("|y%s has been unsummoned.|n" % name)
-        if caller.location:
-            caller.location.msg_contents("%s vanishes." % name, exclude=caller)
 
     def _do_rename(self, caller, rest):
         if "=" not in rest:
@@ -1618,11 +1632,18 @@ class CmdNpc(Command):
             caller.msg("|rThat is a player character.|n")
             return
         old = target.name
+        room_msg_pairs = []
+        if caller.location and caller.location == target.location and hasattr(caller.location, "contents_get"):
+            for v in caller.location.contents_get(content_type="character"):
+                if v in (caller, target):
+                    continue
+                old_d = target.get_display_name(v) if hasattr(target, "get_display_name") else old
+                room_msg_pairs.append((v, old_d))
         target.key = new_name
         target.save()
         caller.msg("|gYou know them as %s now.|n" % new_name)
-        if caller.location and caller.location == target.location:
-            caller.location.msg_contents("%s is now called %s." % (old, new_name), exclude=(caller, target))
+        for v, old_d in room_msg_pairs:
+            v.msg("%s is now called %s." % (old_d, new_name))
 
     def _do_attr(self, caller, rest):
         # @npc/attr <npc>/<attr>=<value>

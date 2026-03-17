@@ -37,6 +37,24 @@ UNCONSCIOUS_WAKE_MAX = 30   # seconds (endurance scales within this range)
 GRAPPLE_UNARMED_BONUS = 5
 
 
+def _combat_display_name(char, viewer):
+    """Display name for char as seen by viewer (sdesc/recog for Characters)."""
+    if char is None:
+        return "Someone"
+    if viewer is not None and hasattr(char, "get_display_name"):
+        out = char.get_display_name(viewer)
+        if out:
+            return out
+    return getattr(char, "name", None) or getattr(char, "key", None) or "Someone"
+
+
+try:
+    from world.combat import _combat_display_name as _combat_display_name_from_combat
+    _combat_display_name = _combat_display_name_from_combat
+except ImportError:
+    pass
+
+
 def _roll_result(character, stat_list, skill_name, modifier=0):
     """Return (result_string, final_result) from character's roll_check."""
     if not hasattr(character, "roll_check"):
@@ -67,20 +85,22 @@ def _resolve_grapple_callback(grappler_id, victim_id):
     if success:
         grappler.msg("|g%s|n" % msg)
         if victim != grappler:
-            victim.msg("|r%s has you locked in their grasp! You can try |wresist|n to break free.|n" % grappler.name)
-        if loc:
-            loc.msg_contents(
-                "%s locks %s in their grasp." % (grappler.name, victim.name),
-                exclude=(grappler, victim),
-            )
+            victim.msg("|r%s has you locked in their grasp! You can try |wresist|n to break free.|n" % _combat_display_name(grappler, victim))
+        if loc and hasattr(loc, "contents_get"):
+            for v in loc.contents_get(content_type="character"):
+                if v in (grappler, victim):
+                    continue
+                v.msg("%s locks %s in their grasp." % (_combat_display_name(grappler, v), _combat_display_name(victim, v)))
     else:
         grappler.msg("|r%s|n" % msg)
-        victim.msg("|gYou slip free of %s's grab!|n" % grappler.name)
-        if loc:
-            loc.msg_contents(
-                "%s grabs at %s but %s slips free." % (grappler.name, victim.name, victim.name),
-                exclude=(grappler, victim),
-            )
+        victim.msg("|gYou slip free of %s's grab!|n" % _combat_display_name(grappler, victim))
+        if loc and hasattr(loc, "contents_get"):
+            for v in loc.contents_get(content_type="character"):
+                if v in (grappler, victim):
+                    continue
+                gv = _combat_display_name(grappler, v)
+                vv = _combat_display_name(victim, v)
+                v.msg("%s grabs at %s but %s slips free." % (gv, vv, vv))
 
 
 def start_grapple_attempt(grappler, victim):
@@ -99,26 +119,31 @@ def start_grapple_attempt(grappler, victim):
     if grappler.location != victim.location:
         return False, "You need to be in the same place."
     try:
-        from world.death import is_flatlined, is_permanently_dead, is_character_logged_off
+        from world.death import is_flatlined, is_permanently_dead
         if is_flatlined(victim) or is_permanently_dead(victim):
             return False, "You cannot grapple the dead."
-        if is_character_logged_off(victim) and not getattr(victim.db, "is_npc", False):
-            return False, "You cannot grapple someone who is not here."
+        # Logged-off (sleeping) characters can be grappled and dragged, but not attacked in the grapple.
     except ImportError:
         pass
 
-    g_name = grappler.name
-    v_name = victim.name
-
-    # Phase 1: grappler sees lunge; room sees tense + lunge; target sees tense then lunge
-    grappler.msg("|rYou lunge towards %s!|n" % v_name)
-    victim.msg("|yYou see %s tense up!|n" % g_name)
-    victim.msg("|r%s lunges towards you!|n" % g_name)
+    # Phase 1: grappler sees lunge; room sees tense + lunge; target sees tense then lunge (per-viewer display names)
+    v_name_for_grappler = _combat_display_name(victim, grappler)
+    g_name_for_victim = _combat_display_name(grappler, victim)
+    grappler.msg("|rYou lunge towards %s!|n" % v_name_for_grappler)
+    victim.msg("|yYou see %s tense up!|n" % g_name_for_victim)
+    victim.msg("|r%s lunges towards you!|n" % g_name_for_victim)
     if grappler.location:
-        grappler.location.msg_contents(
-            "%s tenses up and lunges towards %s!" % (g_name, v_name),
-            exclude=(grappler, victim),
-        )
+        loc = grappler.location
+        if hasattr(loc, "contents_get"):
+            for v in loc.contents_get(content_type="character"):
+                if v in (grappler, victim):
+                    continue
+                v.msg("%s tenses up and lunges towards %s!" % (_combat_display_name(grappler, v), _combat_display_name(victim, v)))
+        else:
+            loc.msg_contents(
+                "%s tenses up and lunges towards %s!" % (_combat_display_name(grappler, None), _combat_display_name(victim, None)),
+                exclude=(grappler, victim),
+            )
 
     sec = random.uniform(GRAPPLE_DELAY_MIN, GRAPPLE_DELAY_MAX)
     delay(sec, _resolve_grapple_callback, grappler.id, victim.id)
@@ -151,7 +176,18 @@ def _resolve_third_party_grapple_callback(third_party_id, victim_id):
     if victim and hasattr(victim, "msg"):
         victim.msg("|y%s|n" % msg_victim)
     if msg_room and third_party.location:
-        third_party.location.msg_contents(msg_room, exclude=(third_party, victim, grappler))
+        loc = third_party.location
+        if hasattr(loc, "contents_get"):
+            if callable(msg_room):
+                for v in loc.contents_get(content_type="character"):
+                    if v in (third_party, victim, grappler):
+                        continue
+                    v.msg(msg_room(v))
+            else:
+                loc.msg_contents(msg_room, exclude=(third_party, victim, grappler))
+        elif msg_room:
+            fallback = msg_room(None) if callable(msg_room) else msg_room
+            loc.msg_contents(fallback, exclude=(third_party, victim, grappler))
 
 
 def start_grapple_third_party_attempt(third_party, victim):
@@ -170,20 +206,21 @@ def start_grapple_third_party_attempt(third_party, victim):
         return False, "You cannot grapple yourself."
     if third_party.location != victim.location or grappler.location != victim.location:
         return False, "You need to be in the same place."
-    tp_name = third_party.name
-    v_name = victim.name
-    g_name = grappler.name
+    v_name_for_tp = _combat_display_name(victim, third_party)
+    g_name_for_tp = _combat_display_name(grappler, third_party)
+    tp_name_for_v = _combat_display_name(third_party, victim)
+    v_name_for_g = _combat_display_name(victim, grappler)
     loc = third_party.location
     # Phase 1: lunge messages (third_party = you, victim = target, grappler = current holder)
-    third_party.msg("|rYou lunge towards %s, trying to pull them from %s's grasp!|n" % (v_name, g_name))
-    victim.msg("|yYou see %s tense up!|n" % tp_name)
-    victim.msg("|r%s lunges towards you!|n" % tp_name)
-    grappler.msg("|yYou see %s tense up and lunge towards %s!|n" % (tp_name, v_name))
-    if loc:
-        loc.msg_contents(
-            "%s tenses up and lunges towards %s!" % (tp_name, v_name),
-            exclude=(third_party, victim, grappler),
-        )
+    third_party.msg("|rYou lunge towards %s, trying to pull them from %s's grasp!|n" % (v_name_for_tp, g_name_for_tp))
+    victim.msg("|yYou see %s tense up!|n" % tp_name_for_v)
+    victim.msg("|r%s lunges towards you!|n" % tp_name_for_v)
+    grappler.msg("|yYou see %s tense up and lunge towards %s!|n" % (_combat_display_name(third_party, grappler), v_name_for_g))
+    if loc and hasattr(loc, "contents_get"):
+        for v in loc.contents_get(content_type="character"):
+            if v in (third_party, victim, grappler):
+                continue
+            v.msg("%s tenses up and lunges towards %s!" % (_combat_display_name(third_party, v), _combat_display_name(victim, v)))
     sec = random.uniform(GRAPPLE_DELAY_MIN, GRAPPLE_DELAY_MAX)
     delay(sec, _resolve_third_party_grapple_callback, third_party.id, victim.id)
     return True, None
@@ -206,11 +243,10 @@ def attempt_grapple(grappler, victim):
     if grappler.location != victim.location:
         return False, "You need to be in the same place."
     try:
-        from world.death import is_flatlined, is_permanently_dead, is_character_logged_off
+        from world.death import is_flatlined, is_permanently_dead
         if is_flatlined(victim) or is_permanently_dead(victim):
             return False, "You cannot grapple the dead."
-        if is_character_logged_off(victim) and not getattr(victim.db, "is_npc", False):
-            return False, "You cannot grapple someone who is not here."
+        # Logged-off (sleeping) characters can be grappled and dragged, but not attacked in the grapple.
     except ImportError:
         pass
 
@@ -240,7 +276,7 @@ def attempt_grapple(grappler, victim):
     for key in ("lying_on_table", "sitting_on", "lying_on"):
         if hasattr(victim.db, key) and getattr(victim.db, key) is not None:
             victim.attributes.remove(key)
-    return True, "You lock {} in your grasp.".format(victim.name)
+    return True, "You lock {} in your grasp.".format(_combat_display_name(victim, grappler))
 
 
 def _grapple_strike_ticker_id(grappler, victim):
@@ -285,9 +321,15 @@ def _execute_grapple_strike_tick(grappler_id=None, victim_id=None, **kwargs):
 
 
 def start_grapple_strike_ticker(grappler, victim):
-    """Start the recurring strangle ticker (every GRAPPLE_STRIKE_INTERVAL seconds)."""
+    """Start the recurring strangle ticker (every GRAPPLE_STRIKE_INTERVAL seconds). Not started for logged-off victims (drag only)."""
     if not grappler or not victim or getattr(grappler.db, "grappling", None) != victim:
         return
+    try:
+        from world.death import is_character_logged_off
+        if is_character_logged_off(victim) and not getattr(victim.db, "is_npc", False):
+            return
+    except ImportError:
+        pass
     idstring = _grapple_strike_ticker_id(grappler, victim)
     if not idstring:
         return
@@ -338,10 +380,11 @@ def attempt_grapple_third_party(third_party, victim):
     tp_result, tp_val = _roll_result(third_party, ["strength"], "unarmed", modifier=GRAPPLE_UNARMED_BONUS)
     g_result, g_val = _roll_result(grappler, ["strength"], "unarmed", modifier=GRAPPLE_UNARMED_BONUS)
     if tp_val <= g_val:
-        msg_room = "%s tries to grab %s from %s but %s bats their attempts away." % (
-            third_party.name, victim.name, grappler.name, grappler.name,
+        msg_room = lambda v: "%s tries to grab %s from %s but %s bats their attempts away." % (
+            _combat_display_name(third_party, v), _combat_display_name(victim, v),
+            _combat_display_name(grappler, v), _combat_display_name(grappler, v),
         )
-        return False, "They bat away your attempts.", "They try to grab %s from you but you bat their attempts away." % victim.name, "%s tries to grab you from %s but %s bats their attempts away." % (third_party.name, grappler.name, grappler.name), msg_room
+        return False, "They bat away your attempts.", "They try to grab %s from you but you bat their attempts away." % _combat_display_name(victim, grappler), "%s tries to grab you from %s but %s bats their attempts away." % (_combat_display_name(third_party, victim), _combat_display_name(grappler, victim), _combat_display_name(grappler, victim)), msg_room
 
     # Success: transfer grapple. Stop any strangle ticker on the old grappler first.
     stop_grapple_strike_ticker(grappler, victim)
@@ -357,8 +400,8 @@ def attempt_grapple_third_party(third_party, victim):
     victim.db.grapple_hold_strength = HOLD_STRENGTH_BASE + (str_display * HOLD_STRENGTH_PER_STR // 10)
     victim.db.grapple_resist_cooldown = time.time()
 
-    msg_room = "%s grabs %s from %s and locks them in their grasp!" % (third_party.name, victim.name, grappler.name)
-    return True, "You grab %s from %s and lock them in your grasp!" % (victim.name, grappler.name), "%s grabs %s from you!" % (third_party.name, victim.name), "%s grabs you from %s and has you in their grasp!" % (third_party.name, grappler.name), msg_room
+    msg_room = lambda v: "%s grabs %s from %s and locks them in their grasp!" % (_combat_display_name(third_party, v), _combat_display_name(victim, v), _combat_display_name(grappler, v))
+    return True, "You grab %s from %s and lock them in your grasp!" % (_combat_display_name(victim, third_party), _combat_display_name(grappler, third_party)), "%s grabs %s from you!" % (_combat_display_name(third_party, grappler), _combat_display_name(victim, grappler)), "%s grabs you from %s and has you in their grasp!" % (_combat_display_name(third_party, victim), _combat_display_name(grappler, victim)), msg_room
 
 
 def release_grapple(grappler):
@@ -373,7 +416,7 @@ def release_grapple(grappler):
     for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
         if hasattr(victim.db, key):
             victim.attributes.remove(key)
-    return True, "You release {}.".format(victim.name)
+    return True, "You release {}.".format(_combat_display_name(victim, grappler))
 
 
 def release_grapple_forced(grappler, room_message=None):
@@ -393,7 +436,18 @@ def release_grapple_forced(grappler, room_message=None):
         if hasattr(victim.db, key):
             victim.attributes.remove(key)
     if room_message and grappler.location:
-        grappler.location.msg_contents(room_message, exclude=(grappler, victim))
+        loc = grappler.location
+        if hasattr(loc, "contents_get"):
+            if callable(room_message):
+                for v in loc.contents_get(content_type="character"):
+                    if v in (grappler, victim):
+                        continue
+                    v.msg(room_message(v))
+            else:
+                loc.msg_contents(room_message, exclude=(grappler, victim))
+        elif room_message:
+            fallback = room_message(None) if callable(room_message) else room_message
+            loc.msg_contents(fallback, exclude=(grappler, victim))
     if hasattr(victim, "msg"):
         victim.msg("You are no longer held.")
 
@@ -437,8 +491,8 @@ def attempt_resist(victim):
         for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
             if hasattr(victim.db, key):
                 victim.attributes.remove(key)
-        return True, "You wrench free of {}'s grasp!".format(grappler.name), "{} breaks free of your grasp!".format(victim.name)
-    return False, "You strain but cannot break free yet. Your efforts weaken their hold.", "{} struggles but you keep hold.".format(victim.name)
+        return True, "You wrench free of {}'s grasp!".format(_combat_display_name(grappler, victim)), "{} breaks free of your grasp!".format(_combat_display_name(victim, grappler))
+    return False, "You strain but cannot break free yet. Your efforts weaken their hold.", "{} struggles but you keep hold.".format(_combat_display_name(victim, grappler))
 
 
 def is_unconscious(character):
@@ -486,11 +540,11 @@ def _wake_unconscious_callback(character_id):
     except Exception:
         pass
     character.msg("|gYou groggily come to.|n")
-    if character.location:
-        character.location.msg_contents(
-            "%s groggily comes to." % character.name,
-            exclude=(character,),
-        )
+    if character.location and hasattr(character.location, "contents_get"):
+        for v in character.location.contents_get(content_type="character"):
+            if v == character:
+                continue
+            v.msg("%s groggily comes to." % _combat_display_name(character, v))
 
 
 def set_unconscious(character):
@@ -515,6 +569,7 @@ def grapple_strike(grappler, victim):
     """
     Attack the grappled victim: grappler spends stamina, victim loses STAMINA_DRAIN_GRAPPLE_STRIKE.
     If victim stamina hits 0, they are knocked out (unconscious), grapple is released, wake is scheduled.
+    Logged-off (sleeping) victims cannot be attacked in the grapple — drag only.
     Returns (success: bool, message: str).
     """
     if not grappler or not victim:
@@ -522,6 +577,12 @@ def grapple_strike(grappler, victim):
     held = getattr(grappler.db, "grappling", None)
     if held != victim:
         return False, "You are not holding them."
+    try:
+        from world.death import is_character_logged_off
+        if is_character_logged_off(victim) and not getattr(victim.db, "is_npc", False):
+            return False, "You can drag them, but you cannot attack someone who is not here."
+    except ImportError:
+        pass
     try:
         from world.stamina import is_exhausted, spend_stamina, STAMINA_COST_GRAPPLE_STRIKE
         if is_exhausted(grappler):
@@ -546,8 +607,8 @@ def grapple_strike(grappler, victim):
     drain = min(v_cur, STAMINA_DRAIN_GRAPPLE_STRIKE)
     victim.db.current_stamina = max(0, v_cur - STAMINA_DRAIN_GRAPPLE_STRIKE)
 
-    g_name = grappler.name
-    v_name = victim.name
+    v_name_for_g = _combat_display_name(victim, grappler)
+    g_name_for_v = _combat_display_name(grappler, victim)
     loc = grappler.location
 
     if victim.db.current_stamina <= 0:
@@ -559,19 +620,21 @@ def grapple_strike(grappler, victim):
             if hasattr(victim.db, key):
                 victim.attributes.remove(key)
         set_unconscious(victim)
-        grappler.msg("|rYou choke %s until they go limp. They're out cold.|n" % v_name)
-        if loc:
-            loc.msg_contents(
-                "%s chokes %s until they go limp. %s is out cold." % (g_name, v_name, v_name),
-                exclude=(grappler, victim),
-            )
+        grappler.msg("|rYou choke %s until they go limp. They're out cold.|n" % v_name_for_g)
+        if loc and hasattr(loc, "contents_get"):
+            for v in loc.contents_get(content_type="character"):
+                if v in (grappler, victim):
+                    continue
+                gv = _combat_display_name(grappler, v)
+                vv = _combat_display_name(victim, v)
+                v.msg("%s chokes %s until they go limp. %s is out cold." % (gv, vv, vv))
         return True, "They go limp. Out cold."
 
-    grappler.msg("|rYou tighten your grip; %s gasps and sags.|n" % v_name)
-    victim.msg("|r%s's grip tightens; you gasp, strength fading.|n" % g_name)
-    if loc:
-        loc.msg_contents(
-            "%s strangles %s." % (g_name, v_name),
-            exclude=(grappler, victim),
-        )
+    grappler.msg("|rYou tighten your grip; %s gasps and sags.|n" % v_name_for_g)
+    victim.msg("|r%s's grip tightens; you gasp, strength fading.|n" % g_name_for_v)
+    if loc and hasattr(loc, "contents_get"):
+        for v in loc.contents_get(content_type="character"):
+            if v in (grappler, victim):
+                continue
+            v.msg("%s strangles %s." % (_combat_display_name(grappler, v), _combat_display_name(victim, v)))
     return True, "You tighten your grip."
