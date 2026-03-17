@@ -114,7 +114,7 @@ class MatrixAvatar(DefaultCharacter):
         """
         Get the description for this Matrix avatar.
 
-        Uses the dmas attribute if set, otherwise falls back to desc.
+        Uses the general_desc attribute (set via @dmas command) if set, otherwise falls back to desc.
 
         Args:
             looker: The object looking at this avatar
@@ -122,4 +122,4 @@ class MatrixAvatar(DefaultCharacter):
         Returns:
             str: The description text
         """
-        return self.db.dmas or self.db.desc or "A generic Matrix avatar."
+        return self.db.general_desc or self.db.desc or "A generic Matrix avatar."

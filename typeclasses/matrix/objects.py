@@ -8,7 +8,7 @@ MatrixObject - Virtual objects that exist only in cyberspace (programs, data, be
 """
 
 from typeclasses.objects import Object
-from .mixins import NetworkedMixin
+from typeclasses.mixins.networked import NetworkedMixin
 
 
 class NetworkedObject(NetworkedMixin, Object):
