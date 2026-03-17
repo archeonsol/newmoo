@@ -144,7 +144,8 @@ class Character(RoleplayMixin, MedicalMixin, RPGCharacterMixin, DefaultCharacter
         If this returns False, the move is cancelled.
 
         Block normal movement when sitting/lying (must stand first).
-        Allow teleportation (@tel, @goto, etc) to clear state automatically.
+        Allow forced movement (teleport, grapple drag, etc) but notify furniture
+        and clear state automatically.
         """
         move_type = kwargs.get("move_type", "move")
 
@@ -160,9 +161,14 @@ class Character(RoleplayMixin, MedicalMixin, RPGCharacterMixin, DefaultCharacter
                 self.msg("You need to get up first.")
             return False
 
-        # Allow teleportation, but clear state
+        # For forced movement (teleport, grapple, etc), notify furniture and clear state
         if is_seated:
+            sitting_on = self.db.sitting_on
+            # Notify furniture of forced removal (e.g., dive rig jack-out)
+            if sitting_on and hasattr(sitting_on, "handle_forced_removal"):
+                sitting_on.handle_forced_removal(self)
             del self.db.sitting_on
+
         if self.db.lying_on:
             del self.db.lying_on
         if self.db.lying_on_table:
