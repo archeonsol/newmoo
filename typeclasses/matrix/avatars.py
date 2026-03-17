@@ -93,7 +93,7 @@ class MatrixAvatar(DefaultCharacter):
             severity (int): Severity level (JACKOUT_NORMAL, JACKOUT_EMERGENCY, JACKOUT_FORCED)
         """
         if self.db.real_character:
-            self.msg(f"|rJacking out:|n {reason}")
+            self.msg(f"|rDISCO:|n {reason}")
 
             # Apply consequences based on severity
             if severity >= JACKOUT_FORCED:
@@ -103,7 +103,6 @@ class MatrixAvatar(DefaultCharacter):
                 # TODO: Apply minor penalties (disorientation, stamina loss, etc.)
                 pass
 
-            # TODO: Transfer collected data items back to real character
             # TODO: Return control to real character
 
         # Mark as idle for cleanup later
