@@ -10,7 +10,7 @@ from evennia.utils.create import create_object
 from typeclasses.seats import Seat
 from typeclasses.matrix.objects import NetworkedObject
 from typeclasses.matrix.mixins import PuppetRigMixin
-from typeclasses.matrix.avatars import MatrixAvatar, JACKOUT_FORCED, JACKOUT_EMERGENCY
+from typeclasses.matrix.avatars import MatrixAvatar, JACKOUT_FORCED, JACKOUT_EMERGENCY, JACKOUT_FATAL
 
 
 class DiveRig(PuppetRigMixin, Seat, NetworkedObject):
@@ -42,6 +42,7 @@ class DiveRig(PuppetRigMixin, Seat, NetworkedObject):
         self.db.normal_jackout_msg = "|cYou feel your awareness being drawn back through the Matrix and into your body.|n"
         self.db.emergency_jackout_msg = "|yYou feel your awareness being urgently pulled back through the Matrix...|n"
         self.db.forced_jackout_msg = "|rYou feel your consciousness being violently ripped back through the Matrix!|n"
+        self.db.fatal_jackout_msg = "|rThe world fractures. Your avatar is dying. The Matrix ejects your consciousness like poison—|n"
 
     def jack_in(self, character):
         """

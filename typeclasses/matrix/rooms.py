@@ -62,12 +62,29 @@ class MatrixNode(Room):
         """
         Called when an object enters this node.
 
+        Prevents dropping items in ephemeral device nodes.
+
         Future implementation will add:
         - Security clearance checks
         - ICE alerts
         - Access logging
         """
-        super().at_object_receive(moved_obj, source_location, **kwargs)
+        # Prevent dropping items in ephemeral nodes
+        if self.db.ephemeral:
+            # Allow avatars to enter
+            if moved_obj.has_account:
+                return super().at_object_receive(moved_obj, source_location, **kwargs)
+
+            # Prevent items from being dropped
+            if source_location and source_location.has_account:
+                # It's being dropped by a character/avatar
+                source_location.msg(
+                    "You cannot drop items in ephemeral device nodes. "
+                    "Use programs like infil.exe to save data to device storage."
+                )
+                return False
+
+        return super().at_object_receive(moved_obj, source_location, **kwargs)
 
         # TODO: Security checks for future implementation
         # if self.db.security_level > 0:

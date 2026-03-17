@@ -7,6 +7,7 @@ PuppetRigMixin - Handles staged puppet transitions and connection validation
 """
 
 from evennia.utils import delay
+from typeclasses.matrix.avatars import JACKOUT_FATAL
 
 
 class PuppetRigMixin:
@@ -134,7 +135,10 @@ class PuppetRigMixin:
         target.db.conscious = False
 
         # Different messages based on severity
-        if severity >= 2:  # FORCED
+        if severity >= JACKOUT_FATAL:  # FATAL
+            msg = getattr(self.db, 'fatal_jackout_msg',
+                         "|rThe world fractures. The Matrix ejects your consciousness like poison—|n")
+        elif severity >= 2:  # FORCED
             msg = getattr(self.db, 'forced_jackout_msg',
                          "|rYou feel your consciousness being violently ripped back!|n")
         elif severity >= 1:  # EMERGENCY
@@ -147,9 +151,9 @@ class PuppetRigMixin:
         target.msg(msg)
 
         # Stage 2: After another second, puppet swap
-        delay(1, self._puppet_out_stage2, character, target, account)
+        delay(1, self._puppet_out_stage2, character, target, severity, account)
 
-    def _puppet_out_stage2(self, character, target, account):
+    def _puppet_out_stage2(self, character, target, severity, account):
         """Stage 2: Switch puppet back to character."""
         if account:
             sessions = target.sessions.all()
@@ -157,13 +161,23 @@ class PuppetRigMixin:
             if session:
                 account.puppet_object(session, character)
 
-                # Stage 3: After another second, regain consciousness
-                delay(1, self._puppet_out_stage3, character)
+                # Stage 3: After another second, regain consciousness (or die)
+                delay(1, self._puppet_out_stage3, character, severity)
 
-    def _puppet_out_stage3(self, character):
-        """Stage 3: Character regains consciousness."""
-        character.db.conscious = True
-        character.msg("|rDISCO.|n")
+    def _puppet_out_stage3(self, character, severity=0):
+        """Stage 3: Character regains consciousness (or dies)."""
+        if severity >= JACKOUT_FATAL:
+            # Fatal jackout - character dies
+            # TODO: Implement death system
+            character.msg("|rDISCO.|n")
+            character.msg("|r....|n")
+            # For now, just regain consciousness with severe warning
+            character.db.conscious = True
+            character.msg("|rYou shouldn't be alive.|n")
+        else:
+            character.db.conscious = True
+            character.msg("|rDISCO.|n")
+            character.execute_cmd("look")
 
         # Show message to room where character's body is
         if character.location:

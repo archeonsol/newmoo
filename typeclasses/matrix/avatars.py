@@ -12,6 +12,7 @@ from evennia import DefaultCharacter
 JACKOUT_NORMAL = 0      # Clean logout, no penalties
 JACKOUT_EMERGENCY = 1   # Uncontrolled disconnect, minor penalties
 JACKOUT_FORCED = 2      # Violent disconnect, physical damage
+JACKOUT_FATAL = 3       # Unsurvivable... Sorry
 
 
 class MatrixAvatar(DefaultCharacter):
@@ -96,10 +97,22 @@ class MatrixAvatar(DefaultCharacter):
             self.msg(f"|rDISCO:|n {reason}")
 
             # Apply consequences based on severity
-            if severity >= JACKOUT_FORCED:
+            if severity >= JACKOUT_FATAL:
+                # Fatal jackout - avatar death causes real death
+                # The dying consciousness is violently shoved back into the body
+                self.msg("|rYour avatar dissolves into static and void.|n")
+                self.msg("|rFor a brief, terrible moment, you see reality again—|n")
+                self.msg("|rYour body in the rig, convulsing—|n")
+                self.msg("|rThen nothing.|n")
+                # TODO: Kill the real character
+                # TODO: Apply fatal consequences (permadeath or severe penalty)
+                pass
+            elif severity >= JACKOUT_FORCED:
+                # Violent disconnect - physical damage
                 # TODO: Apply physical damage to real character
                 pass
             elif severity >= JACKOUT_EMERGENCY:
+                # Uncontrolled disconnect - minor penalties
                 # TODO: Apply minor penalties (disorientation, stamina loss, etc.)
                 pass
 
