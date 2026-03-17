@@ -601,7 +601,7 @@ class CmdMatrixLink(Command):
         mlink              (view current router)
         mlink/clear        (remove router link)
 
-    Sets the network_router attribute on the current room, which determines
+    Sets the network_router attribute (dbref) on the current room, which determines
     whether networked devices in this room can connect to the Matrix.
 
     Example:
@@ -611,6 +611,33 @@ class CmdMatrixLink(Command):
     locks = "cmd:perm(Builder)"
     help_category = "Building"
     switch_options = ("clear",)
+
+    def parse(self):
+        """
+        Parse the command to extract switches manually.
+        """
+        super().parse()
+
+        # Extract switches from raw_string
+        # Format: "mlink/switch args"
+        raw = self.raw_string or ""
+        self.switches = []
+
+        # Find the command and switches
+        parts = raw.split(None, 1)  # Split on first whitespace
+        if parts:
+            cmd_part = parts[0]  # e.g., "mlink/clear"
+            # Split by / to get switches
+            segments = cmd_part.split('/')
+            if len(segments) > 1:
+                # First segment is the command, rest are switches
+                self.switches = segments[1:]
+
+            # Update args to not include switches
+            if len(parts) > 1:
+                self.args = parts[1]
+            else:
+                self.args = ""
 
     def func(self):
         caller = self.caller
@@ -624,9 +651,15 @@ class CmdMatrixLink(Command):
 
         # View current router
         if not args and not clear:
-            current = getattr(loc.db, 'network_router', None)
-            if current:
-                caller.msg(f"This room is linked to router: |w{current}|n")
+            current_dbref = getattr(loc.db, 'network_router', None)
+            if current_dbref:
+                from evennia.objects.models import ObjectDB
+                try:
+                    router = ObjectDB.objects.get(pk=current_dbref)
+                    caller.msg(f"This room is linked to router: |w{router.key}|n (#{router.id})")
+                except ObjectDB.DoesNotExist:
+                    caller.msg(f"This room is linked to a router that no longer exists (#{current_dbref}).")
+                    caller.msg("Use |wmlink/clear|n to remove the broken link.")
             else:
                 caller.msg("This room has no network router link.")
             return
@@ -637,7 +670,23 @@ class CmdMatrixLink(Command):
             caller.msg("Network router link cleared from this room.")
             return
 
-        # Set router
-        router_key = args
-        loc.db.network_router = router_key
-        caller.msg(f"Room linked to router |w{router_key}|n. Networked devices here will use this router.")
+        # Set router - search for it and store dbref
+        from evennia.utils.search import search_object
+        from typeclasses.matrix.objects import Router
+
+        results = search_object(args, typeclass=Router)
+
+        if not results:
+            caller.msg(f"Could not find router '{args}'.")
+            return
+
+        if len(results) > 1:
+            caller.msg(f"Multiple routers found matching '{args}':")
+            for i, router in enumerate(results, 1):
+                caller.msg(f"  {i}. {router.key} (#{router.id}) in {router.location.key if router.location else 'nowhere'}")
+            caller.msg("Please be more specific or use the dbref.")
+            return
+
+        router = results[0]
+        loc.db.network_router = router.pk  # Store dbref, not name
+        caller.msg(f"Room linked to router |w{router.key}|n (#{router.id}). Networked devices here will use this router.")

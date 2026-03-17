@@ -75,31 +75,33 @@ Use the `mlink` command to connect physical rooms to Matrix routers.
 # In meatspace room you want to connect
 mlink Downtown Router
 
-# Or with full key if there are multiple routers with similar names
-mlink Downtown Router#15
+# Or with dbref if there are multiple routers with similar names
+mlink #123
 ```
 
-This sets `room.db.network_router = "Downtown Router"` on the current room.
+This sets `room.db.network_router = <router_dbref>` on the current room.
 
 ### Verifying the Link
 
 ```
 # Quick method - just run mlink with no arguments
 mlink
-# Output: This room is linked to router: Downtown Router
+# Output: This room is linked to router: Downtown Router (#123)
 
-# Or check the attribute directly
+# Or check the attribute directly (shows dbref)
 @py here.db.network_router
-# Should output: "Downtown Router"
+# Should output: 123 (the router's dbref)
 ```
 
 ### Unlinking
 
 ```
+mlink/clear
+# or
 @py here.db.network_router = None
 ```
 
-Or set it to a different router to change the connection.
+Or use `mlink <router>` to change the connection to a different router.
 
 ## Creating Networked Devices
 
@@ -255,7 +257,7 @@ Some networks are completely isolated with no connections to the main Matrix.
 **Check**: Is the device's room linked to the router?
 ```
 @tel <device room>
-@py here.db.network_router
+mlink
 ```
 
 **Fix**: Link the room
@@ -267,7 +269,7 @@ mlink <router name>
 
 **Check 1**: Is the dive rig's room linked to a router?
 ```
-@py here.db.network_router
+mlink
 ```
 
 **Check 2**: Is the router online?
@@ -301,7 +303,7 @@ mlink <router>
 **Check 1**: Is device in a room linked to the router you're using?
 ```
 @tel <device room>
-@py here.db.network_router
+mlink
 ```
 
 **Check 2**: Does the device have the NetworkedMixin/NetworkedObject typeclass?
@@ -319,6 +321,8 @@ By default, `route list` shows room names as cell names. You can customize this:
 ```
 
 Now when using `route list`, that room will appear as "Downtown Sector Alpha" instead of the actual room name.
+
+**Note**: The `network_router` attribute stores the router's dbref (integer), not its name. This makes links more reliable and portable even if routers are renamed.
 
 This is useful for:
 - Grouping multiple rooms under one cell name

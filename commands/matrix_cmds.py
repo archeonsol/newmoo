@@ -282,8 +282,8 @@ class CmdRoute(Command):
         all_rooms = Room.objects.all()
 
         for room in all_rooms:
-            router_key = getattr(room.db, 'network_router', None)
-            if router_key == router.key:
+            router_dbref = getattr(room.db, 'network_router', None)
+            if router_dbref == router.pk:
                 cell_name = getattr(room.db, 'cell_name', room.key)
 
                 # Get devices in this room
@@ -316,8 +316,8 @@ class CmdRoute(Command):
         actual_cell_name = None
 
         for room in all_rooms:
-            router_key = getattr(room.db, 'network_router', None)
-            if router_key == router.key:
+            router_dbref = getattr(room.db, 'network_router', None)
+            if router_dbref == router.pk:
                 room_cell_name = getattr(room.db, 'cell_name', room.key)
 
                 # Match cell name (case-insensitive partial match)
@@ -350,8 +350,8 @@ class CmdRoute(Command):
         found_device = None
 
         for room in all_rooms:
-            router_key = getattr(room.db, 'network_router', None)
-            if router_key == router.key:
+            router_dbref = getattr(room.db, 'network_router', None)
+            if router_dbref == router.pk:
                 for obj in room.contents:
                     if isinstance(obj, NetworkedObject):
                         # Match device name (case-insensitive partial match)
