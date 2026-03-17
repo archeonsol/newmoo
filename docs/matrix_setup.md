@@ -5,11 +5,13 @@ This guide explains how to set up the Matrix network infrastructure, including r
 ## Overview
 
 The Matrix network consists of:
-- **Nodes**: Matrix rooms (public spaces, meeting points, whatever)
-- **Relays**: Persistent Matrix rooms that connect to meatspace via `routers`
-- **Routers**: Virtual objects that provide network connectivity
+- **Nodes**: Any Matrix room
+- **Relay Nodes**: Matrix rooms where routers live (connect to meatspace, no actual difference. Just like if you put a router in a room you should name it "Relay Something". The R in Cortex stands for Relay!)
+- **Routers**: Virtual objects in relays that provide network connectivity
 - **Networked Devices**: Physical objects with Matrix interfaces
 - **Device Clusters**: Ephemeral 2-room structures created on access
+
+Note: Both relay nodes and spine nodes are `MatrixNode` objects. The distinction is just organizational - relays contain routers and connect to meatspace, while spines are for navigation and socializing.
 
 ## Quick Start Checklist
 
