@@ -23,8 +23,15 @@ def router_access_points(caller, raw_string, **kwargs):
     """
     router = kwargs.get("router")
     if not router:
+        # Try to get from menu storage
+        router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+    if not router:
         caller.msg("Error: No router found.")
         return None
+
+    # Store router in menu for other nodes
+    if hasattr(caller.ndb, '_evmenu'):
+        caller.ndb._evmenu.router = router
 
     # Find all rooms linked to this router
     from evennia.objects.models import ObjectDB
@@ -64,7 +71,7 @@ def router_access_points(caller, raw_string, **kwargs):
 
         options.append({
             "desc": f"Access {ap_name}",
-            "goto": (_access_point_devices, {"router": router, "room": room})
+            "goto": ("access_point_devices", {"room": room})
         })
 
     text += "\n|xq|n. Exit router interface"
@@ -78,18 +85,19 @@ def router_access_points(caller, raw_string, **kwargs):
     return text, options
 
 
-def _access_point_devices(caller, raw_string, **kwargs):
+def access_point_devices(caller, raw_string, **kwargs):
     """
     Show all networked devices in a specific access point.
 
     Displays devices with their type and allows routing to their interface.
     """
-    router = kwargs.get("router")
+    # Get router from menu storage
+    router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
     room = kwargs.get("room")
 
     if not router or not room:
         caller.msg("Error: Missing router or room data.")
-        return "router_access_points", {"router": router}
+        return "router_access_points"
 
     # Find all networked devices in this room
     devices = []
@@ -105,7 +113,7 @@ def _access_point_devices(caller, raw_string, **kwargs):
         return text, [{
             "key": ("b", "back"),
             "desc": "Back",
-            "goto": ("router_access_points", {"router": router})
+            "goto": "router_access_points"
         }]
 
     # Sort devices by key
@@ -129,7 +137,7 @@ def _access_point_devices(caller, raw_string, **kwargs):
 
         options.append({
             "desc": f"Route to {device_name}",
-            "goto": (_route_to_device, {"router": router, "room": room, "device": device})
+            "goto": ("route_to_device", {"device": device})
         })
 
     text += "\n|xb|n. Back to access points"
@@ -137,26 +145,26 @@ def _access_point_devices(caller, raw_string, **kwargs):
     options.append({
         "key": ("b", "back"),
         "desc": "Back",
-        "goto": ("router_access_points", {"router": router})
+        "goto": "router_access_points"
     })
 
     return text, options
 
 
-def _route_to_device(caller, raw_string, **kwargs):
+def route_to_device(caller, raw_string, **kwargs):
     """
     Route to a specific device's interface.
 
     Creates the device's ephemeral vestibule and interface rooms,
     then teleports the caller to the vestibule.
     """
-    router = kwargs.get("router")
-    room = kwargs.get("room")
+    # Get router from menu storage
+    router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
     device = kwargs.get("device")
 
     if not device:
         caller.msg("Error: Device not found.")
-        return "router_access_points", {"router": router}
+        return "router_access_points"
 
     caller.msg(f"|cInitiating connection to {device.key}...|n")
 
