@@ -55,7 +55,8 @@ class MatrixNode(Room):
         """Matrix node names use different coloring to distinguish from meatspace."""
         name = self.get_display_name(looker, **kwargs)
         extra = self.get_extra_display_name_info(looker, **kwargs) or ""
-        return f"{self.matrix_name_color}{name}{extra}|n"
+        ephemeral_tag = " |y[Ephemeral]|n" if self.db.ephemeral else ""
+        return f"{self.matrix_name_color}{name}{extra}{ephemeral_tag}|n"
 
     def at_object_receive(self, moved_obj, source_location, **kwargs):
         """

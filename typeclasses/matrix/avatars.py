@@ -109,3 +109,17 @@ class MatrixAvatar(DefaultCharacter):
         # Mark as idle for cleanup later
         self.db.idle = True
         self.db.idle_since = None  # TODO: Set timestamp when we implement grace period
+
+    def get_display_desc(self, looker, **kwargs):
+        """
+        Get the description for this Matrix avatar.
+
+        Uses the dmas attribute if set, otherwise falls back to desc.
+
+        Args:
+            looker: The object looking at this avatar
+
+        Returns:
+            str: The description text
+        """
+        return self.db.dmas or self.db.desc or "A generic Matrix avatar."
