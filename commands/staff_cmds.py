@@ -1130,6 +1130,10 @@ class CmdSpawnSeat(Command):
     """
     Create a seat (chair, couch, bench) in the room. Builder+.
     Usage: spawnseat [name]
+
+    Capacity = how many people can sit (each person takes 1 slot).
+    Default capacity is 1. Use @set <seat>/capacity = <number> for larger furniture.
+    Use @set <seat>/room_pose = <text> to change how it appears in room look.
     """
     key = "spawnseat"
     aliases = ["spawn seat", "spawn chair", "spawn couch"]
@@ -1142,8 +1146,9 @@ class CmdSpawnSeat(Command):
         from evennia.utils.create import create_object
         try:
             from typeclasses.seats import Seat
-            create_object("typeclasses.seats.Seat", key=name, location=caller.location)
+            seat = create_object("typeclasses.seats.Seat", key=name, location=caller.location)
             caller.msg("|gSeat |w%s|n created here. Players can |wsit on %s|n.|n" % (name, name))
+            caller.msg("|yUse |w@set %s/capacity = <number>|y for capacity, |w@set %s/room_pose = <text>|y for appearance.|n" % (name, name))
         except Exception as e:
             caller.msg("|rCould not create seat: %s|n" % e)
 
@@ -1152,6 +1157,13 @@ class CmdSpawnBed(Command):
     """
     Create a bed (or cot, sofa) in the room. Builder+.
     Usage: spawnbed [name]
+
+    Players can sit OR lie on beds. Capacity uses slots: sitting = 1 slot, lying = 3 slots.
+    Default capacity is 1. Recommended: single bed = 4, double bed = 7, couch = 4.
+    A couch (capacity 4) can fit: 4 sitting, OR 1 lying + 1 sitting.
+    A single bed (capacity 4) can fit: 4 sitting, OR 1 lying + 1 sitting.
+    A double bed (capacity 7) can fit: 7 sitting, OR 2 lying + 1 sitting.
+    Use @set <bed>/capacity = <number> and @set <bed>/room_pose = <text> to customize.
     """
     key = "spawnbed"
     aliases = ["spawn bed", "spawn cot"]
@@ -1164,8 +1176,9 @@ class CmdSpawnBed(Command):
         from evennia.utils.create import create_object
         try:
             from typeclasses.seats import Bed
-            create_object("typeclasses.seats.Bed", key=name, location=caller.location)
-            caller.msg("|gBed |w%s|n created here. Players can |wlie on %s|n.|n" % (name, name))
+            bed = create_object("typeclasses.seats.Bed", key=name, location=caller.location)
+            caller.msg("|gBed |w%s|n created here. Players can |wsit on %s|n or |wlie on %s|n.|n" % (name, name, name))
+            caller.msg("|yUse |w@set %s/capacity = <number>|y for capacity, |w@set %s/room_pose = <text>|y for appearance.|n" % (name, name))
         except Exception as e:
             caller.msg("|rCould not create bed: %s|n" % e)
 

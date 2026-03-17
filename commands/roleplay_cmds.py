@@ -1511,18 +1511,20 @@ class CmdSit(Command):
         if not args:
             caller.msg("Sit on what? Usage: sit <seat>")
             return
-        from typeclasses.seats import Seat
-        seat = caller.search(args, location=caller.location)
-        if not seat:
+        from typeclasses.seats import Seat, Bed
+        obj = caller.search(args, location=caller.location)
+        if not obj:
             return
-        if not isinstance(seat, Seat):
-            caller.msg("You can only sit on a chair, couch, or similar seat.")
+        # Can sit on Seat or Bed
+        if not isinstance(obj, (Seat, Bed)):
+            caller.msg("You can only sit on furniture like chairs, couches, or beds.")
             return
-        if seat.get_sitter():
-            caller.msg("Someone is already sitting there.")
+        # Check capacity (sitting takes 1 slot)
+        if not obj.has_room(posture="sitting"):
+            caller.msg("There's no room left to sit there.")
             return
-        caller.db.sitting_on = seat
-        sname = seat.get_display_name(caller)
+        caller.db.sitting_on = obj
+        sname = obj.get_display_name(caller)
         caller.msg("|wYou sit down on %s.|n" % sname)
         if caller.location and hasattr(caller.location, "contents_get"):
             for v in caller.location.contents_get(content_type="character"):
@@ -1566,8 +1568,9 @@ class CmdLieOnTable(Command):
                         continue
                     v.msg("%s lies down on the operating table." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))
         elif isinstance(obj, Bed):
-            if obj.get_occupant():
-                caller.msg("Someone is already lying there.")
+            # Check capacity (lying takes 3 slots)
+            if not obj.has_room(posture="lying"):
+                caller.msg("There's no room left on that bed.")
                 return
             caller.db.lying_on = obj
             bname = obj.get_display_name(caller)
