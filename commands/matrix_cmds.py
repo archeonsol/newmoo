@@ -244,14 +244,8 @@ class CmdRoute(Command):
             return
 
         # Search for router in current location
-        caller.msg(f"|xDEBUG: Searching for '{router_name}' in {caller.location}|n")
         router = caller.search(router_name, location=caller.location)
-        caller.msg(f"|xDEBUG: Search returned: {router} (type: {type(router).__name__})|n")
-        if not router:
-            caller.msg("|xDEBUG: Router is None/False|n")
-            return
 
-        caller.msg(f"|xDEBUG: Checking isinstance: {isinstance(router, Router)}|n")
         if not isinstance(router, Router):
             caller.msg("That is not a router.")
             return
@@ -268,6 +262,7 @@ class CmdRoute(Command):
             startnode="router_access_points",
             startnode_input=("", {"router": router}),
             cmdset_mergetype="Union",
+            cmd_on_exit=None,  # Suppress auto-look on menu exit
         )
 
     def route_back(self, caller):

@@ -166,7 +166,7 @@ def route_to_device(caller, raw_string, **kwargs):
         caller.msg("Error: Device not found.")
         return "router_access_points"
 
-    caller.msg(f"|cInitiating connection to {device.key}...|n")
+    from evennia.utils import delay
 
     # Get or create the device's ephemeral cluster
     try:
@@ -188,29 +188,41 @@ def route_to_device(caller, raw_string, **kwargs):
         caller.msg(f"|rConnection failed: Incomplete interface cluster.|n")
         return None
 
-    # Move caller to vestibule
-    caller.msg(f"|gConnection established.|n")
-    caller.msg(f"|cRouting to {device.key} interface...|n")
+    # Get router and access point info for link path
+    router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+    router_name = router.key if router else "unknown"
+    access_point_name = device.location.key if device.location else "unknown"
+    link_path = f"link://{router_name}/{access_point_name}/{device.key}"
 
-    # Announce departure to current room
-    if caller.location:
-        caller.location.msg_contents(
-            f"{caller.key} disappears in a flicker of data.",
+    # Progressive connection messages with delays
+    caller.msg(f"|cResolving spanning tree...|n")
+
+    def _link_established():
+        caller.msg(f"|gLink established.|n")
+        delay(0.8, _route_to_device)
+
+    def _route_to_device():
+        caller.msg(f"|cRouting to |w{link_path}|c...|n")
+        delay(0.8, _do_move)
+
+    def _do_move():
+        # Announce departure to current room
+        if caller.location:
+            caller.location.msg_contents(
+                f"{caller.key} disappears in a flicker of data.",
+                exclude=[caller]
+            )
+
+        # Move to vestibule (let Evennia handle auto-look)
+        caller.move_to(vestibule)
+
+        # Announce arrival
+        vestibule.msg_contents(
+            f"{caller.key} materializes from the data stream.",
             exclude=[caller]
         )
 
-    # Move to vestibule (let Evennia handle auto-look)
-    caller.move_to(vestibule)
-
-    # Announce arrival
-    vestibule.msg_contents(
-        f"{caller.key} materializes from the data stream.",
-        exclude=[caller]
-    )
-
-    # Set nolookaround to suppress EvMenu's auto-look when closing
-    if hasattr(caller.ndb, '_evmenu'):
-        caller.ndb._evmenu.nolookaround = True
+    delay(0.8, _link_established)
 
     # Exit the menu
     return None
