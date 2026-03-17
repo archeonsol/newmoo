@@ -213,7 +213,8 @@ def process_language_for_viewer(speaker, quote_text, lang_key, viewer):
     if not quote_text:
         return quote_text
     if viewer is None:
-        return quote_text
+        # Cameras / logs: always show clear speech, wrapped in quotes
+        return f"\"{quote_text}\""
     lang_key = (lang_key or "english").strip().lower() or "english"
     if lang_key == "default":
         lang_key = "english"
@@ -221,15 +222,18 @@ def process_language_for_viewer(speaker, quote_text, lang_key, viewer):
     try:
         from evennia.contrib.rpg.rpsystem.rplanguage import obfuscate_language
     except ImportError:
-        return quote_text
+        # No language system available; show clear text in quotes
+        return f"\"{quote_text}\""
     # English is always fully understood
     if lang_key == "english":
-        return quote_text
+        # English is always fully understood; keep the original, wrapped in quotes
+        return f"\"{quote_text}\""
     percent = get_language_percent(viewer, lang_key)
     level = language_percent_to_understanding(percent)
     obfuscate_level = 1.0 - max(0.0, min(1.0, level))
     if obfuscate_level <= 0:
-        return quote_text
+        # Viewer fully understands this language; show original, wrapped in quotes
+        return f"\"{quote_text}\""
     try:
         # Cap obfuscation so we get gibberish instead of empty (rplanguage can return "." at 1.0)
         obfuscate_level = min(0.85, obfuscate_level)
@@ -237,9 +241,12 @@ def process_language_for_viewer(speaker, quote_text, lang_key, viewer):
         # If still empty or only punctuation, retry at lower level so we get actual gibberish
         if not result or not result.strip() or all(c in '.,;:!? \t\n' for c in result.strip()):
             result = obfuscate_language(quote_text, level=0.5, language=lang_key)
-        return result if (result and result.strip()) else quote_text
+        # Always return something non-empty, wrapped in quotes
+        final = result if (result and result.strip()) else quote_text
+        return f"\"{final}\""
     except Exception:
-        return quote_text
+        # On any error, fall back to clear text in quotes
+        return f"\"{quote_text}\""
 
 
 def parse_quoted_speech(text):

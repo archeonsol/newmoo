@@ -891,8 +891,10 @@ HT_CONDITION_INJURED_TIERS = [
     (50, "badly injured"),
     (35, "severely injured"),
     (20, "critically injured"),
+    # Below 10% HP you are on your last legs but still technically conscious; true
+    # unconscious/flatlined is handled separately when HP <= 0 and death_state=flatlined.
     (10, "mortally injured and struggling to remain conscious"),
-    (0, "dying and unconscious"),  # flatlined; 0 HP
+    (0, "on the verge of collapse"),
 ]
 # Flatlined gets special message; permanently dead is not shown by ht
 HT_CONDITION_DEAD = "beyond help"

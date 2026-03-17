@@ -141,23 +141,53 @@ class CmdLook(DefaultCmdLook):
         super().func()
 
 
-class CmdExamine(Command):
+class CmdStopWalking(Command):
     """
-    Look at an object and see what commands you can use with it.
+    Stop a pending staggered walk before it completes.
 
     Usage:
-      @examine <object>
-      @ex <object>
+      stop walking
     """
-    key = "@examine"
-    aliases = ["@ex"]
+
+    key = "stop walking"
+    aliases = ["stop walk", "halt walking", "halt walk"]
+    locks = "cmd:all()"
+    help_category = "Movement"
+
+    def func(self):
+        caller = _command_character(self)
+        if not getattr(caller, "db", None):
+            self.caller.msg("You must be in character to do that.")
+            return
+        # Mark the next delayed walk to be cancelled; the delayed callback
+        # in `world.staggered_movement` will honour this flag.
+        already_set = bool(getattr(caller.db, "cancel_walking", False))
+        caller.db.cancel_walking = True
+        if already_set:
+            self.caller.msg("You steady yourself, keeping from walking off anywhere.")
+        else:
+            self.caller.msg("You stop walking.")
+
+
+class CmdExamine(Command):
+    """
+    Player examine: look at an object and see what commands you can use with it.
+
+    Usage:
+      examine <object>
+      ex <object>
+    """
+    # Player-facing examine (no @). Staff continue to use Evennia's default
+    # '@examine' from the base cmdset for builder/staff-style inspection.
+    key = "examine"
+    aliases = ["ex"]
     locks = "cmd:all()"
     help_category = "General"
 
     def func(self):
         caller = self.caller
         if not self.args:
-            caller.msg("Examine what? Usage: @examine <object>")
+            caller.msg("Examine what? Usage: examine <object>")
             return
         obj = caller.search(self.args.strip(), location=caller.location)
         if not obj:

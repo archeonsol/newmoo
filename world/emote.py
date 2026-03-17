@@ -182,19 +182,8 @@ def find_targets_in_text(text, character_list, emitter):
             seen_positions.add((start, end))
             matched = m.group(0)
             targets.append((matched, char))
-    # Match by character key (name) so "Bob" works when recog'd
-    for char in character_list:
-        if char == emitter:
-            continue
-        key = (getattr(char, "key", None) or "").strip()
-        if not key:
-            continue
-        for m in re.finditer(r"(?<!\w)" + re.escape(key) + r"(?!\w)", text, re.IGNORECASE):
-            start, end = m.start(), m.end()
-            if _overlaps(start, end):
-                continue
-            seen_positions.add((start, end))
-            targets.append((m.group(0), char))
+    # NOTE: We intentionally do NOT match by the character's internal key/name here.
+    # Targeting should only work via sdesc/recog-visible names, not builder object keys.
     def pos_key(t):
         pos = text.lower().find(t[0].lower())
         return (pos, -len(t[0]))

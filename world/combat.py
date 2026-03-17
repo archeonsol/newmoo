@@ -791,10 +791,10 @@ def _start_first_round(attacker_id, target_id):
         return
     if getattr(attacker.db, "combat_ended", False) or getattr(target.db, "combat_ended", False):
         return
+    # Attacker must still be targeting this defender; otherwise their combat was cancelled/swapped.
+    # The defender, however, may be targeting someone else (multi-combat): we still allow this
+    # attacker to strike them without forcing an aggro swap.
     if _get_combat_target(attacker) != target:
-        return
-    # When target is a creature we don't set their combat_target; only require mutual target for PvP
-    if not getattr(target.db, "is_creature", False) and _get_combat_target(target) != attacker:
         return
     try:
         import traceback
@@ -832,8 +832,12 @@ def start_combat_ticker(attacker, target):
     """
     if not attacker or not target:
         return
+    # Attacker always targets the defender.
     _set_combat_target(attacker, target)
-    if not getattr(target.db, "is_creature", False):
+    # For non-creatures, only set the defender's combat_target if they don't already have one.
+    # This allows third parties to join an existing fight without stealing aggro: the defender
+    # keeps attacking whoever they were already focused on unless they manually swap targets.
+    if not getattr(target.db, "is_creature", False) and _get_combat_target(target) is None:
         _set_combat_target(target, attacker)
     if getattr(attacker.db, "current_hp", None) is None or (attacker.db.current_hp or 0) <= 0:
         attacker.db.current_hp = getattr(attacker, "max_hp", 100)

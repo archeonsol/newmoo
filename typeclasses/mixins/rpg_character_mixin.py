@@ -19,16 +19,37 @@ class RPGCharacterMixin:
 
     def get_display_stat(self, stat_name):
         """
-        Return display level 0-150 for a stat (stored_level // 2). Use for all RPG mechanics and HP.
-        No external code should perform // 2 on stored stats; use this method instead.
+        Return effective display level 0-150 for a stat.
+
+        Base: stored_level // 2 from world.xp (0-300 -> 0-150).
+        Buffs: routed through Evennia's BuffHandler (obj.buffs) using a
+        '<stat>_display' identifier, e.g. 'charisma_display'.
         """
-        stored = self.get_stat_level(stat_name) or 0
-        return min(int(stored) // 2, 150)
+        from world.xp import _stat_level
+
+        stored = int(_stat_level(self, stat_name) or 0)
+        base_display = min(max(stored // 2, 0), 150)
+        if hasattr(self, "buffs"):
+            try:
+                return int(self.buffs.check(base_display, f"{stat_name}_display"))
+            except Exception:
+                return base_display
+        return base_display
 
     def get_skill_level(self, skill_key):
-        """Return skill level as int 0-150 (normalizes legacy letter to mid-tier)."""
+        """
+        Return effective skill level as int 0-150 (normalizes legacy letters and
+        applies buffs via BuffHandler using 'skill:<key>' identifiers).
+        """
         from world.xp import _skill_level
-        return _skill_level(self, skill_key)
+
+        base = int(_skill_level(self, skill_key) or 0)
+        if hasattr(self, "buffs"):
+            try:
+                return int(self.buffs.check(base, f"skill:{skill_key}"))
+            except Exception:
+                return base
+        return base
 
     def get_stat_grade_adjective(self, grade_letter, stat_key):
         """Adjective for this stat at this grade (letter-matched, per-stat)."""

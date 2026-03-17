@@ -86,34 +86,14 @@ class CmdWield(Command):
         if not target:
             return
 
-        # Allow weapons or holdable tools (medical tools, defibrillator, etc.)
+        # Try to resolve a combat weapon key if this is a weapon; if not, it's still holdable,
+        # but will not be treated as a combat weapon by the combat system.
         try:
             from typeclasses.weapons import get_weapon_key
             weapon_key = get_weapon_key(target)
         except Exception as e:
             logger.log_trace("inventory_cmds.CmdWield get_weapon_key: %s" % e)
             weapon_key = getattr(target.db, "weapon_key", None)
-        if not weapon_key:
-            # Not a weapon: allow if holdable (medical tool, defib, food, drink)
-            try:
-                from typeclasses.medical_tools import MedicalTool, Defibrillator
-                if isinstance(target, (MedicalTool, Defibrillator)):
-                    weapon_key = None  # holdable, one hand
-                elif getattr(target, "tags", None) and (target.tags.has("food") or target.tags.has("drink")):
-                    weapon_key = None
-                elif getattr(target.db, "edible", False) or getattr(target.db, "drinkable", False):
-                    weapon_key = None
-                else:
-                    caller.msg(f"{target.name} isn't something you can wield or fight with.")
-                    return
-            except ImportError:
-                if getattr(target, "tags", None) and (target.tags.has("food") or target.tags.has("drink")):
-                    weapon_key = None
-                elif getattr(target.db, "edible", False) or getattr(target.db, "drinkable", False):
-                    weapon_key = None
-                else:
-                    caller.msg(f"{target.name} isn't something you can fight with effectively.")
-                    return
         if weapon_key and not getattr(target.db, "weapon_key", None):
             target.db.weapon_key = weapon_key  # persist
         hands_needed = _hands_required(weapon_key) if weapon_key else 1
@@ -146,7 +126,15 @@ class CmdWield(Command):
         _update_primary_wielded(caller)
         if getattr(caller.db, "combat_target", None) is not None:
             caller.db.combat_skip_next_turn = True
-        caller.msg(f"You shift your grip and wield |w{target.name}|n.")
+        item_name_self = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
+        caller.msg(f"You hold |w{item_name_self}|n in your hands.")
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for viewer in caller.location.contents_get(content_type="character"):
+                if viewer == caller:
+                    continue
+                vcaller = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.name
+                vitem = target.get_display_name(viewer) if hasattr(target, "get_display_name") else target.name
+                viewer.msg(f"{vcaller} holds {vitem} in their hands.")
 
 
 class CmdUnwield(Command):
@@ -187,7 +175,15 @@ class CmdUnwield(Command):
         _update_primary_wielded(caller)
         if getattr(caller.db, "combat_target", None) is not None:
             caller.db.combat_skip_next_turn = True
-        caller.msg(f"You stop wielding |w{target.name}|n and put it away.")
+        item_name_self = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
+        caller.msg(f"You put away |w{item_name_self}|n.")
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for viewer in caller.location.contents_get(content_type="character"):
+                if viewer == caller:
+                    continue
+                vcaller = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.name
+                vitem = target.get_display_name(viewer) if hasattr(target, "get_display_name") else target.name
+                viewer.msg(f"{vcaller} puts away {vitem}.")
 
 
 class CmdFreehands(Command):
@@ -209,15 +205,31 @@ class CmdFreehands(Command):
             return
         names = []
         if left and left.location == caller:
-            names.append(left.get_display_name(caller) if hasattr(left, "get_display_name") else left.name)
+            names.append(left)
         if right and right.location == caller and right is not left:
-            names.append(right.get_display_name(caller) if hasattr(right, "get_display_name") else right.name)
+            names.append(right)
         caller.db.left_hand_obj = None
         caller.db.right_hand_obj = None
         _update_primary_wielded(caller)
         if getattr(caller.db, "combat_target", None) is not None:
             caller.db.combat_skip_next_turn = True
-        caller.msg(f"You put away {' and '.join('|w' + n + '|n' for n in names)}.")
+        # Build name list for self
+        self_names = [
+            (obj.get_display_name(caller) if hasattr(obj, "get_display_name") else obj.name)
+            for obj in names
+        ]
+        caller.msg(f"You put away {' and '.join('|w' + n + '|n' for n in self_names)}.")
+        # Echo to observers
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for viewer in caller.location.contents_get(content_type="character"):
+                if viewer == caller:
+                    continue
+                vcaller = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.name
+                vnames = [
+                    (obj.get_display_name(viewer) if hasattr(obj, "get_display_name") else obj.name)
+                    for obj in names
+                ]
+                viewer.msg(f"{vcaller} puts away {' and '.join(vnames)}.")
 
 
 class CmdInventory(Command):
@@ -556,11 +568,15 @@ class CmdWear(Command):
             caller.msg("The item must be worn under %s." % higher.get_display_name(caller))
 
         caller.db.worn = worn + [target]
-        caller.msg(f"You put on {target.get_display_name(caller)}.")
-        caller.location.msg_contents(
-            f"{caller.get_display_name(caller)} puts on {target.get_display_name(caller)}.",
-            exclude=caller,
-        )
+        item_name = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
+        caller.msg(f"You put on {item_name}.")
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for viewer in caller.location.contents_get(content_type="character"):
+                if viewer == caller:
+                    continue
+                vcaller = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.name
+                vitem = target.get_display_name(viewer) if hasattr(target, "get_display_name") else target.name
+                viewer.msg(f"{vcaller} puts on {vitem}.")
 
 
 class CmdRemove(Command):
@@ -590,11 +606,15 @@ class CmdRemove(Command):
             caller.msg(f"You aren't wearing {target.get_display_name(caller)}.")
             return
         caller.db.worn = [o for o in worn if o != target]
-        caller.msg(f"You remove {target.get_display_name(caller)}.")
-        caller.location.msg_contents(
-            f"{caller.get_display_name(caller)} removes {target.get_display_name(caller)}.",
-            exclude=caller,
-        )
+        item_name = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
+        caller.msg(f"You remove {item_name}.")
+        if caller.location and hasattr(caller.location, "contents_get"):
+            for viewer in caller.location.contents_get(content_type="character"):
+                if viewer == caller:
+                    continue
+                vcaller = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.name
+                vitem = target.get_display_name(viewer) if hasattr(target, "get_display_name") else target.name
+                viewer.msg(f"{vcaller} removes {vitem}.")
 
 
 class CmdStrip(Command):

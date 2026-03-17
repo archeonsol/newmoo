@@ -66,7 +66,10 @@ def _run_emote(caller, text, improvise=False):
             for i, seg in enumerate(segments):
                 # Strip leading comma (no-conjugate marker) so it doesn't appear in echo
                 seg = seg.lstrip().lstrip(",").lstrip() if seg.strip().startswith(",") else seg
-                # Treat '.word' in the middle of a pose as plain 'word' (e.g. '.look' -> 'look')
+                # Treat '.word' as a verb marker for the caller's echo only:
+                # - At the start of the segment: '.grin at the crowd' -> 'grin at the crowd'
+                # - In the middle of a segment: 'I .look at them' -> 'I look at them'
+                seg = re.sub(r"^\.\s*(\w+)", r"\1", seg)
                 seg = re.sub(r" \.\s*(\w+)", r" \1", seg)
                 # Quoted text is character speech: protect from transformation and restore verbatim
                 quotes = re.findall(r'"([^"]*)"', seg)
@@ -358,6 +361,60 @@ class CmdVoice(Command):
             caller.msg("|wYour voice|n: not set. Use |w@voice = <text>|n.")
 
 
+class CmdSmellSet(Command):
+    """
+    Set or view your personal scent description, used when others smell you.
+
+    Usage:
+      @smell                 - show your current personal scent
+      @smell = <text>        - set it (e.g. @smell = He smells like roses and oil, a stark contrast but quite intoxicating anyway.)
+      @smell clear           - clear your personal scent
+
+    This text is a full sentence or short paragraph used when someone runs
+    'smell <you>'. It does NOT change your short description (sdesc); that is
+    reserved for perfume/room effects.
+    """
+    key = "@smell"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        if not hasattr(caller, "db"):
+            return
+        raw = (self.args or "").strip()
+        # @smell clear
+        if raw.lower() == "clear":
+            if hasattr(caller.db, "smell_text"):
+                try:
+                    del caller.db.smell_text
+                except Exception:
+                    caller.db.smell_text = ""
+            caller.msg("You clear your personal scent message. Others will no longer see a custom line when they smell you.")
+            return
+        # @smell (no '=') – show current
+        if "=" not in raw:
+            text = (getattr(caller.db, "smell_text", None) or "").strip()
+            if not text:
+                caller.msg("|wYour personal scent line|n: not set.")
+                caller.msg("Set one with |w@smell = <text>|n (e.g. @smell = He smells like roses and oil, a stark contrast but quite intoxicating anyway.)")
+                return
+            caller.msg("|wYour personal scent line (shown when someone smells you):|n")
+            caller.msg(f"  {text}")
+            return
+        # @smell = <text>
+        _, _, rest = raw.partition("=")
+        rest = (rest or "").strip()
+        if not rest:
+            caller.msg("Provide a short sentence or line after '=' (e.g. @smell = He smells like roses and oil...).")
+            return
+        if len(rest) > 400:
+            caller.msg("That scent description is a bit too long. Keep it to 400 characters or fewer.")
+            return
+        caller.db.smell_text = rest
+        caller.msg(f"Set your personal scent line to:\n|w{rest}|n")
+
+
 class CmdLanguage(Command):
     """
     Set which language you speak (say/whisper/emotes). Only languages you know (have invested XP in) can be selected.
@@ -422,6 +479,130 @@ def _count_pluralize(name):
     if n.endswith("s") or n.endswith("x") or n.endswith("ch") or n.endswith("sh"):
         return n + "es"
     return n + "s"
+
+
+def _get_memory_slots(caller):
+    """
+    Return how many short strings this character can memorize.
+    Minimum of 5, scaling with intelligence display stat (0–150).
+    """
+    base = 5
+    if not hasattr(caller, "get_display_stat"):
+        return base
+    try:
+        intel = caller.get_display_stat("intelligence") or 0
+    except Exception:
+        intel = 0
+    # +1 slot per 3 intelligence display levels, up to +45 at 150 (max 50 total).
+    extra = max(0, int(intel) // 3)
+    return base + min(extra, 45)
+
+
+class CmdMemorize(Command):
+    """
+    Memorize a short string you can recall later with the memory command.
+
+    Usage:
+      memorize <text>
+
+    You can store at least five strings; the maximum grows with your Intelligence stat.
+    Each stored string is limited to 120 characters.
+    """
+
+    key = "memorize"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        text = (self.args or "").strip()
+        if not text:
+            caller.msg("Usage: memorize <text>  (e.g. memorize door code 4917)")
+            return
+        if len(text) > 120:
+            caller.msg("That is too long to keep straight in your head. Keep it to 120 characters or fewer.")
+            return
+
+        max_slots = _get_memory_slots(caller)
+        memories = list(getattr(caller.db, "memories", None) or [])
+
+        if len(memories) >= max_slots:
+            # Drop the oldest memory to make room for the new one.
+            memories.pop(0)
+
+        memories.append(text)
+        caller.db.memories = memories
+        slot_num = len(memories)
+        caller.msg(
+            f"|gYou fix that thought in your mind.|n "
+            f"(Memory {slot_num}/{max_slots})"
+        )
+
+
+class CmdMemory(Command):
+    """
+    Recall or remove the strings you've memorized.
+
+    Usage:
+      memory                    - list everything you currently remember
+      memory <number>           - recall a specific entry (as listed)
+      memory delete <number>    - forget that specific entry and free a slot
+    """
+
+    key = "memory"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        memories = list(getattr(caller.db, "memories", None) or [])
+
+        # memory delete <number> – forget a specific entry
+        low = args.lower()
+        if low.startswith("delete ") or low.startswith("forget ") or low.startswith("remove "):
+            _, _, rest = args.partition(" ")
+            rest = rest.strip()
+            if not rest or not rest.isdigit():
+                caller.msg("Usage: memory delete <number>  (e.g. memory delete 2)")
+                return
+            index = int(rest)
+            if index < 1 or index > len(memories):
+                caller.msg("You don't have a memory with that number.")
+                return
+            removed = memories.pop(index - 1)
+            caller.db.memories = memories
+            caller.msg(f"|yYou let go of memory {index}:|n {removed}")
+            return
+
+        if not args:
+            if not memories:
+                max_slots = _get_memory_slots(caller)
+                caller.msg(
+                    f"You are not currently holding anything specific in memory. "
+                    f"(You can remember up to {max_slots} memories; use |wmemorize <text>|n.)"
+                )
+                return
+
+            max_slots = _get_memory_slots(caller)
+            caller.msg(f"|wMemories ({len(memories)}/{max_slots}):|n")
+            for i, text in enumerate(memories, start=1):
+                caller.msg(f"  |w{i}.|n {text}")
+            caller.msg("Use |wmemory <number>|n to recall one, |wmemory delete <number>|n to forget one, or |wmemorize <text>|n to store another.")
+            return
+
+        # memory <number> – recall a specific entry
+        if not args.isdigit():
+            caller.msg("Usage: memory [number]  (e.g. memory 2, or just memory to list all)")
+            return
+
+        index = int(args)
+        if index < 1 or index > len(memories):
+            caller.msg("You don't have a memory with that number.")
+            return
+
+        text = memories[index - 1]
+        caller.msg(f"|wMemory {index}:|n {text}")
 
 
 class CmdCount(Command):
@@ -534,7 +715,17 @@ class CmdRecog(Command):
 
     def func(self):
         from world.emote import resolve_sdesc_to_characters
-        from world.rp_features import get_display_name_for_viewer
+        from world.rp_features import (
+            get_display_name_for_viewer,
+            get_character_sdesc_for_viewer,
+            get_helmet_recog_for_viewer,
+            set_helmet_recog_for_viewer,
+            clear_helmet_recog_for_viewer,
+        )
+        try:
+            from world.sdesc import character_has_mask_or_helmet
+        except ImportError:
+            character_has_mask_or_helmet = lambda c: False
         caller = self.caller
         location = caller.location
         args = (self.args or "").strip()
@@ -544,35 +735,54 @@ class CmdRecog(Command):
         chars_here = location.contents_get(content_type="character")
         chars_here = [c for c in chars_here if c != caller and location.filter_visible([c], caller)]
         if self.cmdstring == "forget":
-            # forget <name> - clear recog by alias
+            # forget <name> - clear recog by alias (permanent or helmet-only)
             if not args:
                 caller.msg("Usage: forget <name>")
                 return
             found = None
             for c in chars_here:
-                if caller.recog.get(c) and args.lower() in (caller.recog.get(c) or "").lower():
-                    found = c
+                perm = caller.recog.get(c) if hasattr(caller, "recog") else None
+                temp = get_helmet_recog_for_viewer(caller, c)
+                perm_match = perm and args.lower() in (perm or "").lower()
+                temp_match = temp and args.lower() in (temp or "").lower()
+                if perm_match or temp_match:
+                    found = (c, perm_match, temp_match)
                     break
             if not found:
                 caller.msg("You don't recognize anyone by that name.")
                 return
-            caller.recog.remove(found)
-            sdesc = get_display_name_for_viewer(found, caller)
+            target, perm_match, temp_match = found
+            if perm_match:
+                caller.recog.remove(target)
+            if temp_match:
+                clear_helmet_recog_for_viewer(caller, target)
+            sdesc = get_display_name_for_viewer(target, caller)
             caller.msg("You no longer recognize them. You'll see them as: |w%s|n" % sdesc)
             return
         if not args:
-            # list recogs
+            # list recogs (show both permanent and any active helmet-only ones)
             all_recogs = caller.recog.all()
-            if not all_recogs:
-                caller.msg("You haven't recognized anyone here. Use |wrecog <sdesc> as <name>|n (e.g. recog tall man as Bob).")
-                return
             lines = []
-            for recog_name, obj in all_recogs.items():
-                if obj not in chars_here:
+            if all_recogs:
+                for recog_name, obj in all_recogs.items():
+                    if obj not in chars_here:
+                        continue
+                    seen = get_display_name_for_viewer(obj, caller)
+                    lines.append("  %s (you see: %s)" % (recog_name, seen))
+            # Helmet-only recogs for people here that don't have a permanent recog entry
+            for c in chars_here:
+                temp = get_helmet_recog_for_viewer(caller, c)
+                if not temp:
                     continue
-                sdesc = get_display_name_for_viewer(obj, caller)
-                lines.append("  %s (you see: %s)" % (recog_name, sdesc))
-            caller.msg("|wRecognized here|n:\n" + "\n".join(lines) if lines else "|wRecognized here|n: (no one in this room)")
+                # Skip if this same string is already a permanent recog entry
+                if any(name == temp for name in all_recogs.keys()):
+                    continue
+                seen = get_display_name_for_viewer(c, caller)
+                lines.append("  %s (helmeted; you see: %s)" % (temp, seen))
+            if not lines:
+                caller.msg("You haven't recognized anyone here. Use |wrecog <sdesc> as <name>|n (e.g. recog tall man as Bob).")
+            else:
+                caller.msg("|wRecognized here|n:\n" + "\n".join(lines))
             return
         if " as " not in args:
             caller.msg("Usage: recog <sdesc> as <name>   (e.g. recog tall man as Bob)")
@@ -590,9 +800,17 @@ class CmdRecog(Command):
             caller.msg("Multiple people match. Be specific: |w1-%s as %s|n or |w2-%s as %s|n etc." % (sdesc_part, name_part, sdesc_part, name_part))
             return
         target = matches[0]
-        caller.recog.add(target, name_part)
-        sdesc = get_display_name_for_viewer(target, caller)
-        caller.msg("You'll now see |w%s|n as |w%s|n." % (sdesc, name_part))
+        # Decide whether this is a normal or helmet-only recog based on target's current appearance.
+        if character_has_mask_or_helmet(target):
+            # Helmet/mask on: set a temporary overlay that only applies while their face is hidden.
+            before = get_character_sdesc_for_viewer(target, caller)
+            set_helmet_recog_for_viewer(caller, target, name_part)
+        else:
+            # Normal recog: permanent name tied to their uncovered face; message should use the
+            # *current* visible description (sdesc) before recog is applied.
+            before = get_character_sdesc_for_viewer(target, caller)
+            caller.recog.add(target, name_part)
+        caller.msg("You'll now see |w%s|n as |w%s|n." % (before, name_part))
 
 
 class CmdBody(Command):
@@ -763,13 +981,20 @@ class CmdLookPlace(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            current = getattr(caller.db, "room_pose", None) or "standing here"
-            caller.msg(f"You appear in the room as: |w{current}|n.")
-            caller.msg("Use |w@lp <text>|n to change it (e.g. @lp leaning against the wall).")
+            # No args: clear any custom look-place so you fall back to the default.
+            if hasattr(caller.db, "room_pose"):
+                try:
+                    del caller.db.room_pose
+                except Exception:
+                    caller.db.room_pose = None
+            # Default fallback text matches room display: "is standing here"
+            current = getattr(caller.db, "room_pose", None) or "is standing here"
+            caller.msg(f"You clear your custom look-place. You now appear in the room as: |w{current}|n.")
+            caller.msg("Use |w@lp <text>|n to set one again (e.g. @lp leaning against the wall).")
             return
         caller.db.room_pose = args
         pose = args.rstrip(".")
-        caller.msg(f"When people look here, they will see: |w{caller.name} is {pose}.|n")
+        caller.msg(f"When people look here, they will see: |w{caller.name} {pose}.|n")
 
 
 class CmdSleepPlace(Command):
@@ -1149,6 +1374,124 @@ class CmdTease(Command):
                     viewer.msg(format_emote_message(doer_name, body))
         return
 
+
+class CmdSmell(Command):
+    """
+    Smell the room, yourself, someone else, or an object.
+
+    Usage:
+      smell               - smell the current room/area
+      smell me            - smell yourself
+      smell <target>      - smell a person or object here
+
+    Characters and objects can define a 'smell' (and perfumes/rooms can
+    override or add to a character's scent). If nothing special is set,
+    you'll be told you don't notice anything particular.
+    """
+
+    key = "smell"
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        from world.smell import get_smell_for, format_smell_line
+        from world.emote import resolve_sdesc_to_characters
+
+        caller = self.caller
+        args = (self.args or "").strip()
+
+        # smell (no args) -> smell the room
+        if not args:
+            loc = caller.location
+            if not loc:
+                caller.msg("You are nowhere in particular; you don't smell anything noteworthy.")
+                return
+            smell = get_smell_for(loc)
+            if not smell:
+                caller.msg("You take a cautious sniff of the air but don't notice anything in particular.")
+                return
+            # Rooms: show their own line
+            name = getattr(loc, "key", None) or "here"
+            caller.msg(f"The air here smells {smell}.")
+            return
+
+        low = args.lower()
+        # smell me / smell self
+        if low in ("me", "self", "myself"):
+            # First, echo the action.
+            caller.msg("You discreetly smell yourself.")
+            loc = caller.location
+            if loc:
+                try:
+                    from world.rp_features import get_display_name_for_viewer
+                    from world.emote import PRONOUN_MAP
+                except ImportError:
+                    get_display_name_for_viewer = None
+                    PRONOUN_MAP = {}
+                for viewer in loc.contents_get(content_type="character"):
+                    if viewer == caller:
+                        continue
+                    if get_display_name_for_viewer:
+                        name = get_display_name_for_viewer(caller, viewer)
+                    else:
+                        name = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.key
+                    pron_key = (getattr(caller.db, "pronoun", None) or getattr(caller.db, "gender", "neutral") or "neutral").lower()
+                    sub, poss, obj = PRONOUN_MAP.get(pron_key, PRONOUN_MAP.get("neutral", ("they", "their", "them")))
+                    reflexive = {"he": "himself", "she": "herself", "they": "themself"}.get(sub, "themself")
+                    viewer.msg(f"{name} discreetly sniffs {reflexive}.")
+            # Then show the actual smell result to the caller only.
+            line = format_smell_line(caller, viewer=caller, prefix_name="You")
+            if not line:
+                caller.msg("You don't notice any particular scent on yourself.")
+            else:
+                # Replace "You smells" with "You smell" in case of grammar
+                line = line.replace("You smells", "You smell")
+                caller.msg(line)
+            return
+
+        location = caller.location
+        if not location:
+            caller.msg("You are not in a room to smell anyone or anything.")
+            return
+
+        # First try to resolve a character in the room by sdesc/recog
+        chars_here = location.contents_get(content_type="character")
+        chars_here = [c for c in chars_here if location.filter_visible([c], caller)]
+        matches = resolve_sdesc_to_characters(caller, chars_here, args)
+        target = None
+        if matches:
+            if len(matches) > 1:
+                caller.msg("Multiple people match that. Be more specific (use 1-<sdesc>, 2-<sdesc>, etc).")
+                return
+            target = matches[0]
+        else:
+            # Fallback: normal search for any object/exit/character
+            target = caller.search(args, location=location)
+            if not target:
+                return
+
+        # Now build the smell line for the target
+        line = format_smell_line(target, viewer=caller)
+        if not line:
+            # Distinguish characters vs objects a bit
+            try:
+                from evennia import DefaultCharacter
+
+                is_char = isinstance(target, DefaultCharacter)
+            except Exception:
+                is_char = getattr(target, "has_account", False) or bool(
+                    getattr(getattr(target, "db", None), "is_npc", False)
+                )
+            if is_char:
+                name = target.get_display_name(caller) if hasattr(target, "get_display_name") else getattr(target, "key", "They")
+                caller.msg(f"You don't notice any particular scent on {name}.")
+            else:
+                name = target.get_display_name(caller) if hasattr(target, "get_display_name") else getattr(target, "key", "it")
+                caller.msg(f"You don't notice any particular scent from {name}.")
+            return
+
+        caller.msg(line)
+        return
 
 class CmdSit(Command):
     """

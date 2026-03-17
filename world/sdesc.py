@@ -335,4 +335,5 @@ def get_short_desc(character, looker=None):
         parts.append(worn)
     if carry:
         parts.append(carry)
+
     return " ".join(parts)

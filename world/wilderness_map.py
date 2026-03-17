@@ -86,8 +86,8 @@ class ColonyWildernessRoom(wilderness.WildernessRoom):
     """
 
     def at_object_receive(self, obj, source_location, move_type="move", **kwargs):
-        """Accept move_type and kwargs so @goto/teleport into wilderness doesn't break (contrib room expects no move_type)."""
-        super().at_object_receive(obj, source_location)
+        """Accept move_type and kwargs so @goto/teleport into wilderness doesn't break, and still run Room hooks."""
+        super().at_object_receive(obj, source_location, move_type=move_type, **kwargs)
 
     def _biome_label_for_coords(self, coordinates):
         """Return a short label for the biome at these coordinates (for room header)."""

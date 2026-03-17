@@ -62,11 +62,11 @@ STAT_GRADE_ADJECTIVES = {
 
 # Skills: 21 letters U through A
 SKILL_GRADE_ADJECTIVES = {
-    "U": "Untrained", "T": "Trial", "S": "Shaky", "R": "Rote",
-    "Q": "Questionable", "P": "Patchy", "O": "Out of depth", "N": "Novice",
-    "M": "Marginal", "L": "Learned", "K": "Knackless", "J": "Junior",
-    "I": "Inexperienced", "H": "Half-decent", "G": "Good", "F": "Functional",
-    "E": "Expert", "D": "Disciplined", "C": "Capable", "B": "Badass", "A": "Apex",
+    "U": "Untested", "T": "Terrible", "S": "Scrub", "R": "Rusty",
+    "Q": "Query", "P": "Poser", "O": "Oafish", "N": "Nitwit",
+    "M": "Marginal", "L": "Learning", "K": "Kiff", "J": "Junior",
+    "I": "Involute", "H": "Habile", "G": "Grand", "F": "Forte",
+    "E": "Elevated", "D": "Deft", "C": "Consummate", "B": "Badass", "A": "Apex",
 }
 
 # Use tuple of all valid stat keys for perf in lookup
