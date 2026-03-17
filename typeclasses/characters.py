@@ -1,6 +1,6 @@
 from evennia import DefaultCharacter
 from evennia.utils import logger
-from evennia.utils.utils import compress_whitespace
+from evennia.utils.utils import compress_whitespace, lazy_property
 
 from world.multipuppet import multi_puppet_relay
 from typeclasses.mixins import MedicalMixin, RPGCharacterMixin, RoleplayMixin
@@ -47,6 +47,18 @@ class Character(RoleplayMixin, MedicalMixin, RPGCharacterMixin, DefaultCharacter
 
     # Stats 0-300, skills 0-150; letter tiers from world.levels (21 letters U–A)
 
+    @lazy_property
+    def buffs(self):
+        """
+        Timed/permanent modifiers (perfume, bad smells, cybernetics, traits).
+        Backed by Evennia's generic BuffHandler; all mechanical effects flow
+        through stat/skill helpers rather than touching stored values directly.
+        """
+        from evennia.contrib.rpg.buffs.buff import BuffHandler
+
+        # Use a dedicated dbkey so buffs live on character.db.buffs.
+        return BuffHandler(self, dbkey="buffs", autopause=True)
+
     def at_object_creation(self):
         """Called only once, when the character is first created."""
         super().at_object_creation()
@@ -81,8 +93,6 @@ class Character(RoleplayMixin, MedicalMixin, RPGCharacterMixin, DefaultCharacter
         self.db.bleeding_level = 0
         # Worn clothing/armor (list of objects); order = bottom to top layer
         self.db.worn = []
-        # How this character appears in room look: "standing here", "sitting by the fire", etc.
-        self.db.room_pose = "standing here"
         # How this character appears when logged off (persistent world): "sleeping here", etc.
         self.db.sleep_place = "sleeping here"
         # Room message when you log off (others see this); $N = your name. Default: "$N falls asleep."

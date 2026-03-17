@@ -13,12 +13,13 @@ are shown in bright white and get audience reactions until you use 'performance 
 """
 
 import random
+import time
 from commands.base_cmds import Command
 from evennia.utils import delay
 from evennia.utils.eveditor import EvEditor
 
 PERFORMANCE_SKILL = "performance"
-PERFORMANCE_DELAY_SECONDS = 15
+PERFORMANCE_DELAY_SECONDS = 15  # minimum seconds between performance lines
 COMPOSITION_SLOTS_MIN = 5
 # Max compositions = COMPOSITION_SLOTS_MIN + 1 per 10 performance skill (skill 0–150)
 COMPOSITION_SLOTS_PER_SKILL = 10
@@ -148,24 +149,22 @@ def stop_performance_if_active(character):
     """Stop any running performance or improvise (e.g. on logoff). Call from at_post_unpuppet."""
     if not character or not hasattr(character, "ndb"):
         return
-    task = getattr(character.ndb, "performance_task", None)
-    if task and hasattr(task, "cancel"):
-        try:
-            task.cancel()
-        except Exception:
-            pass
-    character.ndb.performance_task = None
     character.ndb.performance_lines = None
+    if hasattr(character.ndb, "performance_cooldown_until"):
+        character.ndb.performance_cooldown_until = None
     if hasattr(character.ndb, "performance_room_id"):
         character.ndb.performance_room_id = None
+    if hasattr(character.ndb, "performance_outcome"):
+        character.ndb.performance_outcome = None
+        character.ndb.performance_result = None
     character.ndb.performance_improvising = False
 
 
-def _performance_tick(character):
+def _performance_next_line(character):
     """
-    Called every PERFORMANCE_DELAY_SECONDS while a performance is running.
-    Pops the next line, runs it as a pose, and schedules the next tick or ends.
-    Stops if the character left the starting room or is unconscious/flatlined.
+    Manually trigger the next line of an ongoing performance.
+    Enforces cooldown between lines and stops if the character left the starting room
+    or is unconscious/flatlined.
     """
     if not character or not hasattr(character, "ndb"):
         return
@@ -174,8 +173,12 @@ def _performance_tick(character):
     if not lines:
         if hasattr(character.ndb, "performance_lines"):
             character.ndb.performance_lines = None
-        if hasattr(character.ndb, "performance_task"):
-            character.ndb.performance_task = None
+        if hasattr(character.ndb, "performance_cooldown_until"):
+            character.ndb.performance_cooldown_until = None
+        if hasattr(character.ndb, "performance_outcome"):
+            character.ndb.performance_outcome = None
+            character.ndb.performance_result = None
+        character.msg("|cYou have no more lines to perform.|n")
         return
         
     # Safety: stop if they left the room or are no longer conscious
@@ -186,23 +189,37 @@ def _performance_tick(character):
             from world.medical import is_unconscious
             if not character.location or character.location.id != start_room_id:
                 character.ndb.performance_lines = None
-                character.ndb.performance_task = None
                 character.ndb.performance_room_id = None
-                character.ndb.performance_outcome = None
-                character.ndb.performance_result = None
+                if hasattr(character.ndb, "performance_cooldown_until"):
+                    character.ndb.performance_cooldown_until = None
+                if hasattr(character.ndb, "performance_outcome"):
+                    character.ndb.performance_outcome = None
+                    character.ndb.performance_result = None
                 character.msg("|cYour performance is interrupted; you're no longer in the same place.|n")
                 return
             if is_flatlined(character) or is_unconscious(character):
                 character.ndb.performance_lines = None
-                character.ndb.performance_task = None
                 character.ndb.performance_room_id = None
-                character.ndb.performance_outcome = None
-                character.ndb.performance_result = None
+                if hasattr(character.ndb, "performance_cooldown_until"):
+                    character.ndb.performance_cooldown_until = None
+                if hasattr(character.ndb, "performance_outcome"):
+                    character.ndb.performance_outcome = None
+                    character.ndb.performance_result = None
                 character.msg("|cYour performance is interrupted.|n")
                 return
         except Exception:
             pass
-            
+
+    # Enforce cooldown between lines
+    now = time.time()
+    cooldown_until = getattr(character.ndb, "performance_cooldown_until", 0) or 0
+    if now < cooldown_until:
+        remaining = int(round(cooldown_until - now))
+        if remaining <= 0:
+            remaining = 1
+        character.msg("|cYou need to wait %d more second%s before the next line.|n" % (remaining, "" if remaining == 1 else "s"))
+        return
+
     line = lines.pop(0)
     line = (line or "").strip()
     if line:
@@ -210,21 +227,21 @@ def _performance_tick(character):
             _run_emote(character, line)
         except Exception:
             pass
-            
+
+    # Set next cooldown window
+    character.ndb.performance_cooldown_until = now + PERFORMANCE_DELAY_SECONDS
     # Crowd reacts 2 seconds AFTER the line is sung
     outcome = getattr(character.ndb, "performance_outcome", "Marginal Success")
     result = getattr(character.ndb, "performance_result", 0)
     if character.location:
         delay(2, _audience_echo, character.location, outcome, result)
 
-    if lines:
-        task = delay(PERFORMANCE_DELAY_SECONDS, _performance_tick, character)
-        character.ndb.performance_task = task
-    else:
+    if not lines:
         character.ndb.performance_lines = None
-        character.ndb.performance_task = None
         if hasattr(character.ndb, "performance_room_id"):
             character.ndb.performance_room_id = None
+        if hasattr(character.ndb, "performance_cooldown_until"):
+            character.ndb.performance_cooldown_until = None
         if hasattr(character.ndb, "performance_outcome"):
             character.ndb.performance_outcome = None
             character.ndb.performance_result = None
@@ -311,14 +328,17 @@ class CmdPerformance(Command):
     Compose a set piece, play it with a guitar, or improvise live.
 
     Usage:
-      performance list                 - show your stored compositions (limit based on Performance skill)
-      performance compose <name>       - write a performance in the editor (one pose per line)
-      performance delete <name>        - remove a stored composition
-      performance play <name> with <instrument>   - perform it; crowd reacts, lines play automatically
+      performance list                   - show your stored compositions (limit based on Performance skill)
+      performance compose <name>         - write a new performance in the editor (one pose per line)
+      performance edit <name>            - edit an existing stored performance
+      performance delete <name>          - remove a stored composition
+      performance play <name> with <instrument>   - begin performing it; use |wperformance next|n for each line
+      performance next                  - manually trigger the next line of your current performance
       performance improvise with <instrument>     - your poses and says light up and draw reactions until you stop
-      performance stop                - end a performance or improvise
+      performance stop                  - end a performance or improvise
     """
     key = "performance"
+    aliases = ["pf"]
     locks = "cmd:all()"
     help_category = "Roleplay"
 
@@ -361,6 +381,20 @@ class CmdPerformance(Command):
             caller.msg("|gDeleted composition \"%s\".|n" % display)
             return
 
+        # --- performance edit <name> ---
+        if args.lower().startswith("edit "):
+            title = args[5:].strip()
+            if not title:
+                caller.msg("Usage: |wperformance edit <name>|n (e.g. performance edit The Ballad of the Wastes)")
+                return
+            normalized = _normalize_title(title)
+            compositions = getattr(caller.db, "compositions", None) or {}
+            if normalized not in compositions:
+                caller.msg("You have no composition named \"%s\". Use |wperformance list|n to see yours, or |wperformance compose %s|n to create it." % (title, title))
+                return
+            _open_compose_editor(caller, title)
+            return
+
         # --- performance compose <name> ---
         if args.lower().startswith("compose "):
             title = args[8:].strip()
@@ -372,25 +406,29 @@ class CmdPerformance(Command):
 
         # --- performance stop ---
         if args.strip().lower() == "stop":
-            task = getattr(caller.ndb, "performance_task", None)
-            if task and hasattr(task, "cancel"):
-                try:
-                    task.cancel()
-                except Exception:
-                    pass
-            caller.ndb.performance_task = None
             caller.ndb.performance_lines = None
             if hasattr(caller.ndb, "performance_room_id"):
                 caller.ndb.performance_room_id = None
             if hasattr(caller.ndb, "performance_outcome"):
                 caller.ndb.performance_outcome = None
                 caller.ndb.performance_result = None
+            if hasattr(caller.ndb, "performance_cooldown_until"):
+                caller.ndb.performance_cooldown_until = None
             was_improvising = getattr(caller.ndb, "performance_improvising", False)
             caller.ndb.performance_improvising = False
             if was_improvising:
                 caller.msg("|cYou stop improvising.|n")
             else:
                 caller.msg("|cYou stop your performance.|n")
+            return
+
+        # --- performance next ---
+        if args.strip().lower() in ("next", "continue"):
+            lines = getattr(caller.ndb, "performance_lines", None)
+            if not lines:
+                caller.msg("You are not currently performing a stored piece. Use |wperformance play <name> with <instrument>|n to begin.")
+                return
+            _performance_next_line(caller)
             return
 
         # --- performance improvise with <instrument> ---
@@ -406,9 +444,12 @@ class CmdPerformance(Command):
             if getattr(caller.ndb, "performance_task", None) or getattr(caller.ndb, "performance_improvising", False):
                 caller.msg("You're already performing or improvising. Use |wperformance stop|n first.")
                 return
+            # Improvise is harder than a rehearsed performance: apply a hidden penalty to the roll
+            # and do not fire a big success/failure audience echo before the first pose.
             if hasattr(caller, "roll_check"):
-                outcome, result = caller.roll_check(["charisma"], PERFORMANCE_SKILL)
-                _audience_echo(caller.location, outcome, result)
+                outcome, result = caller.roll_check(["charisma"], PERFORMANCE_SKILL, modifier=-10)
+                caller.ndb.performance_outcome = outcome
+                caller.ndb.performance_result = result
             caller.ndb.performance_improvising = True
             caller.msg("|gYou start improvising with %s. Your poses and says will appear in |wbright white|n and draw audience reactions. Use |wperformance stop|n to stop.|n" % (instrument_obj.get_display_name(caller) if instrument_obj else instrument_spec))
             return
@@ -440,7 +481,7 @@ class CmdPerformance(Command):
             caller.msg("You have no performance named \"%s\". Use |wperformance compose %s|n to create it." % (title, title))
             return
 
-        if getattr(caller.ndb, "performance_task", None):
+        if getattr(caller.ndb, "performance_lines", None):
             caller.msg("You're already performing. Use |wperformance stop|n first.")
             return
 
@@ -457,9 +498,7 @@ class CmdPerformance(Command):
 
         caller.ndb.performance_lines = list(lines)
         caller.ndb.performance_room_id = caller.location.id if caller.location else None
-        
-        task = delay(PERFORMANCE_DELAY_SECONDS, _performance_tick, caller)
-        caller.ndb.performance_task = task
-        
+        caller.ndb.performance_cooldown_until = 0
+
         inst_name = instrument_obj.get_display_name(caller) if instrument_obj else instrument_spec
-        caller.msg("|gYou begin your performance of \"%s\" with %s. Lines will play every %s seconds. Use |wperformance stop|n to stop.|n" % (title, inst_name, PERFORMANCE_DELAY_SECONDS))
+        caller.msg("|gYou begin your performance of \"%s\" with %s. Use |wperformance next|n to play each line (at least %s seconds apart). Use |wperformance stop|n to stop.|n" % (title, inst_name, PERFORMANCE_DELAY_SECONDS))

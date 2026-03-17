@@ -14,7 +14,14 @@ class Seat(DefaultObject):
     """
     def at_object_creation(self):
         super().at_object_creation()
-        # Seats are moveable furniture (no get lock)
+        self.locks.add("get:false()")
+        # Default room-look templates; builders can override these per-object:
+        #   self.db.seating_empty_msg = "The {obj} is empty."
+        #   self.db.seating_occupied_msg = "{name} is sitting on the {obj}."
+        if getattr(self.db, "seating_empty_msg", None) is None:
+            self.db.seating_empty_msg = "The {obj} is empty."
+        if getattr(self.db, "seating_occupied_msg", None) is None:
+            self.db.seating_occupied_msg = "{name} is sitting on the {obj}."
 
     def get_display_name(self, looker):
         return getattr(self.db, "desc", None) or self.key or "a seat"
@@ -29,6 +36,24 @@ class Seat(DefaultObject):
                 return char
         return None
 
+    def get_empty_template(self):
+        """
+        Return the format template for an empty seat.
+        Placeholders:
+          {obj}  – the seat's display name for the viewer
+          {name} – unused for empty, but available for consistency
+        """
+        return getattr(self.db, "seating_empty_msg", None) or "The {obj} is empty."
+
+    def get_occupied_template(self):
+        """
+        Return the format template for an occupied seat.
+        Placeholders:
+          {name} – seated character's display name
+          {obj}  – the seat's display name for the viewer
+        """
+        return getattr(self.db, "seating_occupied_msg", None) or "{name} is sitting on the {obj}."
+
 
 class Bed(DefaultObject):
     """
@@ -38,7 +63,14 @@ class Bed(DefaultObject):
     """
     def at_object_creation(self):
         super().at_object_creation()
-        # Beds are moveable furniture (no get lock)
+        self.locks.add("get:false()")
+        # Default room-look templates; builders can override per bed:
+        #   self.db.seating_empty_msg = "The {obj} is empty."
+        #   self.db.seating_occupied_msg = "{name} is lying on the {obj}."
+        if getattr(self.db, "seating_empty_msg", None) is None:
+            self.db.seating_empty_msg = "The {obj} is empty."
+        if getattr(self.db, "seating_occupied_msg", None) is None:
+            self.db.seating_occupied_msg = "{name} is lying on the {obj}."
 
     def get_display_name(self, looker):
         return getattr(self.db, "desc", None) or self.key or "a bed"
@@ -52,3 +84,21 @@ class Bed(DefaultObject):
             if getattr(char.db, "lying_on", None) == self:
                 return char
         return None
+
+    def get_empty_template(self):
+        """
+        Return the format template for an empty bed.
+        Placeholders:
+          {obj}  – the bed's display name for the viewer
+          {name} – unused for empty, but available for consistency
+        """
+        return getattr(self.db, "seating_empty_msg", None) or "The {obj} is empty."
+
+    def get_occupied_template(self):
+        """
+        Return the format template for an occupied bed.
+        Placeholders:
+          {name} – lying character's display name
+          {obj}  – the bed's display name for the viewer
+        """
+        return getattr(self.db, "seating_occupied_msg", None) or "{name} is lying on the {obj}."

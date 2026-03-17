@@ -11,7 +11,11 @@ DRIVE_DELAY = 2.0
 
 
 def _staggered_walk_callback(obj_id, dest_id):
-    """Called after WALK_DELAY: perform the actual move. Drags grappled victim if mover is grappler."""
+    """Called after WALK_DELAY: perform the actual move. Drags grappled victim if mover is grappler.
+
+    Movement can be cancelled between issuing the walk command and the delay elapsing
+    by setting `db.cancel_walking` on the character (see `commands.base_cmds.CmdStopWalking`).
+    """
     try:
         objs = search_object("#%s" % obj_id)
         dests = search_object("#%s" % dest_id)
@@ -19,6 +23,15 @@ def _staggered_walk_callback(obj_id, dest_id):
             return
         obj, dest = objs[0], dests[0]
         if not obj or not dest or not hasattr(obj, "move_to"):
+            return
+        # If character has requested to stop walking, abort the delayed move.
+        db = getattr(obj, "db", None)
+        if db is not None and getattr(db, "cancel_walking", False):
+            try:
+                del db.cancel_walking
+            except Exception:
+                # Fallback: ensure the flag is false if it couldn't be deleted cleanly.
+                db.cancel_walking = False
             return
         obj.move_to(dest)
         # If grappler: bring grappled victim along

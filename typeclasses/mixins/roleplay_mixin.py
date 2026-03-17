@@ -121,11 +121,8 @@ class RoleplayMixin:
         viewers = [c for c in location.contents_get(content_type="character") if c != self]
         if getattr(destination, "db", None) and getattr(destination.db, "pod", None):
             for viewer in viewers:
-                display = self.get_display_name(viewer)
-                if display:
-                    display = display[0].upper() + display[1:]
-                else:
-                    display = getattr(self, "key", "Someone")
+                from world.rp_features import get_move_display_for_viewer
+                display = get_move_display_for_viewer(self, viewer)
                 viewer.msg("%s enters the splinter pod." % display)
             return
         exits = [
@@ -136,12 +133,9 @@ class RoleplayMixin:
             super().announce_move_from(destination, msg=msg, mapping=mapping, move_type=move_type, **kwargs)
             return
         direction = exits[0].key.strip()
+        from world.rp_features import get_move_display_for_viewer
         for viewer in viewers:
-            display = self.get_display_name(viewer)
-            if display:
-                display = display[0].upper() + display[1:]
-            else:
-                display = getattr(self, "key", "Someone")
+            display = get_move_display_for_viewer(self, viewer)
             viewer.msg(f"{display} goes {direction}.")
 
     def announce_move_to(self, source_location, msg=None, mapping=None, move_type="move", **kwargs):
@@ -160,12 +154,9 @@ class RoleplayMixin:
             return
         direction = exits[0].key.strip()
         viewers = [c for c in self.location.contents_get(content_type="character") if c != self]
+        from world.rp_features import get_move_display_for_viewer
         for viewer in viewers:
-            display = self.get_display_name(viewer)
-            if display:
-                display = display[0].upper() + display[1:]
-            else:
-                display = getattr(self, "key", "Someone")
+            display = get_move_display_for_viewer(self, viewer)
             viewer.msg(f"{display} arrives from the {direction}.")
 
     def at_say(self, message, msg_self=None, msg_location=None, receivers=None, msg_receivers=None, **kwargs):

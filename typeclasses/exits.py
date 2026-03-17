@@ -105,21 +105,37 @@ class Exit(ObjectParent, DefaultExit):
         except Exception:
             pass
 
+        # Starting a new move clears any previous "stop walking" request so
+        # that fresh walks work normally.
+        db = getattr(traversing_object, "db", None)
+        if db is not None and hasattr(db, "cancel_walking"):
+            try:
+                del db.cancel_walking
+            except Exception:
+                db.cancel_walking = False
+
         if exhausted:
             spend_stamina(traversing_object, STAMINA_COST_CRAWL)
             delay_secs = CRAWL_DELAY
             direction = stagger_direction or (self.key or "away").strip()
             traversing_object.msg(f"You crawl slowly {direction}.")
-            room_msg = f"{traversing_object.get_display_name(traversing_object)} crawls slowly {direction}."
         else:
             spend_stamina(traversing_object, STAMINA_COST_WALK)
             delay_secs = WALK_DELAY
             direction = stagger_direction or (self.key or "away").strip()
             traversing_object.msg(f"You begin walking {direction}.")
-            room_msg = f"{traversing_object.get_display_name(traversing_object)} begins walking {direction}."
+
+        # Announce staggered move to others in the room with recog-aware names.
         loc = traversing_object.location
         if loc:
-            loc.msg_contents(room_msg, exclude=traversing_object)
+            from world.rp_features import get_move_display_for_viewer
+            viewers = [c for c in loc.contents_get(content_type="character") if c is not traversing_object]
+            for viewer in viewers:
+                display = get_move_display_for_viewer(traversing_object, viewer)
+                if exhausted:
+                    viewer.msg(f"{display} crawls slowly {direction}.")
+                else:
+                    viewer.msg(f"{display} begins walking {direction}.")
         if _staggered_walk_callback:
             delay(delay_secs, _staggered_walk_callback, traversing_object.id, destination.id)
         else:

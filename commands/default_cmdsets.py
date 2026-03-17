@@ -97,7 +97,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         """
         super().at_cmdset_creation()
 
-        from commands.base_cmds import CmdLook, CmdExamine, CmdGet, CmdPut
+        from commands.base_cmds import CmdLook, CmdExamine, CmdGet, CmdPut, CmdStopWalking
         from commands.combat_cmds import CmdAttack, CmdStop, CmdFlee, CmdStance, CmdExecute, CmdGrapple, CmdLetGo, CmdResist
         from commands.scavenge_cmds import CmdScavenge, CmdSkin, CmdButcher, CmdSever, CmdLoot
         from commands.medical_cmds import CmdHt, CmdUse, CmdApply, CmdStabilize, CmdSurgery, CmdDefib
@@ -105,16 +105,17 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         from commands.inventory_cmds import CmdWield, CmdUnwield, CmdFreehands, CmdInventory, CmdReload, CmdUnload, CmdCheckAmmo, CmdWear, CmdRemove, CmdStrip, CmdFrisk
         from commands.crafting_cmds import CmdSurvey, CmdRepairArmor, CmdTailor
         from commands.media_cmds import CmdCamera, CmdTuneTelevision, CmdLabel
-        from commands.roleplay_cmds import CmdTease, CmdDescribeBodypart, CmdDescribeMeAs, CmdBody, CmdVoice, CmdLanguage, CmdSdesc, CmdPending, CmdLookPlace, CmdSleepPlace, CmdWakeMsg, CmdFlatlineMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch, CmdCount, CmdRecog
+        from commands.roleplay_cmds import CmdTease, CmdDescribeBodypart, CmdDescribeMeAs, CmdBody, CmdVoice, CmdSmellSet, CmdLanguage, CmdSdesc, CmdPending, CmdLookPlace, CmdSleepPlace, CmdWakeMsg, CmdFlatlineMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch, CmdCount, CmdRecog, CmdMemorize, CmdMemory, CmdSmell
         from commands.roleplay_cmds import CmdSit, CmdLieOnTable, CmdGetOffTable
         from commands.performance_cmds import CmdPerformance
+        from typeclasses.perfume import CmdUsePerfume
         from commands.death_cmds import CmdGoOOC, CmdReturnIC, CmdEnterPod, CmdLeavePod, CmdSplinterMe
         from commands.vehicle_cmds import CmdEnterVehicle, CmdExitVehicle, CmdStartEngine, CmdStopEngine, CmdShutoffEngine, CmdDrive, CmdVehicleStatus, CmdRepairPart
         from commands.matrix_cmds import CmdJackIn, CmdJackOut
         from commands.staff_cmds import (
             CmdStats, CmdGiveXp, CmdStaffSheet, CmdStaffSetStat, CmdStaffSetSkill,
             CmdCreateItem, CmdTypeclasses, CmdSpawnItem, CmdSpawnArmor, CmdSpawnVehicle, CmdSpawnMedical, CmdSpawnOR,
-            CmdSpawnCreature, CmdCreatureSet, CmdDespawn, CmdNpc, CmdMakeNpc, CmdNpcSet,
+            CmdSpawnCreature, CmdCreatureSet, CmdDespawn, CmdNpc, CmdMakeNpc, CmdNpcSet, CmdSpawnPerfume, CmdBadSmellRoom,
             CmdGoto, CmdGotoRoom, CmdSummon, CmdSetVoid, CmdVoid, CmdRelease, CmdBoot, CmdFind, CmdAnnounce, CmdRestore, CmdDebugKill,
             CmdSpawnSeat, CmdSpawnBed, CmdSpawnPod, CmdSpawnDiveRig, CmdSpawnCamera, CmdSpawnTelevision,
             CmdEmoteDebug, CmdDamageVehicle,
@@ -135,6 +136,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         # Use our custom CmdLook instead of Evennia's default
         self.remove(default_general.CmdLook)
         self.add(CmdLook())
+        self.add(CmdStopWalking())
         self.add(CmdScavenge())
         self.add(CmdSkin())
         self.add(CmdButcher())
@@ -181,11 +183,13 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdTuneTelevision())
         self.add(CmdTailor())
         self.add(CmdTease())
+        self.add(CmdUsePerfume())
         self.add(CmdXp())
         self.add(CmdDescribeBodypart())
         self.add(CmdDescribeMeAs())
         self.add(CmdBody())
         self.add(CmdVoice())
+        self.add(CmdSmellSet())
         self.add(CmdLanguage())
         self.add(CmdSdesc())
         self.add(CmdPending())
@@ -204,6 +208,9 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdNoMatch())
         self.add(CmdPerformance())
         self.add(CmdExamine())
+        self.add(CmdMemorize())
+        self.add(CmdMemory())
+        self.add(CmdSmell())
         self.add(CmdTag())
         self.add(CmdHere())
         self.add(CmdListCmds())
@@ -243,6 +250,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdDamageVehicle())
         self.add(CmdSpawnMedical())
         self.add(CmdSpawnOR())
+        self.add(CmdSpawnPerfume())
         self.add(CmdStaffSheet())
         self.add(CmdStaffSetStat())
         self.add(CmdStaffSetSkill())
@@ -266,6 +274,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSpawnDiveRig())
         self.add(CmdSpawnCamera())
         self.add(CmdSpawnTelevision())
+        self.add(CmdBadSmellRoom())
         self.add(CmdSpawnCreature())
         self.add(CmdCreatureSet())
 

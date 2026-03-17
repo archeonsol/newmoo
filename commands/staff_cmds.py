@@ -58,6 +58,7 @@ class CmdStats(Command):
                 logger.log_trace("staff_cmds.CmdStats fragmented_at format: %s" % e)
 
         from world.levels import get_stat_grade, get_skill_grade
+        from world.xp import _stat_level, _skill_level
         # Original tall structure; grades from exact thresholds (stats: stored level, skills: level)
         w = 50
         edge = "|x├" + "─" * (w - 2) + "┤|n"
@@ -70,22 +71,77 @@ class CmdStats(Command):
             output += "|x│|n |wLast fragmented|n " + fragmented_str.ljust(w - 21) + " |x│|n\n"
         output += edge + "\n"
         output += "|x│|n |R CORE|n" + " ".ljust(w - 9) + "|x│|n\n"
+
+        # --- Stat buffs/debuffs: compare base vs effective display levels for all stats.
+        # Base display level: from stored stat only (no temporary modifiers).
+        base_stat_display = {}
+        for key in STAT_KEYS:
+            try:
+                stored = int(_stat_level(caller, key) or 0)
+                base_stat_display[key] = max(0, min(150, stored // 2))
+            except Exception:
+                base_stat_display[key] = 0
+        # Effective display level: routed through character helpers, which
+        # now apply buffs via the BuffHandler (see RPGCharacterMixin).
+        effective_stat_display = {}
+        for key in STAT_KEYS:
+            try:
+                effective_stat_display[key] = int(
+                    caller.get_display_stat(key) if hasattr(caller, "get_display_stat") else base_stat_display.get(key, 0)
+                )
+            except Exception:
+                effective_stat_display[key] = base_stat_display.get(key, 0)
+
         for key in STAT_KEYS:
             stored = caller.get_stat_level(key) if hasattr(caller, "get_stat_level") else 0
             letter = get_stat_grade(stored)
             adj = caller.get_stat_grade_adjective(letter, key) if hasattr(caller, "get_stat_grade_adjective") else letter
-            output += "|x│|n   |w{}|n  |R[{}]|n {}\n".format(key.capitalize().ljust(12), letter, adj)
+            label = key.capitalize()
+            eff_disp = effective_stat_display.get(key, 0)
+            base_disp = base_stat_display.get(key, 0)
+            delta = eff_disp - base_disp
+            marker = ""
+            if delta != 0:
+                # Show a green + for buffs, red - for debuffs after the adjective to keep columns aligned.
+                marker = " |g+|n" if delta > 0 else " |r-|n"
+            output += "|x│|n   |w{}|n  |R[{}]|n {}{}\n".format(label.ljust(12), letter, adj, marker)
+
         output += edge + "\n"
         output += "|x│|n |R IMPLANTS|n" + " ".ljust(w - 14) + "|x│|n\n"
+
+        # --- Skill buffs/debuffs: compare base vs effective numeric skill levels.
+        # Base skill level: from stored value only.
+        base_skill_levels = {}
+        for key in SKILL_KEYS:
+            try:
+                base_skill_levels[key] = int(_skill_level(caller, key))
+            except Exception:
+                base_skill_levels[key] = int((skills.get(key, 0) or 0))
+
+        # Effective skill level: current get_skill_level may include temporary bonuses.
+        effective_skill_levels = {}
+        for key in SKILL_KEYS:
+            try:
+                effective_skill_levels[key] = int(
+                    caller.get_skill_level(key) if hasattr(caller, "get_skill_level") else (skills.get(key, 0) or 0)
+                )
+            except Exception:
+                effective_skill_levels[key] = base_skill_levels.get(key, int((skills.get(key, 0) or 0)))
+
         skill_label_width = 24
         for key in SKILL_KEYS:
-            level = caller.get_skill_level(key) if hasattr(caller, "get_skill_level") else (skills.get(key, 0) or 0)
+            level = effective_skill_levels.get(key, 0)
             if not level:
                 continue
             letter = get_skill_grade(level)
             adj = caller.get_skill_grade_adjective(letter) if hasattr(caller, "get_skill_grade_adjective") else letter
             label = SKILL_DISPLAY_NAMES.get(key, key.replace("_", " ").title())
-            output += "|x│|n   |w{}|n  |R[{}]|n {}\n".format(label.ljust(skill_label_width), letter, adj)
+            base_lv = base_skill_levels.get(key, 0)
+            delta = level - base_lv
+            marker = ""
+            if delta != 0:
+                marker = " |g+|n" if delta > 0 else " |r-|n"
+            output += "|x│|n   |w{}|n  |R[{}]|n {}{}\n".format(label.ljust(skill_label_width), letter, adj, marker)
         output += "|x└" + "─" * (w - 2) + "┘|n\n"
         caller.msg(output)
 
@@ -919,13 +975,23 @@ class CmdSpawnArmor(Command):
         caller.msg("|gSpawned:|n %s (quality %s)." % (obj.get_display_name(caller), quality))
 
     def _show_list(self, caller):
-        from world.armor_levels import ARMOR_TEMPLATES, ARMOR_LEVEL_STREET, ARMOR_LEVEL_ARMOR_WEAR, ARMOR_LEVEL_MEDIUM, ARMOR_LEVEL_HEAVY
+        from world.armor_levels import (
+            ARMOR_TEMPLATES,
+            ARMOR_LEVEL_SCAVENGER,
+            ARMOR_LEVEL_CIVILIAN,
+            ARMOR_LEVEL_ENFORCER,
+            ARMOR_LEVEL_MILITARY,
+            ARMOR_LEVEL_HEAVY,
+            ARMOR_LEVEL_INQUISITOR,
+        )
         from evennia.utils.evtable import EvTable
         level_names = {
-            ARMOR_LEVEL_STREET: "Street",
-            ARMOR_LEVEL_ARMOR_WEAR: "Armor wear",
-            ARMOR_LEVEL_MEDIUM: "Medium",
-            ARMOR_LEVEL_HEAVY: "Heavy",
+            ARMOR_LEVEL_SCAVENGER: "Scavenger",
+            ARMOR_LEVEL_CIVILIAN: "Civilian",
+            ARMOR_LEVEL_ENFORCER: "Enforcer",
+            ARMOR_LEVEL_MILITARY: "Medium Military",
+            ARMOR_LEVEL_HEAVY: "Heavy Military",
+            ARMOR_LEVEL_INQUISITOR: "Inquisitorate",
         }
         table = EvTable("|wkey|n", "|wname|n", "|wlevel|n", border="cells")
         for t in ARMOR_TEMPLATES:
@@ -1370,6 +1436,15 @@ class CmdNpc(Command):
         if get_npc_template(template_key) is None:
             caller.msg("|rUnknown template. Use |w@npc/list|n for templates.|n")
             return
+        # Allow random name generation via Evennia's contrib name generator.
+        # Usage example: @npc/summon ganger=rand  (or =random / =*)
+        if name and name.lower() in ("random", "rand", "*"):
+            try:
+                from evennia.contrib.utils.name_generator import namegen
+                name = namegen.full_name()
+            except Exception:
+                # If the name generator is unavailable, fall back silently to template-default naming.
+                name = None
         loc = caller.location
         if not loc:
             caller.msg("You have no location.")
@@ -1479,6 +1554,184 @@ class CmdNpc(Command):
             caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, target.db.skills[attr]))
             return
         caller.msg("|rUnknown attribute. Use a stat (%s) or skill (e.g. evasion, medicine).|n" % ", ".join(STAT_KEYS))
+
+
+class CmdSpawnPerfume(Command):
+    """
+    Spawn a test perfume bottle in your inventory for smell/Charisma testing. Builder+.
+
+    Usage:
+      spawnperfume
+    """
+    key = "spawnperfume"
+    aliases = ["spawn perfume", "testperfume"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        try:
+            from typeclasses.perfume import spawn_example_perfume
+
+            bottle = spawn_example_perfume(caller)
+        except Exception as e:
+            caller.msg(f"|rCould not spawn perfume: {e}|n")
+            return
+        caller.msg(
+            f"|gSpawned perfume|n |w{bottle.get_display_name(caller)}|n in your inventory. "
+            f"Use |wuse perfume|n to apply it."
+        )
+
+
+class CmdBadSmellRoom(Command):
+    """
+    Configure a room as a bad-smell tile that can tag passersby with a lingering stink.
+
+    Usage (in the room to affect):
+      @badsmellroom                        - attach script with defaults or show current settings
+      @badsmellroom off                    - remove the bad-smell script from this room
+      @badsmellroom chance=<0-1>           - set chance per entry (e.g. 0.5)
+      @badsmellroom phrase=<text>          - set scent phrase (e.g. like gutter runoff and stale garbage)
+      @badsmellroom duration=<seconds>     - set duration in seconds (default ~3h)
+
+    Each time someone enters the room, a roll is made; on success they get
+    a bad-smell overlay and -Charisma until it wears off.
+    """
+
+    key = "@badsmellroom"
+    aliases = ["@smellyroom"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        from evennia.utils.create import create_script
+
+        caller = self.caller
+        room = caller.location
+        if not room:
+            caller.msg("You must be in a room to configure it.")
+            return
+
+        # Find existing script on this room, if any
+        existing = None
+        for scr in room.scripts.all():
+            if scr.key == "bad_smell_room_script":
+                existing = scr
+                break
+
+        if existing is None:
+            try:
+                existing = create_script("world.smell.BadSmellRoomScript", obj=room)
+            except Exception as e:
+                caller.msg(f"|rCould not attach bad-smell script: {e}|n")
+                return
+
+        raw = (self.args or "").strip()
+
+        # Handle turning the effect off entirely.
+        if raw.lower() in ("off", "remove", "clear", "none"):
+            if existing:
+                existing.delete()
+                caller.msg("|gBad-smell effect removed from this room.|n")
+            else:
+                caller.msg("This room does not currently have a bad-smell effect.")
+            return
+
+        scr = existing
+        if not raw:
+            phrase = scr.db.bad_scent_phrase or "like rot and cheap solvent"
+            chance = float(scr.db.chance or 0.35)
+            duration = int(scr.db.duration or 0)
+            caller.msg("|wBad-smell room settings for this room:|n")
+            caller.msg(f"  |wphrase|n: {phrase}")
+            move_suffix = getattr(scr.db, "move_suffix", "") or "(auto: who smells <phrase>)"
+            smell_suffix = getattr(scr.db, "smell_suffix", "") or "(auto line from phrase)"
+            caller.msg(f"  |wmove_suffix|n: {move_suffix}")
+            caller.msg(f"  |wsmell_suffix|n: {smell_suffix}")
+            caller.msg(f"  |wchance|n: {chance:.2f} per entry")
+            if duration > 0:
+                caller.msg(f"  |wduration|n: {duration} seconds (~{duration//3600}h)")
+            else:
+                caller.msg("  |wduration|n: (default from world.smell)")
+            caller.msg("Use |w@badsmellroom phrase=<text>|n, |wmove=<suffix>|n, |wsmell=<suffix>|n, |wchance=<0-1>|n, |wduration=<seconds>|n to change, or |w@badsmellroom off|n to remove.")
+            return
+
+        changed = []
+
+        lower_raw = raw.lower()
+
+        # phrase=<...> may contain spaces; capture everything between 'phrase=' and the next known key or end.
+        if "phrase=" in lower_raw:
+            start = lower_raw.index("phrase=") + len("phrase=")
+            # Find the earliest of other keys after phrase=
+            next_idxs = []
+            for marker in (" move=", " smell=", " chance=", " duration="):
+                idx = lower_raw.find(marker, start)
+                if idx != -1:
+                    next_idxs.append(idx)
+            end = min(next_idxs) if next_idxs else len(raw)
+            phrase_val = raw[start:end].strip()
+            if phrase_val:
+                scr.db.bad_scent_phrase = phrase_val
+                changed.append(f"phrase='{phrase_val}'")
+
+        # move=<...> may contain spaces; capture similar to phrase.
+        if " move=" in lower_raw:
+            start = lower_raw.index(" move=") + len(" move=")
+            next_idxs = []
+            for marker in (" phrase=", " smell=", " chance=", " duration="):
+                idx = lower_raw.find(marker, start)
+                if idx != -1:
+                    next_idxs.append(idx)
+            end = min(next_idxs) if next_idxs else len(raw)
+            move_val = raw[start:end].strip()
+            if move_val:
+                scr.db.move_suffix = move_val
+                changed.append(f"move_suffix='{move_val}'")
+
+        # smell=<...> may contain spaces; capture similar to phrase.
+        if " smell=" in lower_raw:
+            start = lower_raw.index(" smell=") + len(" smell=")
+            next_idxs = []
+            for marker in (" phrase=", " move=", " chance=", " duration="):
+                idx = lower_raw.find(marker, start)
+                if idx != -1:
+                    next_idxs.append(idx)
+            end = min(next_idxs) if next_idxs else len(raw)
+            smell_val = raw[start:end].strip()
+            if smell_val:
+                scr.db.smell_suffix = smell_val
+                changed.append(f"smell_suffix='{smell_val}'")
+
+        # chance=VALUE (single token)
+        import re as _re
+        m_chance = _re.search(r"\bchance=([^\s]+)", raw, flags=_re.IGNORECASE)
+        if m_chance:
+            val_str = m_chance.group(1).strip()
+            try:
+                val = float(val_str)
+                val = max(0.0, min(1.0, val))
+                scr.db.chance = val
+                changed.append(f"chance={val:.2f}")
+            except ValueError:
+                caller.msg("Chance must be a number between 0 and 1 (e.g. 0.35).")
+
+        # duration=VALUE (single token, seconds)
+        m_dur = _re.search(r"\bduration=([^\s]+)", raw, flags=_re.IGNORECASE)
+        if m_dur:
+            dur_str = m_dur.group(1).strip()
+            try:
+                dur = int(dur_str)
+                if dur < 0:
+                    dur = 0
+                scr.db.duration = dur
+                changed.append(f"duration={dur}s")
+            except ValueError:
+                caller.msg("Duration must be an integer number of seconds.")
+        if changed:
+            caller.msg("|gUpdated bad-smell room script:|n " + ", ".join(changed))
+        else:
+            caller.msg("No valid settings were changed.")
 
 
 class CmdSpawnCamera(Command):
