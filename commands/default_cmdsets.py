@@ -120,7 +120,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         )
         from commands.builder_commands import (
             CmdTag, CmdHere, CmdListCmds, CmdCloneSpawn, CmdDig, CmdMatrixDig, CmdDesc,
-            CmdSetAttr, CmdName, CmdOpen, CmdDestroy,
+            CmdSetAttr, CmdName, CmdOpen, CmdDestroy, CmdMatrixLink,
         )
         try:
             from evennia.commands.default.general import CmdGet as DefaultCmdGet
@@ -209,6 +209,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdName())
         self.add(CmdOpen())
         self.add(CmdDestroy())
+        self.add(CmdMatrixLink())
         self.add(CmdEnterPod())
         self.add(CmdSplinterMe())
         self.add(SplinterPodCmdSet())  # CmdLeavePod here so it beats exits (priority 110)

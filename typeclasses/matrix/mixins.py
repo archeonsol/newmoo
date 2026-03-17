@@ -52,22 +52,24 @@ class NetworkedMixin:
         """
         Determine which relay this device is connected through.
 
-        Wireless devices connect through the relay covering their current location.
-        Hardwired devices connect through specific ports.
+        Gets the relay from the room this device is located in.
+        Rooms define network coverage via their network_relay attribute.
 
         Returns:
             Relay: The relay this device connects through, or None if not connected
         """
-        if self.db.connection_type == "wireless":
-            # Wireless devices connect through room coverage
-            from typeclasses.matrix.relays import RelayManager
-            return RelayManager.get_relay_for_room(self.location)
-        elif self.db.connection_type == "hardwired":
-            # Hardwired devices connect through specific ports
-            # TODO: Implement port-based relay lookup
-            # For items, hardwired might mean slotted into a console
-            pass
-        return None
+        room = self.location
+        if not room:
+            return None
+
+        # Get relay key from room
+        relay_key = getattr(room.db, 'network_relay', None)
+        if not relay_key:
+            return None
+
+        # Look up relay by key
+        from typeclasses.matrix.relays import RelayManager
+        return RelayManager.get_relay_by_key(relay_key)
 
     def is_connected(self):
         """

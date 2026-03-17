@@ -590,3 +590,54 @@ class CmdDestroy(Command):
             caller.msg("Destroyed %s." % name)
         except Exception as e:
             caller.msg("Could not destroy: %s" % e)
+
+
+class CmdMatrixLink(Command):
+    """
+    Link the current room to a network relay.
+
+    Usage:
+        mlink <relay_key>
+        mlink              (view current relay)
+        mlink/clear        (remove relay link)
+
+    Sets the network_relay attribute on the current room, which determines
+    whether networked devices in this room can connect to the Matrix.
+
+    Example:
+        mlink downtown_relay_01
+    """
+    key = "mlink"
+    locks = "cmd:perm(Builder)"
+    help_category = "Building"
+    switch_options = ("clear",)
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        clear = "clear" in getattr(self, "switches", [])
+
+        loc = caller.location
+        if not loc:
+            caller.msg("You are nowhere.")
+            return
+
+        # View current relay
+        if not args and not clear:
+            current = getattr(loc.db, 'network_relay', None)
+            if current:
+                caller.msg(f"This room is linked to relay: |w{current}|n")
+            else:
+                caller.msg("This room has no network relay link.")
+            return
+
+        # Clear relay
+        if clear:
+            loc.db.network_relay = None
+            caller.msg("Network relay link cleared from this room.")
+            return
+
+        # Set relay
+        relay_key = args
+        loc.db.network_relay = relay_key
+        caller.msg(f"Room linked to relay |w{relay_key}|n. Networked devices here will use this relay.")
