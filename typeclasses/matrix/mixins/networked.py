@@ -217,7 +217,7 @@ class NetworkedMixin(MatrixIdMixin):
     # =========================================================================
 
     def register_device_command(self, command_name, handler_method_name, help_text=None,
-                                matrix_only=False, physical_only=False, requires_acl=False,
+                                matrix_only=False, physical_only=False,
                                 auth_level=0, visibility_threshold=0):
         """
         Register a command that can be invoked via device interface menu.
@@ -231,7 +231,6 @@ class NetworkedMixin(MatrixIdMixin):
             help_text (str): Optional help text describing the command
             matrix_only (bool): If True, only accessible from Matrix (not physical access)
             physical_only (bool): If True, only accessible from physical access (not Matrix)
-            requires_acl (bool): If True, requires caller to be on device ACL (level 1+)
             auth_level (int): Minimum authorization level required (0-10)
                              0: Public access (no ACL required, anyone can use)
                              1: Minimum entry - just gets you in the door
@@ -250,12 +249,12 @@ class NetworkedMixin(MatrixIdMixin):
             # Medium access command
             self.register_device_command("describe", "handle_describe",
                 help_text="Set device description",
-                requires_acl=True, auth_level=5)
+                auth_level=5)
 
             # Root-level command for ACL management
             self.register_device_command("grant_access", "handle_grant_access",
                 help_text="Grant access to another user",
-                requires_acl=True, auth_level=10)
+                auth_level=10)
 
             # Hidden exploit command for skilled hackers
             self.register_device_command("dump_logs", "handle_dump_logs",
@@ -270,7 +269,6 @@ class NetworkedMixin(MatrixIdMixin):
             'help': help_text or f"Execute {command_name} on this device",
             'matrix_only': matrix_only,
             'physical_only': physical_only,
-            'requires_acl': requires_acl,
             'auth_level': auth_level,
             'visibility_threshold': visibility_threshold
         }
@@ -308,11 +306,8 @@ class NetworkedMixin(MatrixIdMixin):
 
         # Check authorization level
         required_auth_level = cmd_data.get('auth_level', 0)
-        if required_auth_level > 0 or cmd_data.get('requires_acl', False):
+        if required_auth_level > 0:
             caller_level = self.get_acl_level(caller)
-            # If requires_acl is set but auth_level is 0, default to level 1
-            if cmd_data.get('requires_acl', False) and required_auth_level == 0:
-                required_auth_level = 1
 
             if caller_level < required_auth_level:
                 caller.msg(f"|rAccess denied. Command '{command_name}' requires authorization level {required_auth_level} (you have level {caller_level}).|n")
