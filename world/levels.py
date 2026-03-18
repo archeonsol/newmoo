@@ -248,7 +248,8 @@ def skill_check(
 def contested_check(
     skill_a,
     skill_b,
-    tie_threshold=0.5,
+    tie_threshold=5.0,
+    tie_breaker=None,
     curve_steepness=1.0,
     q_factor=1.0,
     **kwargs
@@ -260,6 +261,8 @@ def contested_check(
         skill_a: Attacker/initiator skill level (0-150)
         skill_b: Defender/responder skill level (0-150)
         tie_threshold: Margin below which result is considered a tie (on 0-150 scale)
+                      - Default 5.0 means if they're within 5 points, it's a tie
+        tie_breaker: Who wins on a tie - 'a', 'b', or None (default: None returns 'tie')
         curve_steepness: How much skill differential matters (default 1.0)
                         - Higher = skilled fighter almost always beats unskilled
                         - Lower = more upsets possible
@@ -268,7 +271,7 @@ def contested_check(
 
     Returns:
         (winner: str, margin: float)
-        - winner: 'a', 'b', or 'tie'
+        - winner: 'a', 'b', or 'tie' (unless tie_breaker is set)
         - margin: Always positive, indicates how decisively winner won
 
     Example:
@@ -283,10 +286,14 @@ def contested_check(
         elif winner == 'tie':
             # Dead heat
 
+        # For situations that can't accept ties (e.g., initiative):
+        winner, margin = contested_check(80, 60, tie_breaker='a')
+
     Tuning guide:
         - For "skill matters a lot": curve_steepness=1.5-2.0, q_factor=0.8
         - For "David vs Goliath possible": curve_steepness=0.5-0.7, q_factor=1.2
         - tie_threshold controls how often exact ties occur
+        - tie_breaker='a' or 'b' for situations requiring a winner
     """
     import random
 
@@ -312,6 +319,8 @@ def contested_check(
 
     # Determine winner
     if margin < tie_threshold:
+        if tie_breaker in ('a', 'b'):
+            return tie_breaker, margin
         return 'tie', margin
     elif raw_margin > 0:
         return 'a', margin
