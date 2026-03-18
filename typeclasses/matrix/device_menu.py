@@ -111,7 +111,7 @@ def _process_command(caller, raw_string, **kwargs):
         return "node_error", kwargs
 
     if raw_string.strip().lower() == "back":
-        return "node_main", {"device": device, "from_matrix": from_matrix}
+        return "device_main_menu", {"device": device, "from_matrix": from_matrix}
 
     # Parse arguments
     args = raw_string.strip().split() if raw_string.strip() else []
@@ -124,7 +124,7 @@ def _process_command(caller, raw_string, **kwargs):
 
     options = {
         "key": "_default",
-        "goto": ("node_main", {"device": device, "from_matrix": from_matrix})
+        "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})
     }
 
     return text, options
@@ -165,7 +165,7 @@ def _browse_files(caller, raw_string, **kwargs):
         {
             "key": "b",
             "desc": "Back to main menu",
-            "goto": ("node_main", {"device": device, "from_matrix": from_matrix})
+            "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})
         }
     ]
 
@@ -242,7 +242,7 @@ def _view_acl(caller, raw_string, **kwargs):
         {
             "key": "b",
             "desc": "Back to main menu",
-            "goto": ("node_main", {"device": device, "from_matrix": from_matrix})
+            "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})
         }
     ]
 
@@ -283,7 +283,7 @@ def start_device_menu(caller, device, from_matrix=False):
     EvMenu(
         caller,
         "typeclasses.matrix.device_menu",
-        startnode="node_main",
+        startnode="device_main_menu",
         startnode_input=("", menu_data),
         cmd_on_exit=None,
         persistent=False,

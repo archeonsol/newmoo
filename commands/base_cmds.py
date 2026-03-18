@@ -385,7 +385,22 @@ class CmdOperate(Command):
 
     def func(self):
         caller = _command_character(self)
+
+        # If no args, check if we're in a device interface room
         if not self.args:
+            room = caller.location
+            if room and hasattr(room.db, 'parent_object') and room.db.parent_object:
+                device = room.db.parent_object
+                from typeclasses.matrix.mixins import NetworkedMixin
+                if isinstance(device, NetworkedMixin):
+                    # We're in a device interface - open its menu
+                    from typeclasses.matrix.device_menu import start_device_menu
+                    # Check if caller is a Matrix avatar
+                    from typeclasses.matrix.avatars import MatrixAvatar
+                    from_matrix = isinstance(caller, MatrixAvatar)
+                    start_device_menu(caller, device, from_matrix=from_matrix)
+                    return
+
             caller.msg("Usage: operate <device>")
             return
 
