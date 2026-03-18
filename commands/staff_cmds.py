@@ -1,5 +1,5 @@
 """
-Staff commands: stats, xp, givexp, charsheet, setstat, setskill, create, typeclasses, spawn (item/armor/vehicle/medical/or/seat/bed/pod/camera/tv/creature), creatureset, despawn, npc, makenpc, npcset, goto, @gotoroom, summon, setvoid, void, release, boot, find, announce, restore, debugkill, emotedebug, damagevehicle. CmdPending imported from roleplay_cmds.
+Staff commands: stats, xp, givexp, charsheet, setstat, setskill, create, typeclasses, spawn (item/armor/vehicle/medical/or/seat/bed/pod/camera/tv/creature), creatureset, despawn, npc, makenpc, npcset, @goto, @gotoroom, @summon, @setvoid, @void, release (@release), boot, @find, announce, restore, debugkill, emotedebug, damagevehicle. CmdPending imported from roleplay_cmds.
 """
 
 from datetime import datetime
@@ -400,10 +400,9 @@ class CmdNpcSet(Command):
 class CmdGoto(Command):
     """
     Teleport yourself to a character's location. Builder+.
-    Usage: goto <character>
+    Usage: @goto <character>
     """
-    key = "goto"
-    aliases = ["teleport", "tpto"]
+    key = "@goto"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -411,7 +410,7 @@ class CmdGoto(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            caller.msg("Usage: goto <character>")
+            caller.msg("Usage: @goto <character>")
             return
         target = caller.search(args, global_search=True)
         if not target:
@@ -478,10 +477,9 @@ class CmdGotoRoom(Command):
 class CmdSummon(Command):
     """
     Bring a character to your location. Builder+.
-    Usage: summon <character>
+    Usage: @summon <character>
     """
-    key = "summon"
-    aliases = ["bring", "fetch"]
+    key = "@summon"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -489,7 +487,7 @@ class CmdSummon(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            caller.msg("Usage: summon <character>")
+            caller.msg("Usage: @summon <character>")
             return
         target = caller.search(args, global_search=True)
         if not target:
@@ -510,10 +508,9 @@ class CmdSetVoid(Command):
     """
     Set the current room as the void (discipline holding room). Builder+.
     Voided characters are moved here and cannot leave until released.
-    Usage: setvoid
+    Usage: @setvoid
     """
-    key = "setvoid"
-    aliases = ["voidroom"]
+    key = "@setvoid"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -526,7 +523,7 @@ class CmdSetVoid(Command):
         try:
             from evennia.server.models import ServerConfig
             ServerConfig.objects.conf("VOID_ROOM_ID", loc.id)
-            caller.msg("|gThis room is now the void. Use |wvoid <character> [reason]|n to send someone here, |w@release <character>|n to free them.|n")
+            caller.msg("|gThis room is now the void. Use |w@void <character> [reason]|n to send someone here, |w@release <character>|n to free them.|n")
         except Exception as e:
             caller.msg("|rCould not set void room: {}|n".format(e))
 
@@ -534,11 +531,10 @@ class CmdSetVoid(Command):
 class CmdVoid(Command):
     """
     Send a character to the void (discipline room). They cannot leave until released. Builder+.
-    Set the void room first with |wsetvoid|n in that room.
-    Usage: void <character> [reason]
+    Set the void room first with |w@setvoid|n in that room.
+    Usage: @void <character> [reason]
     """
-    key = "void"
-    aliases = ["jail", "timeout", "discipline"]
+    key = "@void"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -546,7 +542,7 @@ class CmdVoid(Command):
         caller = self.caller
         parts = (self.args or "").strip().split(None, 1)
         if not parts:
-            caller.msg("Usage: void <character> [reason]")
+            caller.msg("Usage: @void <character> [reason]")
             return
         target = caller.search(parts[0], global_search=True)
         if not target or not hasattr(target, "move_to"):
@@ -558,14 +554,14 @@ class CmdVoid(Command):
         except Exception:
             void_id = None
         if void_id is None:
-            caller.msg("|rNo void room set. Go to the discipline room and use |wsetvoid|n first.|n")
+            caller.msg("|rNo void room set. Go to the discipline room and use |w@setvoid|n first.|n")
             return
         from evennia.utils.search import search_object
         void_room = search_object("#%s" % int(void_id))
         if not void_room:
             void_room = search_object(int(void_id))
         if not void_room:
-            caller.msg("|rVoid room no longer exists. Use |wsetvoid|n in the discipline room again.|n")
+            caller.msg("|rVoid room no longer exists. Use |w@setvoid|n in the discipline room again.|n")
             return
         void_room = void_room[0] if isinstance(void_room, list) else void_room
         target.db.voided = True
@@ -581,8 +577,8 @@ class CmdRelease(Command):
     Release a character from the void and bring them to your location. Builder+.
     Usage: @release <character>
     """
-    key = "@release"
-    aliases = ["unvoid", "free", "unjail"]
+    key = "@releasevoid"
+    aliases = ["@releasevoid"]
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -643,10 +639,9 @@ class CmdBoot(Command):
 class CmdFind(Command):
     """
     Find where a character is (room name and id). Builder+.
-    Usage: find <character>
+    Usage: @find <character>
     """
-    key = "find"
-    aliases = ["where", "locate"]
+    key = "@find"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -654,7 +649,7 @@ class CmdFind(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            caller.msg("Usage: find <character>")
+            caller.msg("Usage: @find <character>")
             return
         target = caller.search(args, global_search=True)
         if not target:
