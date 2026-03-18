@@ -102,10 +102,10 @@ class NetworkedMixin:
         # Create new cluster
         device_type = getattr(self.db, 'device_type', 'device')
 
-        # Create vestibule
+        # Create checkpoint
         vestibule = create_object(
             MatrixNode,
-            key=f"{self.key} - Vestibule"
+            key=f"{self.key} :: Checkpoint"
         )
         if not vestibule:
             return None
@@ -115,14 +115,14 @@ class NetworkedMixin:
         vestibule.db.ephemeral = True
         vestibule.db.node_type = "device_vestibule"
         vestibule.db.desc = (
-            "A stark virtual anteroom. Security protocols hum in the background, "
+            "A stark virtual checkpoint. Security protocols hum in the background, "
             "ready to spawn defensive ICE at the first sign of unauthorized access."
         )
 
         # Create interface room
         interface = create_object(
             MatrixNode,
-            key=f"{self.key} - Interface"
+            key=f"{self.key} :: Interface"
         )
         if not interface:
             vestibule.delete()
@@ -167,7 +167,8 @@ class NetworkedMixin:
         # Vestibule -> Interface (locked until ICE defeated or on ACL)
         exit_to_interface = create_object(
             MatrixExit,
-            key="interface",
+            key="Interface",
+            aliases=["in"],
             location=vestibule,
             destination=interface
         )
@@ -177,8 +178,8 @@ class NetworkedMixin:
         # Interface -> Vestibule (back exit)
         exit_to_vestibule = create_object(
             MatrixExit,
-            key="back",
-            aliases=["vestibule"],
+            key="Checkpoint",
+            aliases=["c"],
             location=interface,
             destination=vestibule
         )
@@ -573,6 +574,219 @@ class NetworkedMixin:
                 names.append(f"[Unknown #{char_pk}, level {level}]")
 
         return names
+
+    # =========================================================================
+    # ACL Management Command Registration and Handlers
+    # =========================================================================
+
+    def register_acl_commands(self):
+        """
+        Register standard ACL management commands.
+
+        Call this in at_object_creation() to add grant, revoke, and acl commands
+        to the device. Requires level 10 for grant/revoke, level 1 for viewing.
+
+        Example:
+            def at_object_creation(self):
+                super().at_object_creation()
+                self.setup_networked_attrs()
+                self.register_acl_commands()  # Add ACL management
+        """
+        self.register_device_command(
+            "grant",
+            "handle_grant_access",
+            help_text="Grant access: grant <name> <level>",
+            auth_level=10  # Root only
+        )
+        self.register_device_command(
+            "revoke",
+            "handle_revoke_access",
+            help_text="Revoke access: revoke <name>",
+            auth_level=10  # Root only
+        )
+        self.register_device_command(
+            "acl",
+            "handle_view_acl",
+            help_text="View access control list",
+            auth_level=1  # Anyone on ACL can view
+        )
+
+    def handle_grant_access(self, caller, *args):
+        """
+        Grant access to another user.
+
+        Usage (physical): patch cmd.exe grant <person in room> <level>
+        Usage (Matrix): patch cmd.exe grant <avatar name> <level>
+
+        Args:
+            caller (Character or MatrixAvatar): The character executing the command
+            *args: Target name and access level
+
+        Returns:
+            bool: True on success, False on failure
+        """
+        if len(args) < 2:
+            caller.msg("Usage: patch cmd.exe grant <name> <level>")
+            caller.msg("\nLevel 1-10:")
+            caller.msg("  1: Entry (basic access)")
+            caller.msg("  2-3: Low access")
+            caller.msg("  4-6: Medium access")
+            caller.msg("  7-9: High access")
+            caller.msg("  10: Root (ACL management)")
+            return False
+
+        target_name = args[0]
+        try:
+            level = int(args[1])
+        except ValueError:
+            caller.msg("|rLevel must be a number between 1 and 10.|n")
+            return False
+
+        if level < 1 or level > 10:
+            caller.msg("|rLevel must be between 1 and 10.|n")
+            return False
+
+        # Determine if we're in Matrix or physical context
+        from typeclasses.matrix.avatars import MatrixAvatar
+        from_matrix = isinstance(caller, MatrixAvatar)
+
+        target = None
+
+        if from_matrix:
+            # In Matrix: search for avatar by name
+            from evennia.utils.search import search_object
+            avatars = search_object(target_name, typeclass="typeclasses.matrix.avatars.MatrixAvatar")
+            if not avatars:
+                caller.msg(f"|rNo avatar found with name '{target_name}'.|n")
+                return False
+            if len(avatars) > 1:
+                caller.msg(f"|yMultiple avatars found. Using first match: {avatars[0].key}|n")
+            target = avatars[0]
+            caller.msg(f"|gGranting Matrix-only access to avatar '{target.key}' at level {level}.|n")
+        else:
+            # Physical: search for character in same room
+            if not caller.location:
+                caller.msg("|rYou must be in a location to grant physical access.|n")
+                return False
+
+            target = caller.search(target_name, location=caller.location)
+            if not target:
+                return False
+
+            from typeclasses.characters import Character
+            if not isinstance(target, Character):
+                caller.msg("|rYou can only grant access to characters.|n")
+                return False
+
+            caller.msg(f"|gGranting physical + Matrix access to '{target.key}' at level {level}.|n")
+
+        # Add to ACL
+        self.add_to_acl(target, level=level)
+        caller.msg(f"|gAccess granted successfully.|n")
+
+        # Notify target if they're online
+        if target.has_account:
+            target.msg(f"|yYou have been granted level {level} access to {self.key}.|n")
+
+        return True
+
+    def handle_revoke_access(self, caller, *args):
+        """
+        Revoke access from a user.
+
+        Usage: patch cmd.exe revoke <name>
+
+        Args:
+            caller (Character or MatrixAvatar): The character executing the command
+            *args: Target name
+
+        Returns:
+            bool: True on success, False on failure
+        """
+        if not args:
+            caller.msg("Usage: patch cmd.exe revoke <name>")
+            return False
+
+        target_name = args[0]
+
+        # Search in ACL by name
+        if not hasattr(self.db, 'acl') or not self.db.acl:
+            caller.msg("|rNo one has access to this device.|n")
+            return False
+
+        from evennia.objects.models import ObjectDB
+        found_pk = None
+        found_name = None
+
+        for char_pk, level in self.db.acl.items():
+            try:
+                obj = ObjectDB.objects.get(pk=char_pk)
+                if obj.key.lower() == target_name.lower():
+                    found_pk = char_pk
+                    found_name = obj.key
+                    break
+            except ObjectDB.DoesNotExist:
+                continue
+
+        if not found_pk:
+            caller.msg(f"|rNo user '{target_name}' found in ACL.|n")
+            return False
+
+        # Don't allow revoking yourself
+        caller_pk = caller.pk
+        from typeclasses.matrix.avatars import MatrixAvatar
+        if isinstance(caller, MatrixAvatar):
+            operator = caller.db.operator
+            if operator:
+                caller_pk = operator.pk
+
+        if found_pk == caller_pk:
+            caller.msg("|rYou cannot revoke your own access.|n")
+            return False
+
+        # Remove from ACL
+        del self.db.acl[found_pk]
+        caller.msg(f"|gAccess revoked for '{found_name}'.|n")
+
+        # Notify target if they're online
+        try:
+            target = ObjectDB.objects.get(pk=found_pk)
+            if target.has_account:
+                target.msg(f"|rYour access to {self.key} has been revoked.|n")
+        except ObjectDB.DoesNotExist:
+            pass
+
+        return True
+
+    def handle_view_acl(self, caller, *args):
+        """
+        View the access control list.
+
+        Usage: patch cmd.exe acl
+
+        Args:
+            caller (Character or MatrixAvatar): The character executing the command
+            *args: Unused
+
+        Returns:
+            bool: Always True
+        """
+        acl_names = self.get_acl_names()
+
+        caller.msg(f"|c=== Access Control List for {self.key} ===|n")
+        if not acl_names:
+            caller.msg("\nNo access restrictions (public device).")
+        else:
+            caller.msg("\nAuthorized users:")
+            for name in acl_names:
+                caller.msg(f"  {name}")
+
+        caller.msg("\n|yYour access level:|n " + str(self.get_acl_level(caller)))
+        return True
+
+    # =========================================================================
+    # File Storage
+    # =========================================================================
 
     def add_file(self, filename, filetype, contents):
         """
