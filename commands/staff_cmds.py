@@ -1,9 +1,12 @@
 """
-Staff commands: stats, xp, givexp, charsheet, setstat, setskill, create, typeclasses, spawn (item/armor/vehicle/medical/or/seat/bed/pod/camera/tv/creature), creatureset, despawn, npc, makenpc, npcset, goto, @gotoroom, summon, setvoid, void, release, boot, find, announce, restore, debugkill, emotedebug, damagevehicle. CmdPending imported from roleplay_cmds.
+Staff commands: stats, xp, givexp, charsheet, setstat, setskill, create, typeclasses, spawn (item/armor/vehicle/medical/or/seat/bed/pod/camera/tv/creature), creatureset, despawn, npc, makenpc, npcset, @goto, @gotoroom, @summon, @setvoid, @void, release (@release), boot, @find, announce, restore, debugkill, emotedebug, damagevehicle. CmdPending imported from roleplay_cmds.
 """
+
+from datetime import datetime
 
 from commands.base_cmds import Command, ADMIN_LOCK
 from commands.roleplay_cmds import CmdPending
+from evennia.commands.default.account import CmdCharCreate, CmdCharDelete
 from evennia.utils import logger
 from evennia.utils.evtable import EvTable
 
@@ -397,10 +400,9 @@ class CmdNpcSet(Command):
 class CmdGoto(Command):
     """
     Teleport yourself to a character's location. Builder+.
-    Usage: goto <character>
+    Usage: @goto <character>
     """
-    key = "goto"
-    aliases = ["teleport", "tpto"]
+    key = "@goto"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -408,7 +410,7 @@ class CmdGoto(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            caller.msg("Usage: goto <character>")
+            caller.msg("Usage: @goto <character>")
             return
         target = caller.search(args, global_search=True)
         if not target:
@@ -475,10 +477,9 @@ class CmdGotoRoom(Command):
 class CmdSummon(Command):
     """
     Bring a character to your location. Builder+.
-    Usage: summon <character>
+    Usage: @summon <character>
     """
-    key = "summon"
-    aliases = ["bring", "fetch"]
+    key = "@summon"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -486,7 +487,7 @@ class CmdSummon(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            caller.msg("Usage: summon <character>")
+            caller.msg("Usage: @summon <character>")
             return
         target = caller.search(args, global_search=True)
         if not target:
@@ -507,10 +508,9 @@ class CmdSetVoid(Command):
     """
     Set the current room as the void (discipline holding room). Builder+.
     Voided characters are moved here and cannot leave until released.
-    Usage: setvoid
+    Usage: @setvoid
     """
-    key = "setvoid"
-    aliases = ["voidroom"]
+    key = "@setvoid"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -523,7 +523,7 @@ class CmdSetVoid(Command):
         try:
             from evennia.server.models import ServerConfig
             ServerConfig.objects.conf("VOID_ROOM_ID", loc.id)
-            caller.msg("|gThis room is now the void. Use |wvoid <character> [reason]|n to send someone here, |w@release <character>|n to free them.|n")
+            caller.msg("|gThis room is now the void. Use |w@void <character> [reason]|n to send someone here, |w@release <character>|n to free them.|n")
         except Exception as e:
             caller.msg("|rCould not set void room: {}|n".format(e))
 
@@ -531,11 +531,10 @@ class CmdSetVoid(Command):
 class CmdVoid(Command):
     """
     Send a character to the void (discipline room). They cannot leave until released. Builder+.
-    Set the void room first with |wsetvoid|n in that room.
-    Usage: void <character> [reason]
+    Set the void room first with |w@setvoid|n in that room.
+    Usage: @void <character> [reason]
     """
-    key = "void"
-    aliases = ["jail", "timeout", "discipline"]
+    key = "@void"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -543,7 +542,7 @@ class CmdVoid(Command):
         caller = self.caller
         parts = (self.args or "").strip().split(None, 1)
         if not parts:
-            caller.msg("Usage: void <character> [reason]")
+            caller.msg("Usage: @void <character> [reason]")
             return
         target = caller.search(parts[0], global_search=True)
         if not target or not hasattr(target, "move_to"):
@@ -555,14 +554,14 @@ class CmdVoid(Command):
         except Exception:
             void_id = None
         if void_id is None:
-            caller.msg("|rNo void room set. Go to the discipline room and use |wsetvoid|n first.|n")
+            caller.msg("|rNo void room set. Go to the discipline room and use |w@setvoid|n first.|n")
             return
         from evennia.utils.search import search_object
         void_room = search_object("#%s" % int(void_id))
         if not void_room:
             void_room = search_object(int(void_id))
         if not void_room:
-            caller.msg("|rVoid room no longer exists. Use |wsetvoid|n in the discipline room again.|n")
+            caller.msg("|rVoid room no longer exists. Use |w@setvoid|n in the discipline room again.|n")
             return
         void_room = void_room[0] if isinstance(void_room, list) else void_room
         target.db.voided = True
@@ -578,8 +577,8 @@ class CmdRelease(Command):
     Release a character from the void and bring them to your location. Builder+.
     Usage: @release <character>
     """
-    key = "@release"
-    aliases = ["unvoid", "free", "unjail"]
+    key = "@releasevoid"
+    aliases = ["@releasevoid"]
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -640,10 +639,9 @@ class CmdBoot(Command):
 class CmdFind(Command):
     """
     Find where a character is (room name and id). Builder+.
-    Usage: find <character>
+    Usage: @find <character>
     """
-    key = "find"
-    aliases = ["where", "locate"]
+    key = "@find"
     locks = "cmd:perm(Builder)"
     help_category = "Staff"
 
@@ -651,7 +649,7 @@ class CmdFind(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            caller.msg("Usage: find <character>")
+            caller.msg("Usage: @find <character>")
             return
         target = caller.search(args, global_search=True)
         if not target:
@@ -1368,7 +1366,7 @@ class CmdCreatureSet(Command):
             return
         sub = args[1].lower()
         if sub == "notarget":
-            from world.creature_combat import stop_creature_ai_ticker
+            from world.combat.creature_combat import stop_creature_ai_ticker
             creature.db.current_target = None
             creature.db.ai_state = "idle"
             stop_creature_ai_ticker(creature)
@@ -1387,7 +1385,7 @@ class CmdCreatureSet(Command):
                 return
             creature.db.current_target = target
             creature.db.ai_state = "aggro"
-            from world.creature_combat import start_creature_ai_ticker
+            from world.combat.creature_combat import start_creature_ai_ticker
             start_creature_ai_ticker(creature)
             caller.msg("|g%s will now attack %s. AI runs every ~8 seconds.|n" % (creature.name, target.name))
             return
@@ -1913,3 +1911,317 @@ class CmdEmoteDebug(Command):
         self.caller.db.emote_debug = not current
         status = "on" if self.caller.db.emote_debug else "off"
         self.caller.msg(f"Emote debug is now |w{status}|n. Use an emote to see each viewer's line.")
+
+
+class CmdNextNote(Command):
+    """
+    Review the next unread PC note. Read-tracking is per staff Account.
+
+    Usage:
+      @nextnote          - show the next unread note and mark it read
+      @nextnote/peek     - show next unread note without marking read
+      @nextnote/count    - show how many unread notes you have
+    """
+
+    key = "@nextnote"
+    aliases = ["nextnote", "@next-note"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def _border_line(self):
+        # Keep it short so it doesn't wrap on typical telnet widths.
+        return f"|g{'-' * 38}|n"
+
+    def _format_server_time(self, created_at, *, fmt="%Y-%m-%d %H:%M"):
+        if not created_at:
+            return "?"
+        try:
+            dt = datetime.fromisoformat(str(created_at))
+        except ValueError:
+            return str(created_at)
+        try:
+            dt = dt.astimezone()
+        except Exception:
+            pass
+        return dt.strftime(fmt)
+
+    def _truncate(self, text, *, limit):
+        if text is None:
+            return ""
+        txt = str(text).strip()
+        if len(txt) <= limit:
+            return txt
+        return txt[: max(0, limit - 3)] + "..."
+
+    def func(self):
+        from world.notes import staff_unread_notes, staff_mark_read
+
+        caller = self.caller
+        account = self.account or getattr(caller, "account", None) or caller
+        # Some command base implementations may not set `self.switches` at all.
+        switches = [s.lower() for s in getattr(self, "switches", [])]
+
+        unread = staff_unread_notes(account)
+        if "count" in switches:
+            caller.msg(f"|wUnread PC notes for you:|n |w{len(unread)}|n")
+            return
+
+        if not unread:
+            caller.msg("You have no unread PC notes.")
+            return
+
+        note = unread[0]
+        nid = int(note.get("id") or 0)
+
+        created_txt = self._format_server_time(note.get("created_at"))
+        caller.msg(
+            f"{self._border_line()}\n"
+            f"|gPC Note|n |y#{note.get('id')}|n  |c{(note.get('category') or 'UNCATEGORIZED').strip().upper()}|n\n"
+            f"|w{note.get('title') or '(untitled)'}|n\n"
+            f"|xFrom|n: |w{note.get('char_key') or 'Unknown'}|n"
+            f" |x(account)|n: |w{note.get('account_key') or 'Unknown'}|n\n"
+            f"|xCreated|n: |x({created_txt})|n\n"
+            f"{self._border_line()}\n"
+            f"{note.get('body') or ''}"
+        )
+
+        if "peek" not in switches:
+            staff_mark_read(account, nid)
+            remaining = len(unread) - 1
+            if remaining > 0:
+                caller.msg(f"|xMarked read. Remaining unread for you: {remaining}.|n")
+
+
+class CmdGmViewNotes(Command):
+    """
+    View a player's PC notes (with optional category filter and paging). Builder+.
+
+    Usage:
+      @gmviewnotes <character>                 - newest first, first page
+      @gmviewnotes <character>=<category>      - filter by category
+      @gmviewnotes/page <N> <character>        - page N (all categories)
+      @gmviewnotes/page <N> <character>=<cat>  - page N, filtered by category
+      @gmviewnotes <character> <note_id>     - show a specific note (by #id)
+      @gmviewnotes <note_id>                 - show a specific note (by #id)
+    """
+
+    key = "@gmviewnotes"
+    aliases = ["gmviewnotes", "@gm-notes"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def _border_line(self):
+        return f"|g{'-' * 38}|n"
+
+    def _format_server_time(self, created_at, *, fmt="%Y-%m-%d %H:%M"):
+        if not created_at:
+            return "?"
+        try:
+            dt = datetime.fromisoformat(str(created_at))
+        except ValueError:
+            return str(created_at)
+        try:
+            dt = dt.astimezone()
+        except Exception:
+            pass
+        return dt.strftime(fmt)
+
+    def _truncate(self, text, *, limit):
+        if text is None:
+            return ""
+        txt = str(text).strip()
+        if len(txt) <= limit:
+            return txt
+        return txt[: max(0, limit - 3)] + "..."
+
+    def func(self):
+        from world.notes import (
+            notes_for_character_name,
+            DEFAULT_CATEGORIES,
+            get_note_by_id,
+            staff_mark_read,
+        )
+
+        caller = self.caller
+        account = self.account or getattr(caller, "account", None) or caller
+
+        # Some command base implementations may not set `self.switches` at all.
+        switches = [s.lower() for s in getattr(self, "switches", [])]
+        raw = (self.args or "").strip()
+        if not raw:
+            cats_txt = ", ".join(DEFAULT_CATEGORIES)
+            caller.msg(
+                "Usage:\n"
+                "  @gmviewnotes <character>\n"
+                "  @gmviewnotes <character>=<category>\n"
+                "  @gmviewnotes/page <N> <character>\n"
+                "  @gmviewnotes/page <N> <character>=<category>\n"
+                "  @gmviewnotes <character> <note_id>\n"
+                "  @gmviewnotes <note_id>\n"
+                f"Categories: |w{cats_txt}|n"
+            )
+            return
+
+        page = 1
+        target_part = raw
+
+        # Support "@gmviewnotes/page <N> ..." even in templates that don't
+        # populate `self.switches` correctly.
+        if "page" in switches or (not switches and raw.split(None, 1) and raw.split(None, 1)[0].isdigit()):
+            parts = raw.split(None, 1)
+            if parts and parts[0].isdigit():
+                try:
+                    page = max(1, int(parts[0]))
+                except ValueError:
+                    page = 1
+                target_part = parts[1] if len(parts) > 1 else ""
+
+        if not target_part:
+            caller.msg("Specify a character name.")
+            return
+
+        note_id = None
+        note_only = False
+
+        # Allow "@gmviewnotes <note_id>" to view a single note directly.
+        if target_part.isdigit():
+            note_id = int(target_part)
+            note_only = True
+        else:
+            # Allow "@gmviewnotes <character>[=<cat>] <note_id>".
+            # Capture trailing numeric token so character names can still include '=' once.
+            import re
+
+            m = re.match(r"^(?P<main>.+?)\s+(?P<nid>\d+)\s*$", target_part, flags=re.I)
+            if m:
+                try:
+                    note_id = int(m.group("nid"))
+                    target_part = m.group("main").strip()
+                except ValueError:
+                    note_id = None
+
+        # Optional "=CATEGORY"
+        if "=" in target_part:
+            char_name, category = target_part.split("=", 1)
+            char_name = char_name.strip()
+            category = category.strip().upper()
+            if category and category not in DEFAULT_CATEGORIES:
+                cats_txt = ", ".join(DEFAULT_CATEGORIES)
+                caller.msg(f"|rInvalid category.|n Choose one of: |w{cats_txt}|n.")
+                return
+        else:
+            char_name = target_part.strip()
+            category = None
+
+        # If the user only passed a note id, don't treat it as a character name.
+        if note_only:
+            char_name = ""
+            category = None
+
+        if not char_name:
+            if note_id is None:
+                caller.msg("Specify a character name or a note id.")
+                return
+
+        # Helper: display a single note body.
+        def _display_note(note: dict) -> None:
+            nid = note.get("id")
+            cat = str(note.get("category") or "UNCATEGORIZED").strip().upper()
+            created_txt = self._format_server_time(note.get("created_at"))
+            caller.msg(
+                f"{self._border_line()}\n"
+                f"|gPC Note|n |y#{nid}|n  |c{cat}|n\n"
+                f"|w{note.get('title') or '(untitled)'}|n\n"
+                f"|xFrom|n: |w{note.get('char_key') or 'Unknown'}|n"
+                f" |x(account)|n: |w{note.get('account_key') or 'Unknown'}|n\n"
+                f"|xCreated|n: |x({created_txt})|n\n"
+                f"{self._border_line()}\n"
+                f"{note.get('body') or ''}"
+            )
+            if note_id is not None:
+                staff_mark_read(account, int(note_id))
+                caller.msg("|xMarked read.|n")
+
+        # If a note id was specified, show it (and mark read).
+        if note_id is not None:
+            note = get_note_by_id(note_id)
+            if not note:
+                caller.msg(f"No note found with |y#{note_id}|n.")
+                return
+
+            # If the user also provided a character name, ensure it matches.
+            if char_name:
+                expected = char_name.strip().lower()
+                if (note.get("char_key") or "").strip().lower() != expected:
+                    caller.msg(
+                        f"|rThat note (|y#{note_id}|r) is not for |w{char_name}|n."
+                    )
+                    return
+                if category:
+                    wanted = category.strip().lower()
+                    if (note.get("category") or "").strip().lower() != wanted:
+                        caller.msg(
+                            f"|rThat note (|y#{note_id}|r) is not in category |w{category}|n."
+                        )
+                        return
+
+            _display_note(note)
+            return
+
+        notes = notes_for_character_name(char_name, category=category)
+        if not notes:
+            if category:
+                caller.msg(
+                    f"No notes found for |w{char_name}|n in category |w{category}|n "
+                    "(note names are matched by exact key at time of note creation)."
+                )
+            else:
+                caller.msg(
+                    f"No notes found for |w{char_name}|n "
+                    "(note names are matched by exact key at time of note creation)."
+                )
+            return
+
+        per_page = 10
+        total = len(notes)
+        max_page = (total + per_page - 1) // per_page or 1
+        if page > max_page:
+            page = max_page
+        start = (page - 1) * per_page
+        end = start + per_page
+        page_notes = notes[start:end]
+
+        char_key = notes[0].get("char_key", char_name)
+
+        lines = [
+            self._border_line(),
+            f"|gNotes|n for |w{char_key}|n",
+        ]
+        if category:
+            lines.append(f"|cCategory|n: |w{category}|n")
+        lines.append(f"|x(page {page}/{max_page}, newest first)|n")
+        lines.append(
+            "Use |w@gmviewnotes <character> <id>|n or |w@gmviewnotes <id>|n to view a note, or page again."
+        )
+        for n in page_notes:
+            nid = n.get("id")
+            cat = str(n.get("category") or "UNCATEGORIZED").strip().upper()
+            title = self._truncate(n.get("title", ""), limit=42)
+            created_txt = self._format_server_time(n.get("created_at"))
+            lines.append(
+                f"  |y#{nid}|n  |c{cat}|n  |w{title}|n |x({created_txt})|n"
+            )
+        lines.append(self._border_line())
+        caller.msg("\n".join(lines))
+
+
+class StaffCharCreate(CmdCharCreate):
+    """Character creation: staff only (players get one character at account creation)."""
+
+    locks = "cmd:perm(Builder)"
+
+
+class StaffCharDelete(CmdCharDelete):
+    """Character deletion: staff only."""
+
+    locks = "cmd:perm(Builder)"
