@@ -104,7 +104,7 @@ class PuppetRigMixin:
         Puppet a character back to their body.
 
         Uses a staged sequence with delays:
-        1. Initial DISCO message
+        1. Initial DISCO message + mark avatar idle
         2. 1s delay -> target loses consciousness + severity-based message
         3. 1s delay -> puppet swap
         4. 1s delay -> character regains consciousness + final message + look
@@ -124,6 +124,9 @@ class PuppetRigMixin:
 
         # Send initial DISCO message to target
         target.msg(f"|rDISCO:|n {reason}")
+
+        # Mark avatar as idle immediately to prevent reconnection loop
+        target.db.idle = True
 
         # Staged puppet-out sequence
         delay(1, self._puppet_out_stage1, character, target, severity, account)

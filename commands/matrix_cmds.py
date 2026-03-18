@@ -6,10 +6,11 @@ Commands for interacting with the Matrix system.
 CmdJackIn - Jack into the Matrix through a dive rig
 CmdJackOut - Disconnect from the Matrix
 CmdExec - Execute a program in a Matrix interface room
-CmdRoute - Navigate router networks to connected devices
+CmdRoute - Navigate router networks to connected devices via menu
 """
 
 from evennia import Command
+from evennia.utils.evmenu import EvMenu
 from typeclasses.matrix.devices import DiveRig
 from typeclasses.matrix.avatars import JACKOUT_NORMAL
 from typeclasses.matrix.objects import Router, NetworkedObject
@@ -60,8 +61,7 @@ class CmdJackOut(Command):
     Usage:
         jack out
 
-    Cleanly disconnects you from the Matrix. Your avatar will be marked
-    as idle and cleaned up after a grace period.
+    Cleanly disconnects you from the Matrix and returns you to your body.
 
     Note: Cannot jack out during combat or other restricted situations.
     """
@@ -80,16 +80,21 @@ class CmdJackOut(Command):
             caller.msg("You are not jacked into the Matrix.")
             return
 
-        # Check if we have a real character to return to
-        real_character = caller.db.real_character
-        if not real_character:
-            caller.msg("Error: Cannot locate your physical body.")
-            return
-
-        # Check if we have an entry device
+        # Check if we have an entry device (the rig)
         entry_device = caller.db.entry_device
         if not entry_device:
             caller.msg("Error: Cannot locate your dive rig connection.")
+            return
+
+        # Get character from rig's active connection
+        conn = entry_device.db.active_connection
+        if not conn:
+            caller.msg("Error: No active connection found.")
+            return
+
+        character = conn.get('character')
+        if not character:
+            caller.msg("Error: Cannot locate your physical body.")
             return
 
         # TODO: Check for combat or other restrictions
@@ -97,9 +102,9 @@ class CmdJackOut(Command):
         #     caller.msg("You cannot jack out during combat!")
         #     return
 
-        # Perform clean logout
-        entry_device.jack_out_character(
-            real_character,
+        # Perform clean logout via the rig
+        entry_device.disconnect(
+            character,
             severity=JACKOUT_NORMAL,
             reason="Logging out"
         )
@@ -184,23 +189,23 @@ class CmdExec(Command):
 
 class CmdRoute(Command):
     """
-    Navigate the router network to connected devices and locations.
+    Navigate the router network to connected devices via menu.
 
     Usage:
-        route              - Show usage help
-        route list         - List all connected cells (locations)
-        route list <cell>  - List devices in a specific cell
-        route connect <device> - Connect to a device's interface
+        route via <router>
+        route back
 
-    The router acts as a network hub, showing all devices connected through
-    it across different physical locations (cells). You can navigate to any
-    device's Matrix interface from the router console.
+    route via <router> - Opens an interactive menu showing all access points (rooms)
+                         connected to the specified router. You can browse devices
+                         in each access point and connect to their Matrix interface.
+
+    route back - Exit a device interface and return to the router that device is
+                 currently connected to. Works from vestibule or interface rooms.
 
     Examples:
-        route list
-        route list Downtown Sector Alpha
-        route connect Hub #1247
-        route connect camera
+        route via Cortex Router
+        route via downtown_router
+        route back
     """
 
     key = "route"
@@ -213,170 +218,123 @@ class CmdRoute(Command):
         # Check if caller is a Matrix avatar
         from typeclasses.matrix.avatars import MatrixAvatar
         if not isinstance(caller, MatrixAvatar):
-            caller.msg("You must be in the Matrix to use the router.")
+            caller.msg("You must be in the Matrix to use routers.")
             return
 
-        # Check if there's a router in the room
+        if not self.args.strip():
+            caller.msg("Usage: route via <router> | route back")
+            return
+
+        # Parse command
+        args = self.args.strip().lower()
+
+        # Handle "route back" - exit device interface
+        if args in ("back", "exit", "return"):
+            self.route_back(caller)
+            return
+
+        # Parse "via <router>" syntax
+        if args.startswith("via "):
+            router_name = args[4:].strip()
+        else:
+            router_name = args
+
+        if not router_name:
+            caller.msg("Usage: route via <router> | route back")
+            return
+
+        # Search for router in current location
+        router = caller.search(router_name, location=caller.location)
+
+        if not isinstance(router, Router):
+            caller.msg("That is not a router.")
+            return
+
+        # Check if router is online
+        if not router.db.online:
+            caller.msg(f"{router.key} is offline. No connection available.")
+            return
+
+        # Start the router access menu
+        EvMenu(
+            caller,
+            "commands.matrix_menus",
+            startnode="router_access_points",
+            startnode_input=("", {"router": router}),
+            cmdset_mergetype="Union",
+            cmd_on_exit=None,  # Suppress auto-look on menu exit
+        )
+
+    def route_back(self, caller):
+        """
+        Exit a device interface and return to the router.
+
+        Traces: interface/vestibule → parent_object → location → router
+        """
         room = caller.location
         if not room:
-            caller.msg("You are nowhere. This shouldn't happen.")
+            caller.msg("You are nowhere.")
             return
 
-        router = None
-        for obj in room.contents:
-            if isinstance(obj, Router):
-                router = obj
-                break
-
-        if not router:
-            caller.msg("There is no router here.")
+        # Check if we're in a device interface or vestibule
+        parent_device = getattr(room.db, 'parent_object', None)
+        if not parent_device:
+            caller.msg("You are not in a device interface. Use this command from within a device's vestibule or interface room.")
             return
 
-        # Parse arguments
-        if not self.args.strip():
-            # Show usage
-            caller.msg("|c=== Router Console ===|n")
-            caller.msg(f"Connected to: {router.key}")
-            caller.msg(f"Status: {router.get_status()}\n")
-            caller.msg("Usage:")
-            caller.msg("  route list             - Show connected cells")
-            caller.msg("  route list <cell>      - Show devices in cell")
-            caller.msg("  route connect <device> - Connect to device")
+        # Get the device's current physical location
+        device_location = parent_device.location
+        if not device_location:
+            caller.msg("|rError: Device has no physical location. Connection lost.|n")
             return
 
-        args = self.args.strip().split(None, 1)
-        subcommand = args[0].lower()
-
-        if subcommand == "list":
-            # List cells or devices in a cell
-            if len(args) == 1:
-                # List all cells
-                self.list_cells(caller, router)
-            else:
-                # List devices in specific cell
-                cell_name = args[1]
-                self.list_devices_in_cell(caller, router, cell_name)
-
-        elif subcommand == "connect":
-            # Connect to a device
-            if len(args) < 2:
-                caller.msg("Usage: route connect <device>")
-                return
-            device_name = args[1]
-            self.connect_to_device(caller, router, device_name)
-
-        else:
-            caller.msg(f"Unknown subcommand: {subcommand}")
-            caller.msg("Valid subcommands: list, connect")
-
-    def list_cells(self, caller, router):
-        """List all cells (locations) connected to this router."""
-        from evennia.utils.search import search_object
-
-        cells = {}  # cell_name -> [devices]
-
-        # Find all rooms that reference this router
-        # For now, search all rooms and check their network_router attribute
-        # TODO: Optimize by maintaining linked_rooms on router
-        from typeclasses.rooms import Room
-        all_rooms = Room.objects.all()
-
-        for room in all_rooms:
-            router_dbref = getattr(room.db, 'network_router', None)
-            if router_dbref == router.pk:
-                cell_name = getattr(room.db, 'cell_name', room.key)
-
-                # Get devices in this room
-                devices = [obj for obj in room.contents if isinstance(obj, NetworkedObject)]
-
-                if devices:
-                    if cell_name not in cells:
-                        cells[cell_name] = []
-                    cells[cell_name].extend(devices)
-
-        if not cells:
-            caller.msg("|c=== Router Network ===|n")
-            caller.msg("No cells connected to this router.")
+        # Get the router for this location
+        router_dbref = getattr(device_location.db, 'network_router', None)
+        if not router_dbref:
+            caller.msg("|rError: Device's location has no router connection.|n")
             return
 
-        caller.msg("|c=== Router Network ===|n")
-        caller.msg(f"Connected Cells:\n")
-        for cell_name, devices in sorted(cells.items()):
-            caller.msg(f"  {cell_name} ({len(devices)} device{'s' if len(devices) != 1 else ''})")
-
-        caller.msg("\nUse 'route list <cell>' to see devices in a cell.")
-
-    def list_devices_in_cell(self, caller, router, cell_name):
-        """List all devices in a specific cell."""
-        from typeclasses.rooms import Room
-        all_rooms = Room.objects.all()
-
-        # Find devices in matching cell
-        devices = []
-        actual_cell_name = None
-
-        for room in all_rooms:
-            router_dbref = getattr(room.db, 'network_router', None)
-            if router_dbref == router.pk:
-                room_cell_name = getattr(room.db, 'cell_name', room.key)
-
-                # Match cell name (case-insensitive partial match)
-                if cell_name.lower() in room_cell_name.lower():
-                    actual_cell_name = room_cell_name
-                    room_devices = [obj for obj in room.contents if isinstance(obj, NetworkedObject)]
-                    devices.extend(room_devices)
-
-        if not devices:
-            caller.msg(f"No devices found in cell matching '{cell_name}'.")
+        # Load the router
+        try:
+            router = Router.objects.get(pk=router_dbref)
+        except Router.DoesNotExist:
+            caller.msg("|rError: Router no longer exists.|n")
             return
 
-        caller.msg(f"|c=== {actual_cell_name} ===|n")
-        caller.msg(f"{len(devices)} device{'s' if len(devices) != 1 else ''}:\n")
-
-        for i, device in enumerate(devices, 1):
-            device_type = getattr(device.db, 'device_type', 'unknown')
-            security = getattr(device.db, 'security_level', 0)
-            caller.msg(f"  {i}. {device.key} ({device_type}, security: {security})")
-
-        caller.msg("\nUse 'route connect <device>' to connect to a device.")
-
-    def connect_to_device(self, caller, router, device_name):
-        """Connect caller to a device's vestibule."""
-        from typeclasses.rooms import Room
-        from evennia.utils.search import search_object
-
-        # Find the device
-        all_rooms = Room.objects.all()
-        found_device = None
-
-        for room in all_rooms:
-            router_dbref = getattr(room.db, 'network_router', None)
-            if router_dbref == router.pk:
-                for obj in room.contents:
-                    if isinstance(obj, NetworkedObject):
-                        # Match device name (case-insensitive partial match)
-                        if device_name.lower() in obj.key.lower():
-                            found_device = obj
-                            break
-                if found_device:
-                    break
-
-        if not found_device:
-            caller.msg(f"Device '{device_name}' not found on this network.")
+        # Check if router is online
+        if not router.db.online:
+            caller.msg(f"|rConnection lost: {router.key} is offline.|n")
             return
 
-        # Get or create the device cluster
-        cluster = found_device.get_or_create_cluster()
-        if not cluster:
-            caller.msg(f"|rError: Could not establish connection to {found_device.key}.|n")
+        # Get router's location
+        router_location = router.location
+        if not router_location:
+            caller.msg("|rError: Router has no physical location.|n")
             return
 
-        vestibule = cluster.get('vestibule')
-        if not vestibule:
-            caller.msg(f"|rError: Device interface unavailable.|n")
-            return
+        # Show closing message
+        caller.msg(f"|gConnection closed. Returned to {router.key}.|n")
 
-        # Move to vestibule
-        caller.msg(f"|cEstablishing connection to {found_device.key}...|n")
-        caller.move_to(vestibule, quiet=True)
-        caller.execute_cmd("look")
+        # Announce departure to current room
+        room.msg_contents(
+            f"{caller.key} disconnects and fades into the data stream.",
+            exclude=[caller]
+        )
+
+        # Delay 1 second before moving
+        from evennia.utils import delay
+
+        def _do_move():
+            # Move to router's location (let Evennia handle auto-look)
+            caller.move_to(router_location)
+
+            # Announce arrival
+            router_location.msg_contents(
+                f"{caller.key} materializes from a device connection.",
+                exclude=[caller]
+            )
+
+        delay(1.0, _do_move)
+
+
+# Router Access Menu Nodes are in commands/matrix_menus.py

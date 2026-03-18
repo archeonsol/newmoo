@@ -3,10 +3,11 @@ Matrix Avatars
 
 Virtual representations of characters diving the Matrix.
 
-MatrixAvatar - Temporary character object created when jacking into the Matrix
+MatrixAvatar - Virtual character object created when jacking into the Matrix
 """
 
 from evennia import DefaultCharacter
+from typeclasses.mixins import FurnitureMixin, RoleplayMixin
 
 # Jack-out severity levels
 JACKOUT_NORMAL = 0      # Clean logout, no penalties
@@ -15,24 +16,125 @@ JACKOUT_FORCED = 2      # Violent disconnect, physical damage
 JACKOUT_FATAL = 3       # Unsurvivable... Sorry
 
 
-class MatrixAvatar(DefaultCharacter):
+class MatrixAvatar(RoleplayMixin, FurnitureMixin, DefaultCharacter):
     """
     Virtual representation of a character diving the Matrix.
 
-    Created when a character jacks in through a device, destroyed when they jack out.
-    Simpler than physical characters - no body parts, injuries, or complex inventory.
+    Created when a character jacks in through a device. Persists in the Matrix
+    until destroyed.
+
+    Mixins:
+    - RoleplayMixin: Recognition, display names, say/whisper, movement announcements
+    - FurnitureMixin: Sitting/lying on virtual furniture (nodes, consoles, etc.)
+
+    Unlike physical Characters, avatars have NO:
+    - Body parts, organs, medical systems
+    - Hunger, thirst, or survival needs
+    - Sleep/wake messages
+    - XP earning
+    - Clothing/worn items
+    - Stats/skills (uses controlling character's stats for checks)
+
+    The DiveRig owns the connection state - avatars are just puppets.
 
     Attributes:
-        real_character (Character): Link back to the meatspace character
-        entry_device (NetworkedObject/NetworkedItem): Device used to jack in
+        entry_device (DiveRig): The rig this avatar is connected through
+        dead (bool): Whether this avatar has been killed
     """
 
     def at_object_creation(self):
         """Called when avatar is first created."""
         super().at_object_creation()
-        self.db.real_character = None
         self.db.entry_device = None
-        self.db.idle = False
+        self.db.dead = False
+
+    def get_controlling_character(self):
+        """
+        Get the physical character controlling this avatar.
+
+        Returns:
+            Character: The meatspace character jacked into this avatar, or None
+        """
+        rig = self.db.entry_device
+        if not rig or not hasattr(rig, 'db'):
+            return None
+        conn = rig.db.active_connection
+        if not conn:
+            return None
+        return conn.get('character')
+
+    def get_stat_level(self, stat_key):
+        """Delegate to controlling character's stats."""
+        char = self.get_controlling_character()
+        if char and hasattr(char, 'get_stat_level'):
+            return char.get_stat_level(stat_key)
+        return 0
+
+    def get_display_stat(self, stat_name):
+        """Delegate to controlling character's display stats (with buffs)."""
+        char = self.get_controlling_character()
+        if char and hasattr(char, 'get_display_stat'):
+            return char.get_display_stat(stat_name)
+        return 0
+
+    def get_skill_level(self, skill_key):
+        """Delegate to controlling character's skills."""
+        char = self.get_controlling_character()
+        if char and hasattr(char, 'get_skill_level'):
+            return char.get_skill_level(skill_key)
+        return 0
+
+    def get_stat_grade_adjective(self, grade_letter, stat_key):
+        """Delegate to controlling character's stat grade adjectives."""
+        char = self.get_controlling_character()
+        if char and hasattr(char, 'get_stat_grade_adjective'):
+            return char.get_stat_grade_adjective(grade_letter, stat_key)
+        return grade_letter
+
+    def get_skill_grade_adjective(self, grade_letter):
+        """Delegate to controlling character's skill grade adjectives."""
+        char = self.get_controlling_character()
+        if char and hasattr(char, 'get_skill_grade_adjective'):
+            return char.get_skill_grade_adjective(grade_letter)
+        return grade_letter
+
+    def get_stat_cap(self, stat_key):
+        """Delegate to controlling character's stat caps."""
+        char = self.get_controlling_character()
+        if char and hasattr(char, 'get_stat_cap'):
+            return char.get_stat_cap(stat_key)
+        return 0
+
+    def get_skill_cap(self, skill_key):
+        """Delegate to controlling character's skill caps."""
+        char = self.get_controlling_character()
+        if char and hasattr(char, 'get_skill_cap'):
+            return char.get_skill_cap(skill_key)
+        return 0
+
+    def roll_check(self, stat_list, skill_name, difficulty=0, modifier=0):
+        """Delegate to controlling character's roll system."""
+        char = self.get_controlling_character()
+        if char and hasattr(char, 'roll_check'):
+            return char.roll_check(stat_list, skill_name, difficulty, modifier)
+        return "Failure", 0
+
+    def at_object_delete(self):
+        """
+        Called before avatar is deleted.
+
+        Triggers disconnection if the avatar is being destroyed while connected.
+        """
+        rig = self.db.entry_device
+        if rig and hasattr(rig, 'db') and rig.db.active_connection:
+            conn = rig.db.active_connection
+            if conn and conn.get('avatar') == self:
+                character = conn.get('character')
+                if character:
+                    # Avatar being destroyed - force disconnect
+                    rig.disconnect(character, severity=JACKOUT_FORCED, reason="Avatar destroyed")
+
+        return super().at_object_delete()
 
     def at_post_unpuppet(self, account=None, session=None, **kwargs):
         """
@@ -42,85 +144,22 @@ class MatrixAvatar(DefaultCharacter):
         # Avatar stays in place - location is preserved for reconnection
         pass
 
-    def check_connection(self):
+    def at_pre_death(self):
         """
-        Verify the physical connection to meatspace is still valid.
+        Called when avatar is about to die.
 
-        Checks if:
-        - Character still exists
-        - Character is still sitting in the rig
-        - Rig is still connected to the Matrix
-
-        Returns:
-            bool: True if connection is valid, False if disconnected
+        Triggers FATAL jack-out - character body dies too.
         """
-        # Skip check if idle (not actively connected)
-        if self.db.idle:
-            return True
-
-        character = self.db.real_character
-        if not character or not character.pk:
-            # Character deleted/invalid
-            self.jack_out(reason="Physical body lost", severity=JACKOUT_FORCED)
-            return False
-
         rig = self.db.entry_device
-        if not rig or not rig.pk:
-            # Rig deleted/invalid
-            self.jack_out(reason="Connection device lost", severity=JACKOUT_FORCED)
-            return False
-
-        # Is character still sitting in the rig?
-        if character.db.sitting_on != rig:
-            self.jack_out(reason="Physical connection severed", severity=JACKOUT_FORCED)
-            return False
-
-        # Is the rig still connected to the Matrix?
-        if not rig.is_connected():
-            self.jack_out(reason="Network connection lost", severity=JACKOUT_EMERGENCY)
-            return False
-
-        return True
-
-    def jack_out(self, reason="Disconnecting", severity=JACKOUT_NORMAL):
-        """
-        Disconnect from the Matrix and return to meatspace.
-
-        Marks the avatar as idle rather than deleting immediately.
-        Cleanup happens later via the cleanup script.
-
-        Args:
-            reason (str): Why the disconnect happened (shown to user)
-            severity (int): Severity level (JACKOUT_NORMAL, JACKOUT_EMERGENCY, JACKOUT_FORCED)
-        """
-        if self.db.real_character:
-            self.msg(f"|rDISCO:|n {reason}")
-
-            # Apply consequences based on severity
-            if severity >= JACKOUT_FATAL:
-                # Fatal jackout - avatar death causes real death
-                # The dying consciousness is violently shoved back into the body
-                self.msg("|rYour avatar dissolves into static and void.|n")
-                self.msg("|rFor a brief, terrible moment, you see reality again—|n")
-                self.msg("|rYour body in the rig, convulsing—|n")
-                self.msg("|rThen nothing.|n")
-                # TODO: Kill the real character
-                # TODO: Apply fatal consequences (permadeath or severe penalty)
-                pass
-            elif severity >= JACKOUT_FORCED:
-                # Violent disconnect - physical damage
-                # TODO: Apply physical damage to real character
-                pass
-            elif severity >= JACKOUT_EMERGENCY:
-                # Uncontrolled disconnect - minor penalties
-                # TODO: Apply minor penalties (disorientation, stamina loss, etc.)
-                pass
-
-            # TODO: Return control to real character
-
-        # Mark as idle for cleanup later
-        self.db.idle = True
-        self.db.idle_since = None  # TODO: Set timestamp when we implement grace period
+        if rig and hasattr(rig, 'db') and rig.db.active_connection:
+            conn = rig.db.active_connection
+            if conn and conn.get('avatar') == self:
+                character = conn.get('character')
+                if character:
+                    # Mark avatar as dead
+                    self.db.dead = True
+                    # Fatal disconnect - character dies too
+                    rig.disconnect(character, severity=JACKOUT_FATAL, reason="Avatar killed")
 
     def get_display_desc(self, looker, **kwargs):
         """
