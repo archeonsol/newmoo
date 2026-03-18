@@ -216,6 +216,8 @@ class NetworkedMixin:
         except Router.DoesNotExist:
             return None
 
+
+
     def is_connected(self):
         """
         Check if this device is currently connected to the Matrix.

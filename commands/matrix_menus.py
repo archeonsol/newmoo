@@ -60,14 +60,8 @@ def router_access_points(caller, raw_string, **kwargs):
     options = []
 
     for i, room in enumerate(linked_rooms, 1):
-        # Count networked devices in this room
-        device_count = 0
-        for obj in room.contents:
-            if isinstance(obj, NetworkedMixin):
-                device_count += 1
-
         ap_name = room.key
-        text += f"  |w{i}|n. {ap_name} |x({device_count} device{'s' if device_count != 1 else ''})|n\n"
+        text += f"  |w{i}|n. {ap_name}\n"
 
         options.append({
             "desc": f"Access {ap_name}",
@@ -106,11 +100,19 @@ def access_point_devices(caller, raw_string, **kwargs):
         caller.msg("Error: Missing router or room data.")
         return "router_access_points"
 
-    # Find all networked devices in this room
+    # Find all networked devices in this room (recursively check inventory)
     devices = []
-    for obj in room.contents:
-        if isinstance(obj, NetworkedMixin):
-            devices.append(obj)
+
+    def find_devices_recursive(container):
+        """Recursively search container and inventory for networked devices."""
+        for obj in container.contents:
+            if isinstance(obj, NetworkedMixin):
+                devices.append(obj)
+            # Also search this object's contents (inventory, containers, etc.)
+            if hasattr(obj, 'contents'):
+                find_devices_recursive(obj)
+
+    find_devices_recursive(room)
 
     if not devices:
         text = f"|c=== {room.key} ===|n\n\n"
