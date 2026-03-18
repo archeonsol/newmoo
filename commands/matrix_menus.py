@@ -68,7 +68,19 @@ def router_access_points(caller, raw_string, **kwargs):
             "goto": ("access_point_devices", {"room": room})
         })
 
+    # Check if caller has a proxy tunnel
+    from typeclasses.matrix.avatars import MatrixAvatar
+    has_proxy = False
+    if isinstance(caller, MatrixAvatar):
+        has_proxy = bool(caller.db.proxy_router)
+
     text += "\n|xe|n. Route to entry point"
+
+    if has_proxy:
+        text += "\n|xp|n. Close proxy tunnel"
+    else:
+        text += "\n|xp|n. Open proxy tunnel"
+
     text += "\n|xq|n. Exit router interface"
 
     options.append({
@@ -76,6 +88,19 @@ def router_access_points(caller, raw_string, **kwargs):
         "desc": "Route to entry point",
         "goto": "route_to_entry_point"
     })
+
+    if has_proxy:
+        options.append({
+            "key": ("p", "proxy"),
+            "desc": "Close proxy tunnel",
+            "goto": "close_proxy_tunnel"
+        })
+    else:
+        options.append({
+            "key": ("p", "proxy"),
+            "desc": "Open proxy tunnel",
+            "goto": "open_proxy_tunnel"
+        })
 
     options.append({
         "key": ("q", "quit", "exit", "back"),
@@ -341,6 +366,89 @@ def get_linked_rooms(router):
             linked_rooms.append(room)
 
     return linked_rooms
+
+
+def open_proxy_tunnel(caller, raw_string, **kwargs):
+    """
+    Open a proxy tunnel at the current router.
+
+    Cannot open if already have one open.
+    """
+    from typeclasses.matrix.avatars import MatrixAvatar
+
+    router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+
+    if not router:
+        caller.msg("|rError: No router found.|n")
+        return "router_access_points"
+
+    if not isinstance(caller, MatrixAvatar):
+        caller.msg("|rError: Only Matrix avatars can open proxy tunnels.|n")
+        return "router_access_points"
+
+    # Check if already has proxy
+    if caller.db.proxy_router:
+        caller.msg("|rYou already have a proxy tunnel open.|n")
+        caller.msg("You must close your existing proxy before opening a new one.")
+        return "router_access_points"
+
+    # Open the proxy tunnel
+    caller.db.proxy_router = router.pk
+    caller.msg(f"|gProxy tunnel opened at {router.key}.|n")
+    caller.msg("Your session origin now routes through this proxy.")
+
+    return "router_access_points"
+
+
+def close_proxy_tunnel(caller, raw_string, **kwargs):
+    """
+    Close the proxy tunnel.
+
+    Can only close from session origin router or the proxy router itself.
+    """
+    from typeclasses.matrix.avatars import MatrixAvatar
+
+    router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+
+    if not router:
+        caller.msg("|rError: No router found.|n")
+        return "router_access_points"
+
+    if not isinstance(caller, MatrixAvatar):
+        caller.msg("|rError: Only Matrix avatars can close proxy tunnels.|n")
+        return "router_access_points"
+
+    # Check if has proxy
+    if not caller.db.proxy_router:
+        caller.msg("|rYou don't have a proxy tunnel open.|n")
+        return "router_access_points"
+
+    # Get session origin router (from rig's room)
+    rig = caller.db.entry_device
+    if not rig or not hasattr(rig, 'location'):
+        caller.msg("|rError: Cannot determine session origin.|n")
+        return "router_access_points"
+
+    rig_room = rig.location
+    if not rig_room:
+        caller.msg("|rError: Cannot determine session origin.|n")
+        return "router_access_points"
+
+    session_origin_router_pk = getattr(rig_room.db, 'network_router', None)
+    proxy_router_pk = caller.db.proxy_router
+
+    # Check if at session origin or proxy router
+    if router.pk != session_origin_router_pk and router.pk != proxy_router_pk:
+        caller.msg("|rYou can only close your proxy tunnel from your session origin router or the proxy router itself.|n")
+        return "router_access_points"
+
+    # Close the proxy tunnel
+    caller.db.proxy_router = None
+    caller.msg(f"|gProxy tunnel closed.|n")
+    caller.msg("Your session origin now routes directly to your entry point.")
+
+    return "router_access_points"
+
 
 
 # Helper function to get all networked devices in a room
