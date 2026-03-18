@@ -35,23 +35,64 @@ class MatrixCleanupScript(DefaultScript):
         from typeclasses.matrix.rooms import MatrixNode
         from typeclasses.matrix.avatars import MatrixAvatar
         from typeclasses.rooms import Room
+        from evennia.utils import logger
+        import time
+
+        start_time = time.time()
 
         # Get all MatrixNodes and filter for ephemeral ones in Python
         # (Can't filter on Attributes via SQL)
         all_nodes = MatrixNode.objects.all()
         ephemeral_nodes = [node for node in all_nodes if getattr(node.db, 'ephemeral', False)]
 
+        logger.log_info(f"Matrix cleanup START: {len(ephemeral_nodes)} ephemeral nodes to check")
+
         deleted_count = 0
         ejected_count = 0
 
+        # Track which nodes we've already processed (to handle vestibule/interface pairs together)
+        processed_nodes = set()
+
         for node in ephemeral_nodes:
-            # Find avatars in this node
-            avatars = [obj for obj in node.contents if isinstance(obj, MatrixAvatar)]
+            if node.pk in processed_nodes:
+                continue
+
+            parent_device = getattr(node.db, 'parent_object', None)
+            if not parent_device:
+                continue
+
+            # Get BOTH vestibule and interface for this device
+            vestibule_pk = getattr(parent_device.db, 'vestibule_node', None)
+            interface_pk = getattr(parent_device.db, 'interface_node', None)
+
+            cluster_nodes = []
+            if vestibule_pk:
+                try:
+                    vestibule = MatrixNode.objects.get(pk=vestibule_pk)
+                    cluster_nodes.append(vestibule)
+                    processed_nodes.add(vestibule.pk)
+                except MatrixNode.DoesNotExist:
+                    pass
+
+            if interface_pk:
+                try:
+                    interface = MatrixNode.objects.get(pk=interface_pk)
+                    cluster_nodes.append(interface)
+                    processed_nodes.add(interface.pk)
+                except MatrixNode.DoesNotExist:
+                    pass
+
+            if not cluster_nodes:
+                continue
+
+            # Find all avatars in ANY node in the cluster
+            avatars = []
+            for cluster_node in cluster_nodes:
+                avatars.extend([obj for obj in cluster_node.contents if isinstance(obj, MatrixAvatar)])
 
             # Check if parent device has lost connectivity
             if avatars:
-                parent_device = getattr(node.db, 'parent_object', None)
-                if parent_device:
+                    logger.log_info(f"  Checking connectivity for {parent_device.key} with {len(avatars)} avatar(s)")
                     # Walk up the location chain to find a Room
                     current_location = parent_device.location
                     room_location = None
@@ -80,9 +121,18 @@ class MatrixCleanupScript(DefaultScript):
                                 pass
 
                     # Eject avatars if no connectivity
+                    logger.log_info(f"    Has connectivity: {has_connectivity}")
                     if not has_connectivity:
+                        logger.log_info(f"    Ejecting {len(avatars)} avatar(s)")
                         for avatar in avatars:
-                            # Try to route back to entry point
+                            node.msg_contents(
+                                f"{avatar.key} is forcibly ejected as the connection fails!",
+                                exclude=[avatar]
+                            )
+                            avatar.msg("|rConnection lost! Device has no network connectivity.|n")
+
+                            # Try to find entry router to move avatar to
+                            entry_location = None
                             rig = getattr(avatar.db, 'entry_device', None)
                             if rig:
                                 # Walk up rig's location chain to find a Room
@@ -104,47 +154,50 @@ class MatrixCleanupScript(DefaultScript):
                                         try:
                                             entry_router = Router.objects.get(pk=entry_router_pk)
                                             entry_location = entry_router.location
-                                            if entry_location:
-                                                node.msg_contents(
-                                                    f"{avatar.key} is forcibly ejected as the connection fails!",
-                                                    exclude=[avatar]
-                                                )
-                                                avatar.msg("|rConnection lost! Device has no network connectivity.|n")
-                                                avatar.msg("|yYou are forcibly routed back to your entry point...|n")
-                                                avatar.move_to(entry_location)
-                                                entry_location.msg_contents(
-                                                    f"{avatar.key} materializes abruptly, ejected from a failed connection.",
-                                                    exclude=[avatar]
-                                                )
-                                                ejected_count += 1
-                                                continue
                                         except Router.DoesNotExist:
                                             pass
 
-                            # Fallback: kick to Limbo
-                            from evennia.objects.models import ObjectDB
-                            limbo = ObjectDB.objects.get_id(2)
-                            if limbo:
-                                avatar.msg("|rConnection lost! Emergency disconnect to Limbo.|n")
-                                avatar.move_to(limbo)
-                                ejected_count += 1
+                            # Move avatar before disconnecting
+                            if entry_location:
+                                avatar.msg("|yRouting to entry point before disconnect...|n")
+                                avatar.move_to(entry_location)
+                                entry_location.msg_contents(
+                                    f"{avatar.key} materializes abruptly, connection failing.",
+                                    exclude=[avatar]
+                                )
+                            else:
+                                # No entry router, move to Limbo
+                                from evennia.objects.models import ObjectDB
+                                limbo = ObjectDB.objects.get_id(2)
+                                if limbo:
+                                    avatar.msg("|yEmergency disconnect to safe location...|n")
+                                    avatar.move_to(limbo)
 
-            # Delete empty nodes
-            if not any(isinstance(obj, MatrixAvatar) for obj in node.contents):
-                parent_device = getattr(node.db, 'parent_object', None)
-                if parent_device:
-                    if getattr(parent_device.db, 'vestibule_node', None) == node.pk:
+                            # Now force emergency jackout if rig supports it
+                            if rig and hasattr(rig, 'disconnect'):
+                                avatar.msg("|rEmergency jackout initiated...|n")
+                                from typeclasses.matrix.avatars import JACKOUT_EMERGENCY
+                                character = avatar.get_controlling_character()
+                                if character:
+                                    rig.disconnect(character, severity=JACKOUT_EMERGENCY, reason="Device connection lost")
+
+                            ejected_count += 1
+
+            # After ejecting avatars, delete all empty nodes in the cluster
+            for cluster_node in cluster_nodes:
+                if not any(isinstance(obj, MatrixAvatar) for obj in cluster_node.contents):
+                    # Clean up reference in parent device
+                    if getattr(parent_device.db, 'vestibule_node', None) == cluster_node.pk:
                         parent_device.db.vestibule_node = None
-                    if getattr(parent_device.db, 'interface_node', None) == node.pk:
+                    if getattr(parent_device.db, 'interface_node', None) == cluster_node.pk:
                         parent_device.db.interface_node = None
 
-                node.delete()
-                deleted_count += 1
+                    cluster_node.delete()
+                    deleted_count += 1
 
         # Log cleanup activity
-        if deleted_count > 0 or ejected_count > 0:
-            from evennia.utils import logger
-            logger.log_info(f"Matrix cleanup: ejected {ejected_count} avatar(s), deleted {deleted_count} empty ephemeral node(s)")
+        elapsed = time.time() - start_time
+        logger.log_info(f"Matrix cleanup DONE: ejected {ejected_count} avatar(s), deleted {deleted_count} empty ephemeral node(s) in {elapsed:.3f}s")
 
     def at_start(self):
         """Called when script starts (including after server restart)."""
