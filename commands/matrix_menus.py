@@ -14,12 +14,11 @@ from evennia.utils import logger
 from typeclasses.matrix.mixins import NetworkedMixin
 
 
-def router_access_points(caller, raw_string, **kwargs):
+def router_main_menu(caller, raw_string, **kwargs):
     """
-    Main menu showing all access points connected to this router.
+    Main router interface menu.
 
-    An access point is a meatspace room that has been linked to this router
-    via the 'mlink' command. Each AP can contain multiple networked devices.
+    Provides options for routing, proxy management, and browsing access points.
     """
     router = kwargs.get("router")
     if not router:
@@ -43,30 +42,8 @@ def router_access_points(caller, raw_string, **kwargs):
         if room_router_dbref == router.pk:
             linked_rooms.append(room)
 
-    if not linked_rooms:
-        text = f"|c=== {router.key} Access Points ===|n\n\n"
-        text += "No access points connected to this router.\n"
-        text += "(Use 'mlink' in meatspace rooms to connect them to this router)\n"
-
-        return text, None
-
-    # Sort rooms by key for consistent display
-    linked_rooms.sort(key=lambda r: r.key)
-
-    text = f"|c=== {router.key} Access Points ===|n\n\n"
-    text += f"Status: {router.get_status()}\n"
-    text += f"Connected Access Points: {len(linked_rooms)}\n\n"
-
-    options = []
-
-    for i, room in enumerate(linked_rooms, 1):
-        ap_name = room.key
-        text += f"  |w{i}|n. {ap_name}\n"
-
-        options.append({
-            "desc": f"Access {ap_name}",
-            "goto": ("access_point_devices", {"room": room})
-        })
+    text = f"|c=== {router.key} Interface ===|n\n\n"
+    text += f"Status: {router.get_status()}\n\n"
 
     # Check if caller has a proxy tunnel
     from typeclasses.matrix.avatars import MatrixAvatar
@@ -74,19 +51,54 @@ def router_access_points(caller, raw_string, **kwargs):
     if isinstance(caller, MatrixAvatar):
         has_proxy = bool(caller.db.proxy_router)
 
-    text += "\n|xe|n. Route to entry point"
+    text += "|wa|n. Route to access point\n"
+    text += "|wb|n. Browse APs |x(testing only)|n\n"
 
     if has_proxy:
-        text += "\n|xp|n. Close proxy tunnel"
+        text += "|we|n. Route to proxy exit\n"
     else:
-        text += "\n|xp|n. Open proxy tunnel"
+        text += "|we|n. Route to session origin\n"
 
-    text += "\n|xq|n. Exit router interface"
+    text += "|ws|n. View proxy status\n"
+
+    if has_proxy:
+        text += "|wp|n. Close proxy tunnel\n"
+    else:
+        text += "|wp|n. Open proxy tunnel\n"
+
+    text += "|wq|n. Exit router interface"
+
+    options = []
 
     options.append({
-        "key": ("e", "entry"),
-        "desc": "Route to entry point",
-        "goto": "route_to_entry_point"
+        "key": ("a", "route", "access"),
+        "desc": "Route to access point",
+        "goto": "route_to_access_point"
+    })
+
+    options.append({
+        "key": ("b", "browse"),
+        "desc": "Browse APs (testing only)",
+        "goto": "browse_access_points"
+    })
+
+    if has_proxy:
+        options.append({
+            "key": ("e", "entry", "back", "previous"),
+            "desc": "Route to proxy exit",
+            "goto": "route_to_entry_point"
+        })
+    else:
+        options.append({
+            "key": ("e", "entry", "back", "previous"),
+            "desc": "Route to session origin",
+            "goto": "route_to_entry_point"
+        })
+
+    options.append({
+        "key": ("s", "status"),
+        "desc": "View proxy status",
+        "goto": "view_proxy_status"
     })
 
     if has_proxy:
@@ -103,9 +115,151 @@ def router_access_points(caller, raw_string, **kwargs):
         })
 
     options.append({
-        "key": ("q", "quit", "exit", "back"),
+        "key": ("q", "quit", "exit"),
         "desc": "Exit",
         "goto": "router_exit"
+    })
+
+    return text, options
+
+
+def route_to_access_point(caller, raw_string, **kwargs):
+    """
+    Prompt for AP Matrix ID and route to it.
+
+    User must enter the AP ID (with or without ^ prefix).
+    """
+    router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+
+    if not router:
+        text = "|rError: No router found.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
+
+    text = f"|c=== Route to Access Point ===|n\n\n"
+    text += "Enter the Matrix ID of the access point you wish to route to.\n"
+    text += "Format: ^XXXXXX or XXXXXX\n\n"
+    text += "|xType 'back' or 'b' to return to router menu|n"
+
+    options = []
+    options.append({
+        "key": "_default",
+        "goto": ("resolve_access_point", {"router": router})
+    })
+    options.append({
+        "key": ("back", "b"),
+        "goto": ("router_main_menu", {"router": router})
+    })
+
+    return text, options
+
+
+def resolve_access_point(caller, raw_string, **kwargs):
+    """
+    Look up the AP ID and route to devices at that location.
+    """
+    router = kwargs.get("router")
+    if not router:
+        router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+
+    if not router:
+        caller.msg("|rError: No router found.|n")
+        return ("router_access_points", {"router": router})
+
+    ap_input = raw_string.strip()
+
+    # Allow back or empty input
+    if not ap_input or ap_input.lower() in ('back', 'b', 'return'):
+        return ("router_main_menu", {"router": router})
+
+    # Strip ^ prefix if present, accept either format
+    if ap_input.startswith("^"):
+        ap_input = ap_input[1:]
+
+    # Normalize to uppercase
+    ap_id = "^" + ap_input.upper()
+
+    # Look up the AP by Matrix ID
+    from world.matrix_ids import lookup_matrix_id
+    room = lookup_matrix_id(ap_id)
+
+    if not room:
+        caller.msg(f"|rAccess point {ap_id} not found.|n")
+        return ("route_to_access_point", {"router": router})
+
+    # Verify this AP is connected to this router
+    from typeclasses.rooms import Room
+    if not isinstance(room, Room):
+        caller.msg(f"|rInvalid access point.|n")
+        return ("route_to_access_point", {"router": router})
+
+    room_router_pk = getattr(room.db, 'network_router', None)
+    if room_router_pk != router.pk:
+        caller.msg(f"|rAccess point {ap_id} is not connected to this router.|n")
+        return ("route_to_access_point", {"router": router})
+
+    # Valid AP, show devices
+    return ("access_point_devices", {"room": room})
+
+
+def browse_access_points(caller, raw_string, **kwargs):
+    """
+    Browse all access points connected to this router (testing only).
+    """
+    router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+
+    if not router:
+        text = "|rError: No router found.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
+
+    # Find all rooms linked to this router
+    from typeclasses.rooms import Room
+
+    linked_rooms = []
+    for room in Room.objects.all():
+        room_router_dbref = getattr(room.db, 'network_router', None)
+        if room_router_dbref == router.pk:
+            linked_rooms.append(room)
+
+    if not linked_rooms:
+        text = f"|c=== {router.key} - Browse APs (testing) ===|n\n\n"
+        text += "No access points connected to this router.\n"
+        text += "(Use 'mlink' in meatspace rooms to connect them to this router)\n\n"
+        text += "|xb|n. Back to router menu"
+
+        options = [{
+            "key": ("b", "back"),
+            "desc": "Back",
+            "goto": ("router_main_menu", {"router": router})
+        }]
+
+        return text, options
+
+    # Sort rooms by key for consistent display
+    linked_rooms.sort(key=lambda r: r.key)
+
+    text = f"|c=== {router.key} - Browse APs (testing) ===|n\n\n"
+    text += f"Connected Access Points: {len(linked_rooms)}\n\n"
+
+    options = []
+
+    for i, room in enumerate(linked_rooms, 1):
+        ap_name = room.key
+        matrix_id = room.get_matrix_id() if hasattr(room, 'get_matrix_id') else "^UNKNOWN"
+        text += f"  |w{i}|n. {ap_name} |m({matrix_id})|n\n"
+
+        options.append({
+            "desc": f"Access {ap_name}",
+            "goto": ("access_point_devices", {"room": room})
+        })
+
+    text += "\n|xb|n. Back to router menu"
+
+    options.append({
+        "key": ("b", "back"),
+        "desc": "Back",
+        "goto": ("router_main_menu", {"router": router})
     })
 
     return text, options
@@ -122,8 +276,9 @@ def access_point_devices(caller, raw_string, **kwargs):
     room = kwargs.get("room")
 
     if not router or not room:
-        caller.msg("Error: Missing router or room data.")
-        return "router_access_points"
+        text = "|rError: Missing router or room data.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Find all networked devices in this room (recursively check inventory)
     devices = []
@@ -147,7 +302,7 @@ def access_point_devices(caller, raw_string, **kwargs):
         return text, [{
             "key": ("b", "back"),
             "desc": "Back",
-            "goto": "router_access_points"
+            "goto": ("router_main_menu", {"router": router})
         }]
 
     # Sort devices by key
@@ -180,7 +335,7 @@ def access_point_devices(caller, raw_string, **kwargs):
     options.append({
         "key": ("b", "back"),
         "desc": "Back",
-        "goto": "router_access_points"
+        "goto": ("router_main_menu", {"router": router})
     })
 
     return text, options
@@ -198,8 +353,9 @@ def route_to_device(caller, raw_string, **kwargs):
     device = kwargs.get("device")
 
     if not device:
-        caller.msg("Error: Device not found.")
-        return "router_access_points"
+        text = "|rError: Device not found.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     from evennia.utils import delay
 
@@ -273,39 +429,51 @@ def route_to_entry_point(caller, raw_string, **kwargs):
     from typeclasses.matrix.avatars import MatrixAvatar
 
     if not isinstance(caller, MatrixAvatar):
-        caller.msg("|rError: Only Matrix avatars can route to entry points.|n")
-        return "router_access_points"
+        router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+        text = "|rError: Only Matrix avatars can route to entry points.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Get the rig this avatar is connected through
     rig = caller.db.entry_device
     if not rig:
-        caller.msg("|rError: No entry device found. Cannot determine entry point.|n")
-        return "router_access_points"
+        router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+        text = "|rError: No entry device found. Cannot determine entry point.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Get the meatspace room the rig is in
     rig_room = rig.location
     if not rig_room:
-        caller.msg("|rError: Entry device has no location.|n")
-        return "router_access_points"
+        router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+        text = "|rError: Entry device has no location.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Get the router that room is linked to
     entry_router_pk = getattr(rig_room.db, 'network_router', None)
     if not entry_router_pk:
-        caller.msg("|rError: Entry location has no network router.|n")
-        return "router_access_points"
+        router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+        text = "|rError: Entry location has no network router.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Load the entry router
     from typeclasses.matrix.objects import Router
     try:
         entry_router = Router.objects.get(pk=entry_router_pk)
     except Router.DoesNotExist:
-        caller.msg("|rError: Entry router not found.|n")
-        return "router_access_points"
+        router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+        text = "|rError: Entry router not found.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
-    # Check if we're already at the entry router
-    if caller.location == entry_router:
-        caller.msg("|yYou are already at your entry point router.|n")
-        return "router_access_points"
+    # Check if we're already at the entry router's location
+    if caller.location == entry_router.location:
+        router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+        text = "|yYou are already at your entry point router.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Route to the entry router with delays
     from evennia.utils import delay
@@ -324,11 +492,16 @@ def route_to_entry_point(caller, raw_string, **kwargs):
                 exclude=[caller]
             )
 
-        # Move to entry router
-        caller.move_to(entry_router)
+        # Move to entry router's location (the room it's in)
+        destination = entry_router.location
+        if not destination:
+            caller.msg("|rError: Entry router has no location.|n")
+            return
+
+        caller.move_to(destination)
 
         # Announce arrival
-        entry_router.msg_contents(
+        destination.msg_contents(
             f"{caller.key} materializes from the data stream.",
             exclude=[caller]
         )
@@ -379,25 +552,29 @@ def open_proxy_tunnel(caller, raw_string, **kwargs):
     router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
 
     if not router:
-        caller.msg("|rError: No router found.|n")
-        return "router_access_points"
+        text = "|rError: No router found.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     if not isinstance(caller, MatrixAvatar):
-        caller.msg("|rError: Only Matrix avatars can open proxy tunnels.|n")
-        return "router_access_points"
+        text = "|rError: Only Matrix avatars can open proxy tunnels.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Check if already has proxy
     if caller.db.proxy_router:
-        caller.msg("|rYou already have a proxy tunnel open.|n")
-        caller.msg("You must close your existing proxy before opening a new one.")
-        return "router_access_points"
+        text = "|rYou already have a proxy tunnel open.|n\n"
+        text += "You must close your existing proxy before opening a new one.\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Open the proxy tunnel
     caller.db.proxy_router = router.pk
-    caller.msg(f"|gProxy tunnel opened at {router.key}.|n")
-    caller.msg("Your session origin now routes through this proxy.")
 
-    return "router_access_points"
+    text = f"|gProxy tunnel opened at {router.key}.|n\n"
+    text += "Your session origin now routes through this proxy.\n\n"
+    text += "|xPress any key to return to router menu|n"
+    return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
 
 def close_proxy_tunnel(caller, raw_string, **kwargs):
@@ -411,44 +588,103 @@ def close_proxy_tunnel(caller, raw_string, **kwargs):
     router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
 
     if not router:
-        caller.msg("|rError: No router found.|n")
-        return "router_access_points"
+        text = "|rError: No router found.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     if not isinstance(caller, MatrixAvatar):
-        caller.msg("|rError: Only Matrix avatars can close proxy tunnels.|n")
-        return "router_access_points"
+        text = "|rError: Only Matrix avatars can close proxy tunnels.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Check if has proxy
     if not caller.db.proxy_router:
-        caller.msg("|rYou don't have a proxy tunnel open.|n")
-        return "router_access_points"
+        text = "|rYou don't have a proxy tunnel open.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Get session origin router (from rig's room)
     rig = caller.db.entry_device
     if not rig or not hasattr(rig, 'location'):
-        caller.msg("|rError: Cannot determine session origin.|n")
-        return "router_access_points"
+        text = "|rError: Cannot determine session origin.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     rig_room = rig.location
     if not rig_room:
-        caller.msg("|rError: Cannot determine session origin.|n")
-        return "router_access_points"
+        text = "|rError: Cannot determine session origin.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     session_origin_router_pk = getattr(rig_room.db, 'network_router', None)
     proxy_router_pk = caller.db.proxy_router
 
     # Check if at session origin or proxy router
     if router.pk != session_origin_router_pk and router.pk != proxy_router_pk:
-        caller.msg("|rYou can only close your proxy tunnel from your session origin router or the proxy router itself.|n")
-        return "router_access_points"
+        text = "|rYou can only close your proxy tunnel from your session origin router or the proxy router itself.|n\n\n"
+        text += "|xPress any key to return to router menu|n"
+        return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
     # Close the proxy tunnel
     caller.db.proxy_router = None
-    caller.msg(f"|gProxy tunnel closed.|n")
-    caller.msg("Your session origin now routes directly to your entry point.")
 
-    return "router_access_points"
+    text = f"|gProxy tunnel closed.|n\n"
+    text += "Your session origin now routes directly to your entry point.\n\n"
+    text += "|xPress any key to return to router menu|n"
+    return text, [{"key": "_default", "goto": ("router_main_menu", {"router": router})}]
 
+
+def view_proxy_status(caller, raw_string, **kwargs):
+    """
+    Display current proxy tunnel status.
+    """
+    from typeclasses.matrix.avatars import MatrixAvatar
+
+    router = caller.ndb._evmenu.router if hasattr(caller.ndb, '_evmenu') else None
+
+    text = f"|c=== Proxy Tunnel Status ===|n\n\n"
+
+    if not isinstance(caller, MatrixAvatar):
+        text += "|rError: Only Matrix avatars can have proxy tunnels.|n\n"
+    elif not caller.db.proxy_router:
+        text += "Status: |xNo proxy tunnel active|n\n\n"
+        text += "You can open a proxy tunnel at any router to mask your session origin.\n"
+    else:
+        # Get proxy router info
+        try:
+            from typeclasses.matrix.objects import Router
+            proxy_router = Router.objects.get(pk=caller.db.proxy_router)
+            online_status = "|g[ONLINE]|n" if getattr(proxy_router.db, 'online', False) else "|r[OFFLINE]|n"
+            text += f"Status: |gProxy tunnel active|n\n\n"
+            text += f"Proxy Router: {proxy_router.key} {online_status}\n"
+            text += f"Proxy Location: {proxy_router.location.key if proxy_router.location else 'Unknown'}\n\n"
+            text += "Your session origin now routes through this proxy.\n"
+        except:
+            text += "Status: |yProxy tunnel active (router not found)|n\n\n"
+            text += "Warning: Proxy router no longer exists.\n"
+
+    # Get session origin info
+    if isinstance(caller, MatrixAvatar):
+        rig = caller.db.entry_device
+        if rig and hasattr(rig, 'location') and rig.location:
+            rig_room = rig.location
+            session_router_pk = getattr(rig_room.db, 'network_router', None)
+            if session_router_pk:
+                try:
+                    from typeclasses.matrix.objects import Router
+                    session_router = Router.objects.get(pk=session_router_pk)
+                    text += f"\nSession Origin Router: {session_router.key}\n"
+                except:
+                    pass
+
+    text += "\n|xPress any key to return to router menu|n"
+
+    options = [{
+        "key": "_default",
+        "goto": ("router_main_menu", {"router": router})
+    }]
+
+    return text, options
 
 
 # Helper function to get all networked devices in a room

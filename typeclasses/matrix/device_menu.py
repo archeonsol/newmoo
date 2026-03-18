@@ -287,5 +287,6 @@ def start_device_menu(caller, device, from_matrix=False):
         startnode_input=("", menu_data),
         cmd_on_exit=None,
         persistent=False,
+        options_formatter=lambda optionlist, caller=None: "",  # Suppress duplicate option display
         **menu_data
     )

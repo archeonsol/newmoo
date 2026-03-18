@@ -255,10 +255,12 @@ class CmdRoute(Command):
         EvMenu(
             caller,
             "commands.matrix_menus",
-            startnode="router_access_points",
+            startnode="router_main_menu",
             startnode_input=("", {"router": router}),
             cmdset_mergetype="Union",
             cmd_on_exit=None,  # Suppress auto-look on menu exit
+            options_formatter=lambda optionlist, caller=None: "",  # Suppress duplicate option display
+            node_formatter=lambda nodetext, optionstext, caller=None: nodetext,  # Suppress node name display
         )
 
     def route_back(self, caller):
