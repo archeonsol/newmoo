@@ -690,12 +690,14 @@ class NetworkedMixin(MatrixIdMixin):
         from evennia.utils.evmenu import EvMenu
 
         # Start EvMenu for ACL revocation
+        from typeclasses.matrix.menu_formatters import get_matrix_formatters
         EvMenu(
             caller,
             "typeclasses.matrix.mixins.networked",
             startnode="node_device_acl_list",
             startnode_input=("", {"device": self}),
             cmd_on_exit=None,
+            **get_matrix_formatters()
         )
         return True
 
@@ -791,17 +793,17 @@ def node_device_acl_list(caller, raw_string, **kwargs):
     """
     device = kwargs.get("device")
     if not device:
-        return "Error: No device specified.", None
+        caller.msg("|rError: No device specified.|n")
+        return None, None
 
     # Get ACL entries
     if not hasattr(device.db, 'acl') or not device.db.acl:
         text = f"|c=== ACL for {device.key} ===|n\n\n"
         text += "No ACL entries (public device).\n"
-        return text, [{"desc": "Exit", "goto": "node_device_acl_exit"}]
+        return text, [{"key": "q", "desc": "Exit", "goto": "node_device_acl_exit"}]
 
     # Build display
-    text = f"|c=== ACL for {device.key} ===|n\n\n"
-    text += "Select an entry to remove, or 'q' to exit:\n\n"
+    text = f"|c=== ACL for {device.key} ===|n\n"
 
     from evennia.objects.models import ObjectDB
 
@@ -821,7 +823,6 @@ def node_device_acl_list(caller, raw_string, **kwargs):
     # Build options
     options = []
     for i, (char_pk, display_name) in enumerate(acl_list, 1):
-        text += f"  {i}. {display_name}\n"
         options.append({
             "key": str(i),
             "desc": display_name,
@@ -842,7 +843,8 @@ def node_device_acl_confirm(caller, raw_string, **kwargs):
     name = kwargs.get("name")
 
     if not device or char_pk is None:
-        return "Error: Invalid parameters.", None
+        caller.msg("|rError: Invalid parameters.|n")
+        return ("node_device_acl_list", {"device": device})
 
     text = f"|yConfirm removal of:|n\n"
     text += f"  {name}\n\n"
@@ -873,7 +875,8 @@ def node_device_acl_delete(caller, raw_string, **kwargs):
     name = kwargs.get("name")
 
     if not device or char_pk is None:
-        return "Error: Invalid parameters.", None
+        caller.msg("|rError: Invalid parameters.|n")
+        return ("node_device_acl_list", {"device": device})
 
     # Remove from ACL
     if hasattr(device.db, 'acl') and char_pk in device.db.acl:
