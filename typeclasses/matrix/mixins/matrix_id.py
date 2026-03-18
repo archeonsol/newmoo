@@ -30,11 +30,10 @@ class MatrixIdMixin:
 
     def at_object_creation(self):
         """
-        Initialize matrix_id attribute (ID assigned lazily on first access).
+        Called when object is first created.
+        Matrix ID will be assigned lazily on first get_matrix_id() call.
         """
         super().at_object_creation()
-        # Don't assign ID yet - will be generated on first get_matrix_id() call
-        self.db.matrix_id = None
 
     def at_object_delete(self):
         """
@@ -49,27 +48,19 @@ class MatrixIdMixin:
         Get this object's Matrix ID.
 
         Lazily generates and assigns the ID on first access if not already assigned.
+        Always checks registry as single source of truth.
 
         Returns:
-            str: The Matrix ID with prefix (e.g., "^3K7MQ5")
+            str or None: The Matrix ID with prefix (e.g., "^3K7MQ5"), or None if object has no database ID
         """
-        # Check if already assigned
-        if hasattr(self.db, 'matrix_id') and self.db.matrix_id:
-            return self.db.matrix_id
+        # Don't assign IDs to objects without a database ID
+        if not self.pk:
+            return None
 
-        # Check registry (in case it was registered externally)
+        # Check registry for existing ID
         matrix_id = get_matrix_id(self)
         if matrix_id:
-            # Cache it
-            self.db.matrix_id = matrix_id
             return matrix_id
 
         # Generate and register new ID (lazy assignment)
-        try:
-            self.db.matrix_id = register_matrix_id(self)
-            return self.db.matrix_id
-        except Exception as e:
-            # Log error but don't crash
-            from evennia.utils import logger
-            logger.log_err(f"Failed to assign Matrix ID to {self}: {e}")
-            return "^ERROR"
+        return register_matrix_id(self)
