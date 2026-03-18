@@ -140,6 +140,20 @@ def _start_first_round(attacker_id, target_id):
 def start_combat_ticker(attacker, target):
     if not attacker or not target:
         return
+
+    # Check if target is jacked into the Matrix and trigger emergency disconnect
+    if hasattr(target.db, 'sitting_on') and target.db.sitting_on:
+        from typeclasses.matrix.devices import DiveRig
+        rig = target.db.sitting_on
+        if isinstance(rig, DiveRig) and rig.db.active_connection:
+            conn = rig.db.active_connection
+            if conn and conn.get('character') == target:
+                # Emergency disconnect - rig safety systems detect combat stress
+                target.msg("|y*** EMERGENCY DISCONNECT ***|n")
+                target.msg("|yRig safety protocols detect physical distress - forcing jack-out!|n")
+                from typeclasses.matrix.avatars import JACKOUT_EMERGENCY
+                rig.disconnect(target, severity=JACKOUT_EMERGENCY, reason="Combat initiated")
+
     set_combat_target(attacker, target)
     if not getattr(target.db, "is_creature", False) and get_combat_target(target) is None:
         set_combat_target(target, attacker)
@@ -196,4 +210,3 @@ def stop_combat_ticker(attacker, target):
     except KeyError:
         set_combat_target(attacker, None)
         attacker.msg("|yYou pull back from the fight.|n")
-

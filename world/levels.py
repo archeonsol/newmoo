@@ -139,3 +139,181 @@ def xp_cost_for_next_level(current_level, max_level=None):
     else:
         cost = xp_cost_for_skill_level(lv)
     return int(cost) if cost is not None and cost == int(cost) else cost
+
+
+# ============================================================================
+# Generic Skill Check Functions (Tunable for Game Balance)
+# ============================================================================
+
+def normalize_stat_for_check(stat_stored_value):
+    """
+    Convert stored stat value (0-300) to check scale (0-150).
+    Stats are stored at 0-300 because they cost 2x to level, but for
+    check math everything should be on the 0-150 scale.
+
+    Args:
+        stat_stored_value: Stat value from character.db (0-300 range)
+
+    Returns:
+        float: Normalized value on 0-150 scale
+
+    Example:
+        strength = character.db.strength or 0
+        strength_check = normalize_stat_for_check(strength)
+        success, margin = skill_check(strength_check, difficulty)
+    """
+    return (stat_stored_value or 0) / 2.0
+
+
+def skill_check(
+    skill_value,
+    difficulty,
+    min_prob=0.05,
+    max_prob=0.95,
+    curve_steepness=1.0,
+    q_factor=1.0,
+    **kwargs
+):
+    """
+    Generic tunable skill check with difficulty.
+
+    Args:
+        skill_value: Character's skill level (0-150)
+        difficulty: Task difficulty (0-150 scale)
+        min_prob: Minimum success probability (floor), e.g., 0.05 = 5% minimum chance
+        max_prob: Maximum success probability (ceiling), e.g., 0.95 = 95% maximum chance
+        curve_steepness: How much skill differential matters (default 1.0)
+                        - Higher values = skill matters more (steeper curve)
+                        - Lower values = more flat/random (skill matters less)
+        q_factor: Final roll variance (1.0=uniform, <1=more consistent, >1=more swingy)
+        **kwargs: Reserved for future tuning parameters
+
+    Returns:
+        (success: bool, margin: float)
+        - success: True if check succeeded
+        - margin: Positive on success, negative on failure. Magnitude indicates degree.
+
+    Example:
+        success, margin = skill_check(75, 50)  # 75 skill vs 50 difficulty
+        if success:
+            if margin > 30:
+                # Critical success
+            elif margin > 15:
+                # Strong success
+            else:
+                # Marginal success
+
+    Tuning guide:
+        - For "masters are reliable": curve_steepness=1.0-2.0, q_factor=0.8-1.0
+        - For "more random/cinematic": curve_steepness=0.5, q_factor=1.2-1.5
+        - min_prob/max_prob prevent impossible/guaranteed outcomes
+    """
+    import random
+
+    # Clamp inputs to valid range
+    skill_value = max(0, min(150, skill_value))
+    difficulty = max(0, min(150, difficulty))
+
+    # Calculate skill differential (-150 to +150)
+    skill_diff = skill_value - difficulty
+
+    # Convert differential to base probability
+    # At equal skill (diff=0), base_prob = 0.5
+    # At +150 diff, base_prob approaches max_prob
+    # At -150 diff, base_prob approaches min_prob
+    # curve_steepness controls how quickly probability changes with skill diff
+    normalized_diff = (skill_diff / 150.0) * curve_steepness
+    base_prob = 0.5 + (normalized_diff * 0.5)  # Maps -1 to +1 diff to 0-1 probability
+
+    # Apply min/max caps
+    clamped_prob = max(min_prob, min(max_prob, base_prob))
+
+    # Apply q_factor variance to final roll
+    # This adds "dice variance" while respecting the probability
+    random_roll = random.random() ** (1.0 / q_factor)
+    success = random_roll < clamped_prob
+
+    # Calculate margin for degree of success/failure
+    # Margin represents how far above/below the threshold we rolled
+    threshold = clamped_prob
+    margin_raw = random_roll - threshold  # Negative on failure, positive on success
+
+    # Scale margin back to skill scale for interpretation
+    # A margin of ±0.5 (full random range) maps to ±75 on skill scale
+    final_margin = margin_raw * 150.0
+
+    return success, final_margin
+
+
+def contested_check(
+    skill_a,
+    skill_b,
+    tie_threshold=0.5,
+    curve_steepness=1.0,
+    q_factor=1.0,
+    **kwargs
+):
+    """
+    Generic contested check between two opposing skills.
+
+    Args:
+        skill_a: Attacker/initiator skill level (0-150)
+        skill_b: Defender/responder skill level (0-150)
+        tie_threshold: Margin below which result is considered a tie (on 0-150 scale)
+        curve_steepness: How much skill differential matters (default 1.0)
+                        - Higher = skilled fighter almost always beats unskilled
+                        - Lower = more upsets possible
+        q_factor: Controls randomness (1.0=uniform, <1=more consistent, >1=more swingy)
+        **kwargs: Reserved for future tuning parameters
+
+    Returns:
+        (winner: str, margin: float)
+        - winner: 'a', 'b', or 'tie'
+        - margin: Always positive, indicates how decisively winner won
+
+    Example:
+        winner, margin = contested_check(80, 60)  # 80 skill vs 60 skill
+        if winner == 'a':
+            if margin > 30:
+                # Decisive victory for A
+            elif margin > 10:
+                # Clear victory for A
+            else:
+                # Narrow victory for A
+        elif winner == 'tie':
+            # Dead heat
+
+    Tuning guide:
+        - For "skill matters a lot": curve_steepness=1.5-2.0, q_factor=0.8
+        - For "David vs Goliath possible": curve_steepness=0.5-0.7, q_factor=1.2
+        - tie_threshold controls how often exact ties occur
+    """
+    import random
+
+    # Clamp inputs to valid range
+    skill_a = max(0, min(150, skill_a))
+    skill_b = max(0, min(150, skill_b))
+
+    # Normalize to 0-1 scale and apply curve steepness
+    skill_a_norm = (skill_a / 150.0) ** curve_steepness
+    skill_b_norm = (skill_b / 150.0) ** curve_steepness
+
+    # Apply q_factor to random rolls
+    rand_a = random.random() ** (1.0 / q_factor)
+    rand_b = random.random() ** (1.0 / q_factor)
+
+    # Calculate effective rolls
+    roll_a = skill_a_norm * rand_a
+    roll_b = skill_b_norm * rand_b
+
+    # Calculate margin (always positive for return)
+    raw_margin = roll_a - roll_b
+    margin = abs(raw_margin) * 150.0  # Scale back to 0-150 for interpretation
+
+    # Determine winner
+    if margin < tie_threshold:
+        return 'tie', margin
+    elif raw_margin > 0:
+        return 'a', margin
+    else:
+        return 'b', margin
