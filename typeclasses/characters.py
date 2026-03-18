@@ -108,7 +108,7 @@ class Character(RoleplayMixin, MedicalMixin, RPGCharacterMixin, DefaultCharacter
         self.db.pronoun = "neutral"
         # XP: gained every 6h while eligible (max 4 drops/24h); cap enforced so you stop earning after XP_CAP
         self.db.xp = 0
-        from world.xp import XP_CAP
+        from world.rpg.xp import XP_CAP
         self.db.xp_cap = int(getattr(self.db, "xp_cap", XP_CAP) or XP_CAP)
         # PC vs NPC: NPCs do not show as "sleeping" when unpuppeted; set True for staff-created NPCs
         self.db.is_npc = False
@@ -239,7 +239,7 @@ class Character(RoleplayMixin, MedicalMixin, RPGCharacterMixin, DefaultCharacter
         merged = self.format_body_appearance()
         outfit_line = ""
         try:
-            from world.tailoring import get_outfit_quality_line
+            from world.rpg.tailoring import get_outfit_quality_line
             outfit_line = get_outfit_quality_line(self, looker)
         except Exception as err:
             logger.log_trace("characters.get_display_desc outfit_line: %s" % err)
@@ -356,7 +356,7 @@ class Character(RoleplayMixin, MedicalMixin, RPGCharacterMixin, DefaultCharacter
                 EvMenu(self, "world.chargen", startnode="node_start")
                 return
         # Normal post-puppet: grant pending XP and wake-up message
-        from world.xp import grant_pending_xp
+        from world.rpg.xp import grant_pending_xp
         xp_granted, drops = grant_pending_xp(self)
         if xp_granted > 0 and drops > 0:
             self.msg("|gYou got {} XP.|n".format(int(xp_granted) if xp_granted == int(xp_granted) else xp_granted))
