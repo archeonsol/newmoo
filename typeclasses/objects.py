@@ -22,6 +22,25 @@ class ObjectParent:
 
     """
 
+    def search(self, searchdata, **kwargs):
+        """
+        Override search to support Matrix IDs (^XXXXXX format).
+
+        If searchdata starts with ^, attempt Matrix ID lookup first.
+        Otherwise fall back to normal Evennia search behavior.
+        """
+        if searchdata and isinstance(searchdata, str) and searchdata.startswith("^"):
+            from world.matrix_ids import lookup_matrix_id
+            result = lookup_matrix_id(searchdata)
+            if result:
+                return result
+            # Matrix ID not found - return None and let caller handle the error
+            # (consistent with normal search behavior when nothing is found)
+            return None
+
+        # Not a Matrix ID, use default search behavior
+        return super().search(searchdata, **kwargs)
+
     def get_cmdsets(self, caller, current, **kwargs):
         """Never return None for current so the cmdset merger does not crash."""
         cur = self.cmdset.current

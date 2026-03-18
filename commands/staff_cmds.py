@@ -641,8 +641,14 @@ class CmdFind(Command):
             caller.msg("Usage: @find <search term>")
             return
 
-        # Use search_object with exact=False for partial matching
-        matches = search_object(args, exact=False)
+        # Check for Matrix ID first (starts with ^)
+        if args.startswith("^"):
+            from world.matrix_ids import lookup_matrix_id
+            result = lookup_matrix_id(args)
+            matches = [result] if result else []
+        else:
+            # Use search_object with exact=False for partial matching
+            matches = search_object(args, exact=False)
 
         if not matches:
             caller.msg(f"No objects found matching '{args}'.")
