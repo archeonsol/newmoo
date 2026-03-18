@@ -424,8 +424,9 @@ class NetworkedMixin:
             return 0
 
         # Migrate old list-based ACL to dict-based ACL
-        if isinstance(self.db.acl, list):
-            old_acl = self.db.acl
+        # Check if it's a list or _SaverList (not dict)
+        if not isinstance(self.db.acl, dict):
+            old_acl = list(self.db.acl)  # Convert to regular list
             self.db.acl = {}
             for char_pk in old_acl:
                 # Default old entries to level 5 (medium access)
@@ -486,8 +487,9 @@ class NetworkedMixin:
             self.db.acl = {}
 
         # Migrate old list-based ACL to dict-based ACL
-        if isinstance(self.db.acl, list):
-            old_acl = self.db.acl
+        # Check if it's a list or _SaverList (not dict)
+        if not isinstance(self.db.acl, dict):
+            old_acl = list(self.db.acl)  # Convert to regular list
             self.db.acl = {}
             for char_pk in old_acl:
                 # Default old entries to level 5 (medium access)
@@ -521,8 +523,9 @@ class NetworkedMixin:
             return False
 
         # Migrate old list-based ACL to dict-based ACL
-        if isinstance(self.db.acl, list):
-            old_acl = self.db.acl
+        # Check if it's a list or _SaverList (not dict)
+        if not isinstance(self.db.acl, dict):
+            old_acl = list(self.db.acl)  # Convert to regular list
             self.db.acl = {}
             for char_pk in old_acl:
                 # Default old entries to level 5 (medium access)
@@ -551,8 +554,9 @@ class NetworkedMixin:
             return []
 
         # Migrate old list-based ACL to dict-based ACL
-        if isinstance(self.db.acl, list):
-            old_acl = self.db.acl
+        # Check if it's a list or _SaverList (not dict)
+        if not isinstance(self.db.acl, dict):
+            old_acl = list(self.db.acl)  # Convert to regular list
             self.db.acl = {}
             for char_pk in old_acl:
                 # Default old entries to level 5 (medium access)
@@ -571,7 +575,7 @@ class NetworkedMixin:
                 else:
                     names.append(f"{obj.key} (physical, level {level})")
             except ObjectDB.DoesNotExist:
-                names.append(f"[Unknown #{char_pk}, level {level}]")
+                names.append(f"<err> (<err>, level {level})")
 
         return names
 
@@ -583,8 +587,10 @@ class NetworkedMixin:
         """
         Register standard ACL management commands.
 
-        Call this in at_object_creation() to add grant, revoke, and acl commands
-        to the device. Requires level 10 for grant/revoke, level 1 for viewing.
+        Call this in at_object_creation() to add grant and revoke commands
+        to the device. Requires level 10 for both commands.
+
+        Note: ACL viewing is available through the main device menu.
 
         Example:
             def at_object_creation(self):
@@ -603,12 +609,6 @@ class NetworkedMixin:
             "handle_revoke_access",
             help_text="Revoke access: revoke <name>",
             auth_level=10  # Root only
-        )
-        self.register_device_command(
-            "acl",
-            "handle_view_acl",
-            help_text="View access control list",
-            auth_level=1  # Anyone on ACL can view
         )
 
     def handle_grant_access(self, caller, *args):
@@ -692,70 +692,28 @@ class NetworkedMixin:
 
     def handle_revoke_access(self, caller, *args):
         """
-        Revoke access from a user.
+        Open interactive menu to revoke access from users.
 
-        Usage: patch cmd.exe revoke <name>
+        Usage:
+            patch cmd.exe revoke - Open ACL management menu
 
         Args:
             caller (Character or MatrixAvatar): The character executing the command
-            *args: Target name
+            *args: Unused
 
         Returns:
-            bool: True on success, False on failure
+            bool: True on success
         """
-        if not args:
-            caller.msg("Usage: patch cmd.exe revoke <name>")
-            return False
+        from evennia.utils.evmenu import EvMenu
 
-        target_name = args[0]
-
-        # Search in ACL by name
-        if not hasattr(self.db, 'acl') or not self.db.acl:
-            caller.msg("|rNo one has access to this device.|n")
-            return False
-
-        from evennia.objects.models import ObjectDB
-        found_pk = None
-        found_name = None
-
-        for char_pk, level in self.db.acl.items():
-            try:
-                obj = ObjectDB.objects.get(pk=char_pk)
-                if obj.key.lower() == target_name.lower():
-                    found_pk = char_pk
-                    found_name = obj.key
-                    break
-            except ObjectDB.DoesNotExist:
-                continue
-
-        if not found_pk:
-            caller.msg(f"|rNo user '{target_name}' found in ACL.|n")
-            return False
-
-        # Don't allow revoking yourself
-        caller_pk = caller.pk
-        from typeclasses.matrix.avatars import MatrixAvatar
-        if isinstance(caller, MatrixAvatar):
-            operator = caller.db.operator
-            if operator:
-                caller_pk = operator.pk
-
-        if found_pk == caller_pk:
-            caller.msg("|rYou cannot revoke your own access.|n")
-            return False
-
-        # Remove from ACL
-        del self.db.acl[found_pk]
-        caller.msg(f"|gAccess revoked for '{found_name}'.|n")
-
-        # Notify target if they're online
-        try:
-            target = ObjectDB.objects.get(pk=found_pk)
-            if target.has_account:
-                target.msg(f"|rYour access to {self.key} has been revoked.|n")
-        except ObjectDB.DoesNotExist:
-            pass
-
+        # Start EvMenu for ACL revocation
+        EvMenu(
+            caller,
+            "typeclasses.matrix.mixins.networked",
+            startnode="node_device_acl_list",
+            startnode_input=("", {"device": self}),
+            cmd_on_exit=None,
+        )
         return True
 
     def handle_view_acl(self, caller, *args):
@@ -838,6 +796,125 @@ class NetworkedMixin:
                 return file
 
         return None
+
+
+# =========================================================================
+# ACL Management Menu Nodes (for device interface)
+# =========================================================================
+
+def node_device_acl_list(caller, raw_string, **kwargs):
+    """
+    Display ACL entries and allow selection for deletion.
+    """
+    device = kwargs.get("device")
+    if not device:
+        return "Error: No device specified.", None
+
+    # Get ACL entries
+    if not hasattr(device.db, 'acl') or not device.db.acl:
+        text = f"|c=== ACL for {device.key} ===|n\n\n"
+        text += "No ACL entries (public device).\n"
+        return text, [{"desc": "Exit", "goto": "node_device_acl_exit"}]
+
+    # Build display
+    text = f"|c=== ACL for {device.key} ===|n\n\n"
+    text += "Select an entry to remove, or 'q' to exit:\n\n"
+
+    from evennia.objects.models import ObjectDB
+
+    acl_list = []
+    for char_pk, level in device.db.acl.items():
+        try:
+            obj = ObjectDB.objects.get(pk=char_pk)
+            if obj.typeclass_path and 'MatrixAvatar' in obj.typeclass_path:
+                name = f"{obj.key} (matrix, level {level})"
+            else:
+                name = f"{obj.key} (physical, level {level})"
+        except ObjectDB.DoesNotExist:
+            name = f"<err> (<err>, level {level})"
+
+        acl_list.append((char_pk, name))
+
+    # Build options
+    options = []
+    for i, (char_pk, display_name) in enumerate(acl_list, 1):
+        text += f"  {i}. {display_name}\n"
+        options.append({
+            "key": str(i),
+            "desc": display_name,
+            "goto": ("node_device_acl_confirm", {"device": device, "char_pk": char_pk, "name": display_name})
+        })
+
+    options.append({"key": "q", "desc": "Exit", "goto": "node_device_acl_exit"})
+
+    return text, options
+
+
+def node_device_acl_confirm(caller, raw_string, **kwargs):
+    """
+    Confirm deletion of an ACL entry.
+    """
+    device = kwargs.get("device")
+    char_pk = kwargs.get("char_pk")
+    name = kwargs.get("name")
+
+    if not device or char_pk is None:
+        return "Error: Invalid parameters.", None
+
+    text = f"|yConfirm removal of:|n\n"
+    text += f"  {name}\n\n"
+    text += "This will revoke all access for this user.\n"
+
+    options = [
+        {
+            "key": "y",
+            "desc": "Yes, remove",
+            "goto": ("node_device_acl_delete", {"device": device, "char_pk": char_pk, "name": name})
+        },
+        {
+            "key": "n",
+            "desc": "No, go back",
+            "goto": ("node_device_acl_list", {"device": device})
+        }
+    ]
+
+    return text, options
+
+
+def node_device_acl_delete(caller, raw_string, **kwargs):
+    """
+    Actually delete the ACL entry.
+    """
+    device = kwargs.get("device")
+    char_pk = kwargs.get("char_pk")
+    name = kwargs.get("name")
+
+    if not device or char_pk is None:
+        return "Error: Invalid parameters.", None
+
+    # Remove from ACL
+    if hasattr(device.db, 'acl') and char_pk in device.db.acl:
+        del device.db.acl[char_pk]
+        caller.msg(f"|gRemoved {name} from ACL.|n")
+
+        # Notify target if they still exist and are online
+        try:
+            from evennia.objects.models import ObjectDB
+            target = ObjectDB.objects.get(pk=char_pk)
+            if target.has_account:
+                target.msg(f"|rYour access to {device.key} has been revoked.|n")
+        except ObjectDB.DoesNotExist:
+            pass
+    else:
+        caller.msg(f"|rEntry not found in ACL.|n")
+
+    # Return to list
+    return node_device_acl_list(caller, "", device=device)
+
+
+def node_device_acl_exit(caller, raw_string, **kwargs):
+    """Exit the menu."""
+    return None, None
 
     def update_file(self, filename, contents):
         """

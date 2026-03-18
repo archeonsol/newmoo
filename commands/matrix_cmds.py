@@ -15,6 +15,9 @@ from typeclasses.matrix.devices import DiveRig
 from typeclasses.matrix.avatars import JACKOUT_NORMAL
 from typeclasses.matrix.objects import Router, NetworkedObject
 
+# Admin lock for builder/admin commands
+ADMIN_LOCK = "cmd:perm(Builder) or perm(Admin)"
+
 
 class CmdJackIn(Command):
     """
@@ -328,6 +331,342 @@ class CmdRoute(Command):
             )
 
         delay(1.0, _do_move)
+
+
+class CmdMacl(Command):
+    """
+    Manage Access Control Lists on networked devices.
+
+    Usage:
+        macl <device>                         - List ACL entries
+        macl/grant <device> = <name>,<level>  - Grant access (level 1-10)
+        macl/revoke <device> = <name>         - Revoke access
+        macl/clear <device>                   - Clear entire ACL
+
+    Access Levels:
+        1   - Entry (basic interface access)
+        2-3 - Low access (basic commands)
+        4-6 - Medium access (modify device, customize)
+        7-9 - High access (advanced commands)
+        10  - Root (full control, ACL management)
+
+    Examples:
+        macl hub
+            View all users who have access to the hub and their levels.
+
+        macl/grant hub = Alice,10
+            Grant Alice level 10 (root) access - she can do everything.
+
+        macl/grant hub = Cyph3r,5
+            Grant avatar Cyph3r level 5 (medium) access - Matrix-only.
+
+        macl/revoke hub = Bob
+            Remove Bob from the ACL - he loses all access.
+
+        macl/clear hub
+            Remove everyone from the ACL - reset to public device.
+
+    Notes:
+        - Use character names for physical access (they must be in same room)
+        - Use avatar names for Matrix-only access (searched globally)
+        - Characters on ACL get both physical and Matrix access
+        - Avatars on ACL only get Matrix access
+    """
+
+    key = "macl"
+    switch_options = ("grant", "revoke", "clear")
+    locks = ADMIN_LOCK
+    help_category = "Building"
+
+    def parse(self):
+        """Parse switches from raw_string."""
+        super().parse()
+
+        raw = self.raw_string or ""
+        self.switches = []
+
+        # Find switches in format: macl/grant/revoke args
+        parts = raw.split(None, 1)
+        if parts:
+            cmd_part = parts[0]
+            segments = cmd_part.split('/')
+            if len(segments) > 1:
+                self.switches = segments[1:]
+
+            if len(parts) > 1:
+                self.args = parts[1]
+            else:
+                self.args = ""
+
+    def func(self):
+        caller = self.caller
+
+        if not self.args.strip():
+            caller.msg("Usage: macl <device>  or  macl/grant <device> = <name>,<level>")
+            return
+
+        # Parse device name (everything before '=' or the whole arg)
+        if "=" in self.args:
+            device_name = self.args.split("=")[0].strip()
+        else:
+            device_name = self.args.strip()
+
+        # Search for device
+        device = caller.search(device_name)
+        if not device:
+            return
+
+        # Check if it's a networked device
+        from typeclasses.matrix.mixins import NetworkedMixin
+        if not isinstance(device, NetworkedMixin):
+            caller.msg(f"{device.get_display_name(caller)} is not a networked device.")
+            return
+
+        # Handle switches
+        if "grant" in self.switches:
+            self._handle_grant(caller, device)
+        elif "revoke" in self.switches:
+            self._handle_revoke(caller, device)
+        elif "clear" in self.switches:
+            self._handle_clear(caller, device)
+        else:
+            # Default: list ACL
+            self._handle_list(caller, device)
+
+    def _handle_list(self, caller, device):
+        """List all ACL entries with interactive menu."""
+        # Start EvMenu for ACL management
+        EvMenu(
+            caller,
+            "commands.matrix_cmds",
+            startnode="node_acl_list",
+            startnode_input=("", {"device": device}),
+            cmd_on_exit=None,
+        )
+
+    def _handle_grant(self, caller, device):
+        """Grant access to a user."""
+        if "=" not in self.args:
+            caller.msg("Usage: macl/grant <device> = <name>,<level>")
+            caller.msg("Example: macl/grant hub = Alice,10")
+            return
+
+        rhs = self.args.split("=", 1)[1].strip()
+        parts = [p.strip() for p in rhs.split(",")]
+
+        if len(parts) != 2:
+            caller.msg("Usage: macl/grant <device> = <name>,<level>")
+            caller.msg("Example: macl/grant hub = Alice,10")
+            return
+
+        target_name = parts[0]
+        try:
+            level = int(parts[1])
+        except ValueError:
+            caller.msg("|rLevel must be a number between 1 and 10.|n")
+            return
+
+        if level < 1 or level > 10:
+            caller.msg("|rLevel must be between 1 and 10.|n")
+            return
+
+        # Search for character or avatar
+        from typeclasses.characters import Character
+        from typeclasses.matrix.avatars import MatrixAvatar
+        from evennia.utils.search import search_object
+
+        # Try finding a character first (in same location)
+        target = caller.search(target_name, location=caller.location, quiet=True)
+        if target and isinstance(target[0], Character):
+            target = target[0]
+            caller.msg(f"|gGranting physical + Matrix access to '{target.key}' at level {level}.|n")
+        else:
+            # Try finding avatar globally
+            avatars = search_object(target_name, typeclass="typeclasses.matrix.avatars.MatrixAvatar")
+            if avatars:
+                target = avatars[0]
+                caller.msg(f"|gGranting Matrix-only access to avatar '{target.key}' at level {level}.|n")
+            else:
+                caller.msg(f"|rNo character or avatar found matching '{target_name}'.|n")
+                return
+
+        device.add_to_acl(target, level=level)
+        caller.msg(f"|gAccess granted successfully.|n")
+
+        # Notify target if online
+        if target.has_account:
+            target.msg(f"|yYou have been granted level {level} access to {device.key}.|n")
+
+    def _handle_revoke(self, caller, device):
+        """Revoke access from a user."""
+        if "=" not in self.args:
+            caller.msg("Usage: macl/revoke <device> = <name>")
+            caller.msg("Example: macl/revoke hub = Alice")
+            return
+
+        target_name = self.args.split("=", 1)[1].strip()
+
+        # Search in ACL by name
+        if not hasattr(device.db, 'acl') or not device.db.acl:
+            caller.msg("|rNo one has access to this device.|n")
+            return
+
+        from evennia.objects.models import ObjectDB
+        found_pk = None
+        found_name = None
+
+        for char_pk, level in device.db.acl.items():
+            try:
+                obj = ObjectDB.objects.get(pk=char_pk)
+                if obj.key.lower() == target_name.lower():
+                    found_pk = char_pk
+                    found_name = obj.key
+                    break
+            except ObjectDB.DoesNotExist:
+                continue
+
+        if not found_pk:
+            caller.msg(f"|rNo user '{target_name}' found in ACL.|n")
+            return
+
+        # Remove from ACL
+        del device.db.acl[found_pk]
+        caller.msg(f"|gAccess revoked for '{found_name}'.|n")
+
+        # Notify target if online
+        try:
+            target = ObjectDB.objects.get(pk=found_pk)
+            if target.has_account:
+                target.msg(f"|rYour access to {device.key} has been revoked.|n")
+        except ObjectDB.DoesNotExist:
+            pass
+
+    def _handle_clear(self, caller, device):
+        """Clear all ACL entries."""
+        if not hasattr(device.db, 'acl') or not device.db.acl:
+            caller.msg("ACL is already empty.")
+            return
+
+        count = len(device.db.acl)
+        device.db.acl = {}
+        caller.msg(f"|yCleared {count} ACL entries from {device.key}.|n")
+
+
+# ACL Management Menu Nodes
+
+def node_acl_list(caller, raw_string, **kwargs):
+    """
+    Display ACL entries and allow selection for deletion.
+    """
+    device = kwargs.get("device")
+    if not device:
+        return "Error: No device specified.", None
+
+    # Get ACL entries
+    if not hasattr(device.db, 'acl') or not device.db.acl:
+        text = f"|c=== ACL for {device.key} ===|n\n\n"
+        text += "No ACL entries (public device).\n"
+        return text, [{"desc": "Exit", "goto": "node_exit"}]
+
+    # Build display
+    text = f"|c=== ACL for {device.key} ===|n\n\n"
+    text += "Select an entry to remove, or 'q' to exit:\n\n"
+
+    from evennia.objects.models import ObjectDB
+
+    acl_list = []
+    for char_pk, level in device.db.acl.items():
+        try:
+            obj = ObjectDB.objects.get(pk=char_pk)
+            if obj.typeclass_path and 'MatrixAvatar' in obj.typeclass_path:
+                name = f"{obj.key} (matrix, level {level})"
+            else:
+                name = f"{obj.key} (physical, level {level})"
+        except ObjectDB.DoesNotExist:
+            name = f"<err> (<err>, level {level})"
+
+        acl_list.append((char_pk, name))
+
+    # Build options
+    options = []
+    for i, (char_pk, display_name) in enumerate(acl_list, 1):
+        text += f"  {i}. {display_name}\n"
+        options.append({
+            "key": str(i),
+            "desc": display_name,
+            "goto": ("node_confirm_delete", {"device": device, "char_pk": char_pk, "name": display_name})
+        })
+
+    options.append({"key": "q", "desc": "Exit", "goto": "node_exit"})
+
+    return text, options
+
+
+def node_confirm_delete(caller, raw_string, **kwargs):
+    """
+    Confirm deletion of an ACL entry.
+    """
+    device = kwargs.get("device")
+    char_pk = kwargs.get("char_pk")
+    name = kwargs.get("name")
+
+    if not device or char_pk is None:
+        return "Error: Invalid parameters.", None
+
+    text = f"|yConfirm removal of:|n\n"
+    text += f"  {name}\n\n"
+    text += "This will revoke all access for this user.\n"
+
+    options = [
+        {
+            "key": "y",
+            "desc": "Yes, remove",
+            "goto": ("node_do_delete", {"device": device, "char_pk": char_pk, "name": name})
+        },
+        {
+            "key": "n",
+            "desc": "No, go back",
+            "goto": ("node_acl_list", {"device": device})
+        }
+    ]
+
+    return text, options
+
+
+def node_do_delete(caller, raw_string, **kwargs):
+    """
+    Actually delete the ACL entry.
+    """
+    device = kwargs.get("device")
+    char_pk = kwargs.get("char_pk")
+    name = kwargs.get("name")
+
+    if not device or char_pk is None:
+        return "Error: Invalid parameters.", None
+
+    # Remove from ACL
+    if hasattr(device.db, 'acl') and char_pk in device.db.acl:
+        del device.db.acl[char_pk]
+        caller.msg(f"|gRemoved {name} from ACL.|n")
+
+        # Notify target if they still exist and are online
+        try:
+            from evennia.objects.models import ObjectDB
+            target = ObjectDB.objects.get(pk=char_pk)
+            if target.has_account:
+                target.msg(f"|rYour access to {device.key} has been revoked.|n")
+        except ObjectDB.DoesNotExist:
+            pass
+    else:
+        caller.msg(f"|rEntry not found in ACL.|n")
+
+    # Return to list
+    return node_acl_list(caller, "", device=device)
+
+
+def node_exit(caller, raw_string, **kwargs):
+    """Exit the menu."""
+    return None, None
 
 
 # Router Access Menu Nodes are in commands/matrix_menus.py
