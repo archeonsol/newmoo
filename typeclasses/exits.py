@@ -38,6 +38,17 @@ class Exit(ObjectParent, DefaultExit):
         if getattr(traversing_object.db, "lying_on", None) or getattr(traversing_object.db, "lying_on_table", None):
             traversing_object.msg("You need to get up first.")
             return
+        # Grappled: cannot walk away while someone has them locked in grasp.
+        grappled_by = getattr(traversing_object.db, "grappled_by", None)
+        if grappled_by:
+            # get_display_name() is viewer-aware; show the grappler name from the victim's perspective if available.
+            grappler_name = (
+                grappled_by.get_display_name(traversing_object)
+                if hasattr(grappled_by, "get_display_name")
+                else getattr(grappled_by, "key", "someone")
+            )
+            traversing_object.msg(f"You're locked in {grappler_name}'s grasp. Use |wresist|n to break free.")
+            return
         # Flatlined (dying): no movement — lock all IC action
         try:
             from world.death import is_flatlined

@@ -461,3 +461,12 @@ class CmdNoMatchUnconscious(Command):
 
     def func(self):
         self.caller.msg("You are unconscious.")
+
+
+class CmdNoMatchGrappled(Command):
+    """When grappled, any other command shows this."""
+    key = CMD_NOMATCH
+    locks = "cmd:all()"
+
+    def func(self):
+        self.caller.msg("You're locked in someone's grasp. You can only |wlook|n and |wresist|n.")

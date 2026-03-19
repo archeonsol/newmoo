@@ -12,6 +12,7 @@ FIRST_TO_SECOND_MAP = [
     (r"\bI'm\b", "you're"), (r"\bI am\b", "you are"),
     (r"\bI've\b", "you've"), (r"\bI have\b", "you have"),
     (r"\bI\b", "you"), (r"\bmy\b", "your"), (r"\bme\b", "you"),
+    (r"\bmyself\b", "yourself"),
 ]
 
 IRREGULAR_VERBS = {
@@ -47,10 +48,19 @@ def first_to_third(text, character):
     # 2. Pronoun Conversion
     key = (getattr(character.db, "pronoun", "neutral") or "neutral").lower()
     sub, poss, obj = PRONOUN_MAP.get(key, PRONOUN_MAP["neutral"])
+    reflexive = {"he": "himself", "she": "herself", "they": "themself"}.get(sub, "themself")
     text = re.sub(r"\bI'm\b", f"{sub}'s", text, flags=re.IGNORECASE)
     text = re.sub(r"\bI\b", sub, text, flags=re.IGNORECASE)
     text = re.sub(r"\bmy\b", poss, text, flags=re.IGNORECASE)
     text = re.sub(r"\bme\b", obj, text, flags=re.IGNORECASE)
+    # Reflexive pronoun: "myself" -> character-appropriate reflexive.
+    # Also prevents the later first-word conjugation step from mangling it.
+    text = re.sub(
+        r"\bmyself\b",
+        lambda m: reflexive.capitalize() if m.group(0) and m.group(0)[0].isupper() else reflexive,
+        text,
+        flags=re.IGNORECASE,
+    )
 
     # 3. Conjugation: leading "," = don't conjugate first word; ".word" = verb, conjugate
     skip_first_conjugate = False
@@ -65,7 +75,7 @@ def first_to_third(text, character):
     text = re.sub(r" \.\s*(\w+)", conjugate_dot_verb, text)
     # Mid-string ".word" already handled above; leading was stripped so first word gets conjugated below
     words = text.split()
-    pronouns = {sub, poss, obj, "they", "their", "them"}
+    pronouns = {sub, poss, obj, "they", "their", "them", reflexive, "himself", "herself", "themself"}
     if not skip_first_conjugate and words:
         first = words[0]
         # First token may have trailing punctuation (e.g. "grin," from ".grin, looking at Bob")

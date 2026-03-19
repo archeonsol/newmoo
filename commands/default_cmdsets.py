@@ -84,6 +84,24 @@ class FlatlinedCmdSet(CmdSet):
         self.add(CmdNoMatchFlatlined())
 
 
+class GrappledCmdSet(CmdSet):
+    """
+    When character is grappled, only allow look and resist.
+    Added/removed by world.grapple when grapple state changes.
+    """
+    key = "GrappledCmdSet"
+    priority = 180
+
+    def at_cmdset_creation(self):
+        from commands.base_cmds import CmdLook
+        from commands.combat_cmds import CmdResist
+        from commands.death_cmds import CmdNoMatchGrappled
+
+        self.add(CmdLook())
+        self.add(CmdResist())
+        self.add(CmdNoMatchGrappled())
+
+
 class CharacterCmdSet(default_cmds.CharacterCmdSet):
     """
     The `CharacterCmdSet` contains general in-game commands like `look`,
@@ -114,6 +132,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         from commands.death_cmds import CmdGoOOC, CmdReturnIC, CmdEnterPod, CmdLeavePod, CmdSplinterMe
         from commands.vehicle_cmds import CmdEnterVehicle, CmdExitVehicle, CmdStartEngine, CmdStopEngine, CmdShutoffEngine, CmdDrive, CmdVehicleStatus, CmdRepairPart
         from commands.matrix_cmds import CmdJackIn, CmdJackOut, CmdRoute
+        from commands.network_cmds import CmdNetworkWho, CmdNetworkSend, CmdNetworkNtag
         from commands.staff_cmds import (
             CmdStats, CmdGiveXp, CmdStaffSheet, CmdStaffSetStat, CmdStaffSetSkill,
             CmdCreateItem, CmdTypeclasses, CmdSpawnItem, CmdSpawnArmor, CmdSpawnVehicle, CmdSpawnMedical, CmdSpawnOR,
@@ -138,6 +157,12 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
 
         # Use our custom CmdLook instead of Evennia's default
         self.remove(default_general.CmdLook)
+        # Replace Evennia's built-in `who` with our `@who`.
+        try:
+            from evennia.commands.default.account import CmdWho as DefaultCmdWho
+            self.remove(DefaultCmdWho)
+        except Exception:
+            pass
         self.add(CmdLook())
         self.add(CmdStopWalking())
         self.add(CmdScavenge())
@@ -243,6 +268,9 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdRepairPart())
         self.add(CmdJackIn())
         self.add(CmdJackOut())
+        self.add(CmdNetworkWho())
+        self.add(CmdNetworkSend())
+        self.add(CmdNetworkNtag())
         self.add(CmdRoute())
         self.add(CmdAddNote())
         self.add(CmdNotes())
@@ -307,6 +335,18 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         or create more than the single auto-created one.
         """
         super().at_cmdset_creation()
+        # Replace Evennia's built-in `who` with our `@who`.
+        try:
+            from evennia.commands.default.account import CmdWho as DefaultCmdWho
+            self.remove(DefaultCmdWho)
+        except Exception:
+            pass
+
+        from commands.who_cmds import CmdWho, CmdWhoMsg, CmdWhoAnon
+        self.add(CmdWho())
+        self.add(CmdWhoMsg())
+        self.add(CmdWhoAnon())
+
         from commands.multipuppet_cmds import StaffOnlyPuppet, StaffOnlyUnpuppet
         from commands.staff_cmds import StaffCharCreate, StaffCharDelete
         self.remove(CmdIC)
