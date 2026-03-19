@@ -26,7 +26,7 @@ LOOK_CHARACTER_NAME_COLOR = "|520"   # warm orange/amber (same as room character
 LOOK_SDESC_COLOR = "|w"              # white for (a tall man wearing...)
 
 
-class Character(RoleplayMixin, MedicalMixin, RPGCharacterMixin, FurnitureMixin, DefaultCharacter):
+class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, FurnitureMixin, DefaultCharacter):
     """
     The 'Colony' Core Engine.
     Uses a Qualitative Grade system (U through A, 21 letters) where:
