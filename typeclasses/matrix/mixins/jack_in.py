@@ -17,14 +17,12 @@ their own preconditions. All other logic is generic.
 from evennia.utils.create import create_object
 from evennia.utils import delay
 from typeclasses.matrix.avatars import MatrixAvatar, JACKOUT_FORCED, JACKOUT_EMERGENCY, JACKOUT_FATAL, JACKOUT_NORMAL
+from typeclasses.matrix.mixins.networked import NetworkedMixin
 
 
-class JackInMixin:
+class JackInMixin(NetworkedMixin):
     """
     Mixin providing Matrix jack-in/disconnect logic for devices.
-
-    Requires the host class to also provide network connectivity via NetworkedMixin
-    (i.e. get_relay() and has_network_coverage() must exist).
 
     Call setup_jack_in_attrs() from at_object_creation() to initialize attributes.
     """
