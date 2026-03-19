@@ -49,7 +49,8 @@ def device_main_menu(caller, raw_string, **kwargs):
     device = kwargs.get("device")
     from_matrix = kwargs.get("from_matrix", False)
     if not device:
-        return "node_error", kwargs
+        caller.msg("|rError: Device interface unavailable.|n")
+        return None
 
     # Build menu text
     text = f"|c=== {device.key} Interface ===|n\n\n"
@@ -140,10 +141,7 @@ def node_execute_command(caller, raw_string, **kwargs):
     text = f"|c=== Execute: {command} ===|n\n\n"
     text += "Enter command arguments (or 'back' to cancel):\n"
 
-    options = {
-        "key": "_default",
-        "goto": ("node_process_command", {"device": device, "command": command, "from_matrix": from_matrix})
-    }
+    options = [{"key": "_default", "desc": None, "goto": ("node_process_command", {"device": device, "command": command, "from_matrix": from_matrix})}]
 
     return text, options
 
@@ -194,15 +192,16 @@ def node_process_command(caller, raw_string, **kwargs):
     args = raw_string.strip().split() if raw_string.strip() else []
 
     # Execute the command via device framework
-    success = device.invoke_device_command(command, caller, from_matrix, *args)
+    result = device.invoke_device_command(command, caller, from_matrix, *args)
 
-    text = "\n|gCommand executed.|n\n" if success else "\n|rCommand failed.|n\n"
+    # Handlers can return a (node_name, kwargs) tuple to drive menu navigation
+    if isinstance(result, tuple):
+        return result
+
+    text = "\n|gCommand executed.|n\n" if result else "\n|rCommand failed.|n\n"
     text += "\nPress any key to return to main menu."
 
-    options = {
-        "key": "_default",
-        "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})
-    }
+    options = [{"key": "_default", "desc": None, "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})}]
 
     return text, options
 
@@ -259,10 +258,7 @@ def node_read_file_prompt(caller, raw_string, **kwargs):
     text = "|c=== Read File ===|n\n\n"
     text += "Enter filename to read (or 'back' to cancel):\n"
 
-    options = {
-        "key": "_default",
-        "goto": ("node_read_file", {"device": device, "from_matrix": from_matrix})
-    }
+    options = [{"key": "_default", "desc": None, "goto": ("node_read_file", {"device": device, "from_matrix": from_matrix})}]
 
     return text, options
 
@@ -275,7 +271,7 @@ def node_read_file(caller, raw_string, **kwargs):
     from_matrix = kwargs.get("from_matrix", False)
 
     if raw_string.strip().lower() == "back":
-        return node_browse_files(caller, "", **kwargs)
+        return ("node_browse_files", kwargs)
 
     filename = raw_string.strip()
     file_obj = device.get_file(filename)
@@ -288,10 +284,7 @@ def node_read_file(caller, raw_string, **kwargs):
         text += file_obj.get('contents', '[empty]')
         text += "\n\nPress any key to return to file browser."
 
-    options = {
-        "key": "_default",
-        "goto": ("node_browse_files", {"device": device, "from_matrix": from_matrix})
-    }
+    options = [{"key": "_default", "desc": None, "goto": ("node_browse_files", {"device": device, "from_matrix": from_matrix})}]
 
     return text, options
 
@@ -655,13 +648,13 @@ def node_view_photo_one(caller, raw_string, **kwargs):
 def node_error(caller, raw_string, **kwargs):
     """Error state - device not found or invalid."""
     text = "|rError: Device interface unavailable.|n\n"
-    return text, {"key": "_default", "goto": "node_exit"}
+    return text, [{"key": "_default", "desc": None, "goto": "node_exit"}]
 
 
 def node_exit(caller, raw_string, **kwargs):
     """Exit the menu."""
     caller.msg("Disconnecting from device interface.")
-    return None, None
+    return None
 
 
 def start_device_menu(caller, device, from_matrix=False):

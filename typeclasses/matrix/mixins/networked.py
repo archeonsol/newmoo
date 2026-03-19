@@ -34,7 +34,7 @@ class NetworkedMixin(MatrixIdMixin):
         self.db.security_level = 0
         self.db.has_storage = False
         self.db.has_controls = False
-        self.db.acl = []  # Access Control List - list of character dbrefs with permission
+        self.db.acl = {}  # Access Control List - dict of {char_pk: level} with permission
         self.db.storage = []  # File storage (list of dicts with filename, filetype, contents)
         self.db.device_commands = {}  # Registered commands: {command_name: handler_function_name}
         self.db.interface_desc = None  # Custom description for device interface room
@@ -121,32 +121,15 @@ class NetworkedMixin(MatrixIdMixin):
         interface.db.ephemeral = True
         interface.db.node_type = "device_interface"
 
-        # Set interface description based on device type
-        if device_type == "hub":
-            # Hub uses custom description or default
-            hub_desc = getattr(self.db, 'hub_desc', None)
-            if hub_desc:
-                interface.db.desc = hub_desc
-            else:
-                interface.db.desc = (
-                    "A blank virtual space, waiting to be customized. "
-                    "This is your private network node - shape it as you see fit."
-                )
-            # Restore hub details if they exist
-            hub_details = getattr(self.db, 'hub_details', None)
-            if hub_details:
-                for key, value in hub_details.items():
-                    interface.db.details[key] = value
+        # Set interface description - devices override interface_desc to customize
+        device_desc = getattr(self.db, 'interface_desc', None)
+        if device_desc:
+            interface.db.desc = device_desc
         else:
-            # Generic device interface
-            device_desc = getattr(self.db, 'interface_desc', None)
-            if device_desc:
-                interface.db.desc = device_desc
-            else:
-                interface.db.desc = (
-                    f"A sterile virtual interface space. The {device_type}'s "
-                    "systems are accessible here through command consoles."
-                )
+            interface.db.desc = (
+                f"A sterile virtual interface space. The {device_type}'s "
+                "systems are accessible here through command consoles."
+            )
 
         # Create exits between rooms
         from evennia.utils.create import create_object
@@ -195,7 +178,10 @@ class NetworkedMixin(MatrixIdMixin):
         # Get router from room
         router_dbref = room.db.network_router
         from typeclasses.matrix.objects import Router
-        return Router.objects.get(pk=router_dbref)
+        try:
+            return Router.objects.get(pk=router_dbref)
+        except Router.DoesNotExist:
+            return None
 
 
 
@@ -284,7 +270,9 @@ class NetworkedMixin(MatrixIdMixin):
             *args: Arguments to pass to the command handler
 
         Returns:
-            bool: True if command executed successfully, False otherwise
+            bool or tuple: True/False for simple commands, or a (node_name, kwargs)
+                          tuple if the handler wants to navigate the device menu to
+                          another node instead of returning to main.
         """
         if not hasattr(self.db, 'device_commands'):
             self.db.device_commands = {}
@@ -401,14 +389,7 @@ class NetworkedMixin(MatrixIdMixin):
         if not hasattr(self.db, 'acl') or not self.db.acl:
             return 0
 
-        # Migrate old list-based ACL to dict-based ACL
-        # Check if it's a list or _SaverList (not dict)
-        if not isinstance(self.db.acl, dict):
-            old_acl = list(self.db.acl)  # Convert to regular list
-            self.db.acl = {}
-            for char_pk in old_acl:
-                # Default old entries to level 5 (medium access)
-                self.db.acl[char_pk] = 5
+        self._migrate_acl()
 
         # For MatrixAvatar, check BOTH operator AND avatar (return highest level)
         from typeclasses.matrix.avatars import MatrixAvatar
@@ -438,6 +419,22 @@ class NetworkedMixin(MatrixIdMixin):
         """
         return self.check_acl(character, required_level=0)
 
+    def _migrate_acl(self):
+        """
+        Migrate old list-based ACL to dict-based ACL in-place.
+        Old entries default to level 5 (medium access).
+        Safe to call even if acl is already a dict or doesn't exist.
+        """
+        if not hasattr(self.db, 'acl'):
+            return
+        if isinstance(self.db.acl, dict):
+            return
+        if not isinstance(self.db.acl, dict):
+            old_acl = list(self.db.acl)
+            self.db.acl = {}
+            for char_pk in old_acl:
+                self.db.acl[char_pk] = 5
+
     def add_to_acl(self, character, level=5):
         """
         Add a character to this device's Access Control List.
@@ -464,14 +461,7 @@ class NetworkedMixin(MatrixIdMixin):
         if not hasattr(self.db, 'acl'):
             self.db.acl = {}
 
-        # Migrate old list-based ACL to dict-based ACL
-        # Check if it's a list or _SaverList (not dict)
-        if not isinstance(self.db.acl, dict):
-            old_acl = list(self.db.acl)  # Convert to regular list
-            self.db.acl = {}
-            for char_pk in old_acl:
-                # Default old entries to level 5 (medium access)
-                self.db.acl[char_pk] = 5
+        self._migrate_acl()
 
         # Clamp level to valid range
         level = max(1, min(10, level))
@@ -500,14 +490,7 @@ class NetworkedMixin(MatrixIdMixin):
         if not hasattr(self.db, 'acl') or not self.db.acl:
             return False
 
-        # Migrate old list-based ACL to dict-based ACL
-        # Check if it's a list or _SaverList (not dict)
-        if not isinstance(self.db.acl, dict):
-            old_acl = list(self.db.acl)  # Convert to regular list
-            self.db.acl = {}
-            for char_pk in old_acl:
-                # Default old entries to level 5 (medium access)
-                self.db.acl[char_pk] = 5
+        self._migrate_acl()
 
         # Remove the character/avatar by its own pk
         char_pk = character.pk
@@ -531,14 +514,7 @@ class NetworkedMixin(MatrixIdMixin):
         if not hasattr(self.db, 'acl') or not self.db.acl:
             return []
 
-        # Migrate old list-based ACL to dict-based ACL
-        # Check if it's a list or _SaverList (not dict)
-        if not isinstance(self.db.acl, dict):
-            old_acl = list(self.db.acl)  # Convert to regular list
-            self.db.acl = {}
-            for char_pk in old_acl:
-                # Default old entries to level 5 (medium access)
-                self.db.acl[char_pk] = 5
+        self._migrate_acl()
 
         from evennia.objects.models import ObjectDB
         from typeclasses.matrix.avatars import MatrixAvatar
@@ -682,19 +658,7 @@ class NetworkedMixin(MatrixIdMixin):
         Returns:
             bool: True on success
         """
-        from evennia.utils.evmenu import EvMenu
-
-        # Start EvMenu for ACL revocation
-        from typeclasses.matrix.menu_formatters import get_matrix_formatters
-        EvMenu(
-            caller,
-            "typeclasses.matrix.mixins.networked",
-            startnode="node_device_acl_list",
-            startnode_input=("", {"device": self}),
-            cmd_on_exit=None,
-            **get_matrix_formatters()
-        )
-        return True
+        return ("node_device_acl_list", {"device": self})
 
     def handle_view_acl(self, caller, *args):
         """
@@ -777,6 +741,68 @@ class NetworkedMixin(MatrixIdMixin):
 
         return None
 
+    def update_file(self, filename, contents):
+        """
+        Update an existing file's contents.
+
+        Args:
+            filename (str): Name of the file to update
+            contents (str): New contents
+
+        Returns:
+            bool: True if updated, False if file not found
+        """
+        if not self.db.has_storage:
+            return False
+
+        if not hasattr(self.db, 'storage'):
+            self.db.storage = []
+
+        for file in self.db.storage:
+            if file['filename'] == filename:
+                file['contents'] = contents
+                return True
+
+        return False
+
+    def delete_file(self, filename):
+        """
+        Delete a file from this device's storage.
+
+        Args:
+            filename (str): Name of the file to delete
+
+        Returns:
+            bool: True if deleted, False if file not found
+        """
+        if not self.db.has_storage:
+            return False
+
+        if not hasattr(self.db, 'storage'):
+            self.db.storage = []
+
+        for i, file in enumerate(self.db.storage):
+            if file['filename'] == filename:
+                self.db.storage.pop(i)
+                return True
+
+        return False
+
+    def list_files(self):
+        """
+        Get a list of all files on this device.
+
+        Returns:
+            list: List of file dicts with filename, filetype, contents
+        """
+        if not self.db.has_storage:
+            return []
+
+        if not hasattr(self.db, 'storage'):
+            self.db.storage = []
+
+        return list(self.db.storage)
+
 
 # =========================================================================
 # ACL Management Menu Nodes (for device interface)
@@ -789,7 +815,7 @@ def node_device_acl_list(caller, raw_string, **kwargs):
     device = kwargs.get("device")
     if not device:
         caller.msg("|rError: No device specified.|n")
-        return None, None
+        return None
 
     # Get ACL entries
     if not hasattr(device.db, 'acl') or not device.db.acl:
@@ -890,71 +916,9 @@ def node_device_acl_delete(caller, raw_string, **kwargs):
         caller.msg(f"|rEntry not found in ACL.|n")
 
     # Return to list
-    return node_device_acl_list(caller, "", device=device)
+    return ("node_device_acl_list", {"device": device})
 
 
 def node_device_acl_exit(caller, raw_string, **kwargs):
     """Exit the menu."""
-    return None, None
-
-    def update_file(self, filename, contents):
-        """
-        Update an existing file's contents.
-
-        Args:
-            filename (str): Name of the file to update
-            contents (str): New contents
-
-        Returns:
-            bool: True if updated, False if file not found
-        """
-        if not self.db.has_storage:
-            return False
-
-        if not hasattr(self.db, 'storage'):
-            self.db.storage = []
-
-        for file in self.db.storage:
-            if file['filename'] == filename:
-                file['contents'] = contents
-                return True
-
-        return False
-
-    def delete_file(self, filename):
-        """
-        Delete a file from this device's storage.
-
-        Args:
-            filename (str): Name of the file to delete
-
-        Returns:
-            bool: True if deleted, False if file not found
-        """
-        if not self.db.has_storage:
-            return False
-
-        if not hasattr(self.db, 'storage'):
-            self.db.storage = []
-
-        for i, file in enumerate(self.db.storage):
-            if file['filename'] == filename:
-                self.db.storage.pop(i)
-                return True
-
-        return False
-
-    def list_files(self):
-        """
-        Get a list of all files on this device.
-
-        Returns:
-            list: List of file dicts with filename, filetype, contents
-        """
-        if not self.db.has_storage:
-            return []
-
-        if not hasattr(self.db, 'storage'):
-            self.db.storage = []
-
-        return list(self.db.storage)
+    return None
