@@ -118,15 +118,16 @@ def node_process_command(caller, raw_string, **kwargs):
     args = raw_string.strip().split() if raw_string.strip() else []
 
     # Execute the command via device framework
-    success = device.invoke_device_command(command, caller, from_matrix, *args)
+    result = device.invoke_device_command(command, caller, from_matrix, *args)
 
-    text = "\n|gCommand executed.|n\n" if success else "\n|rCommand failed.|n\n"
+    # Handlers can return a (node_name, kwargs) tuple to drive menu navigation
+    if isinstance(result, tuple):
+        return result
+
+    text = "\n|gCommand executed.|n\n" if result else "\n|rCommand failed.|n\n"
     text += "\nPress any key to return to main menu."
 
-    options = {
-        "key": "_default",
-        "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})
-    }
+    options = [{"key": "_default", "desc": None, "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})}]
 
     return text, options
 

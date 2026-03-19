@@ -270,7 +270,9 @@ class NetworkedMixin(MatrixIdMixin):
             *args: Arguments to pass to the command handler
 
         Returns:
-            bool: True if command executed successfully, False otherwise
+            bool or tuple: True/False for simple commands, or a (node_name, kwargs)
+                          tuple if the handler wants to navigate the device menu to
+                          another node instead of returning to main.
         """
         if not hasattr(self.db, 'device_commands'):
             self.db.device_commands = {}
@@ -654,19 +656,7 @@ class NetworkedMixin(MatrixIdMixin):
         Returns:
             bool: True on success
         """
-        from evennia.utils.evmenu import EvMenu
-
-        # Start EvMenu for ACL revocation
-        from typeclasses.matrix.menu_formatters import get_matrix_formatters
-        EvMenu(
-            caller,
-            "typeclasses.matrix.mixins.networked",
-            startnode="node_device_acl_list",
-            startnode_input=("", {"device": self}),
-            cmd_on_exit=None,
-            **get_matrix_formatters()
-        )
-        return True
+        return ("node_device_acl_list", {"device": self})
 
     def handle_view_acl(self, caller, *args):
         """
