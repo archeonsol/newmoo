@@ -24,6 +24,7 @@ from world.network_decoys import DECOY_COUNT_RANGE, generate_decoy_entries
 from world.utils import get_containing_room, room_has_network_coverage
 
 from typeclasses.characters import Character
+from world.matrix_accounts import get_alias
 
 
 MAX_SM_LEN = 400
@@ -44,8 +45,20 @@ def _resolve_meatspace_character(obj) -> Character | None:
 
 def _matrix_alias_for_character(character) -> str:
     """
-    Placeholder alias: use the character's Matrix ID.
+    Network alias.
+
+    Prefers the Matrix account alias (set via handset `set_alias`), and falls
+    back to the character's Matrix ID if no alias is set.
     """
+    try:
+        account_alias = get_alias(character)
+    except Exception:
+        account_alias = None
+
+    if account_alias:
+        # Display with @ prefix (handle aesthetic).
+        return f"@{str(account_alias).lstrip('@')}"
+
     try:
         alias = character.get_matrix_id()
     except Exception:
