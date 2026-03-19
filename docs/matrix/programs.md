@@ -1,41 +1,59 @@
-
 # Programs
 
-Deckers need to 'craft' programs in advance and run on a 'potion-like' system of deploying them? Psionic folks can conjure programs at-will.
+> **Design intent — not yet implemented.** This document describes the planned program ecosystem. The execution framework exists (`patch <program>`) but most individual programs do not yet exist in code.
 
-(these can be balanced somewhow with power level or casting time or whatever.)
+---
 
-## CRUD
-- Create, Read, Update, Delete
+## Acquisition
 
-## Encrypt/Decrypt
-- Secure/unsecure data
+**Deckers** craft programs in advance and deploy them on a potion-like system (limited uses, crafted ahead of time).
 
-## Beacon/Recall
-- conjure beacon, recall to beacon
+**Psionics** conjure programs at-will (balance via power level, casting time, or whatever makes sense).
 
-## Trace
-- Locate a device in the Matrix
+---
 
-## Probe
-- Figure out properties of a device/room in the Matrix
+## Program Types
 
-## Scan
-- Get a list of stuff from a location in the Matrix (this room, adjacent room)
+### CRUD
+Create, Read, Update, Delete — basic file manipulation on device storage.
 
-## Crack
-- Cracks are manifested as weapons for deckers
-- Psionic folks can conjure cracks naturally
+### Encrypt / Decrypt
+Secure and unsecure data files.
 
+### Beacon / Recall
+Conjure a beacon at a location; recall to it later.
 
-----
+### Trace
+Locate a specific device in the Matrix (which relay, physical location).
 
-something.lnk (device connection?)
-asdf.dat (data file)
-asdf.exe (program)
-- exfil.exe (turn a file into a physical object)
-- wedge.exe (I dunno. whatever to add yourself to the ACL)
-- dewedge.exe (remove acl)
-asdf.enc (encryption key?)
-cmd.exe (pull up op menu as acl 1-9 override, depending on skill of crafter)
-sudo.exe (pull up op menu as acl 10 override)
+### Probe
+Examine properties of a device or room in the Matrix.
+
+### Scan
+Get a list of objects in a location (current room, adjacent room).
+
+### Crack (Combat)
+Attack programs, manifested as weapons for deckers. Psionics can conjure these naturally.
+
+---
+
+## File Types
+
+| Extension | Purpose |
+|-----------|---------|
+| `.lnk` | Device connection reference |
+| `.dat` | Generic data file |
+| `.exe` | Executable program |
+| `.enc` | Encryption key |
+
+### Notable `.exe` Programs
+
+| Program | Function |
+|---------|----------|
+| `exfil.exe` | Extract a file from device storage → physical data chip |
+| `wedge.exe` | Add yourself (or another) to a device's ACL |
+| `dewedge.exe` | Remove from ACL |
+| `cmd.exe` | Open device operation menu at ACL level 1-9 (level based on program quality / crafter skill) |
+| `sudo.exe` | Open device operation menu at ACL level 10 |
+
+> **Note:** `cmd.exe` / `sudo.exe` are partially implemented — the `operate` command opens the same device menu from meatspace, and `patch cmd.exe` should work the same from the Matrix. ACL level override based on crafter skill is future work.

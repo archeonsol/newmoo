@@ -337,18 +337,10 @@ class NetworkedMixin(MatrixIdMixin):
                 for cmd, info in self.db.device_commands.items()
             }
 
-        # Determine caller's skill level
-        if from_matrix:
-            # For Matrix avatars, check operator's hacking skill
-            from typeclasses.matrix.avatars import MatrixAvatar
-            if isinstance(caller, MatrixAvatar):
-                operator = caller.db.operator
-                skill = operator.db.skills.get('hacking', 0) if operator else 0
-            else:
-                skill = 0
-        else:
-            # For physical access, check technology skill
-            skill = caller.db.skills.get('technology', 0) if hasattr(caller, 'db') else 0
+        # TODO: Implement skill-based visibility once skill checks are finalized.
+        # Skill keys and check mechanics are not yet defined for Matrix/physical access.
+        # Returning 150 (max) so all threshold-gated commands are visible during testing.
+        skill = 150
 
         available = {}
         for cmd_name, cmd_info in self.db.device_commands.items():
@@ -802,123 +794,3 @@ class NetworkedMixin(MatrixIdMixin):
             self.db.storage = []
 
         return list(self.db.storage)
-
-
-# =========================================================================
-# ACL Management Menu Nodes (for device interface)
-# =========================================================================
-
-def node_device_acl_list(caller, raw_string, **kwargs):
-    """
-    Display ACL entries and allow selection for deletion.
-    """
-    device = kwargs.get("device")
-    if not device:
-        caller.msg("|rError: No device specified.|n")
-        return None
-
-    # Get ACL entries
-    if not hasattr(device.db, 'acl') or not device.db.acl:
-        text = f"|c=== ACL for {device.key} ===|n\n\n"
-        text += "No ACL entries (public device).\n"
-        return text, [{"key": "q", "desc": "Exit", "goto": "node_device_acl_exit"}]
-
-    # Build display
-    text = f"|c=== ACL for {device.key} ===|n\n"
-
-    from evennia.objects.models import ObjectDB
-
-    acl_list = []
-    for char_pk, level in device.db.acl.items():
-        try:
-            obj = ObjectDB.objects.get(pk=char_pk)
-            if obj.typeclass_path and 'MatrixAvatar' in obj.typeclass_path:
-                name = f"{obj.key} (matrix, level {level})"
-            else:
-                name = f"{obj.key} (physical, level {level})"
-        except ObjectDB.DoesNotExist:
-            name = f"<err> (<err>, level {level})"
-
-        acl_list.append((char_pk, name))
-
-    # Build options
-    options = []
-    for i, (char_pk, display_name) in enumerate(acl_list, 1):
-        options.append({
-            "key": str(i),
-            "desc": display_name,
-            "goto": ("node_device_acl_confirm", {"device": device, "char_pk": char_pk, "name": display_name})
-        })
-
-    options.append({"key": "q", "desc": "Exit", "goto": "node_device_acl_exit"})
-
-    return text, options
-
-
-def node_device_acl_confirm(caller, raw_string, **kwargs):
-    """
-    Confirm deletion of an ACL entry.
-    """
-    device = kwargs.get("device")
-    char_pk = kwargs.get("char_pk")
-    name = kwargs.get("name")
-
-    if not device or char_pk is None:
-        caller.msg("|rError: Invalid parameters.|n")
-        return ("node_device_acl_list", {"device": device})
-
-    text = f"|yConfirm removal of:|n\n"
-    text += f"  {name}\n\n"
-    text += "This will revoke all access for this user.\n"
-
-    options = [
-        {
-            "key": "y",
-            "desc": "Yes, remove",
-            "goto": ("node_device_acl_delete", {"device": device, "char_pk": char_pk, "name": name})
-        },
-        {
-            "key": "n",
-            "desc": "No, go back",
-            "goto": ("node_device_acl_list", {"device": device})
-        }
-    ]
-
-    return text, options
-
-
-def node_device_acl_delete(caller, raw_string, **kwargs):
-    """
-    Actually delete the ACL entry.
-    """
-    device = kwargs.get("device")
-    char_pk = kwargs.get("char_pk")
-    name = kwargs.get("name")
-
-    if not device or char_pk is None:
-        caller.msg("|rError: Invalid parameters.|n")
-        return ("node_device_acl_list", {"device": device})
-
-    # Remove from ACL
-    if hasattr(device.db, 'acl') and char_pk in device.db.acl:
-        del device.db.acl[char_pk]
-        caller.msg(f"|gRemoved {name} from ACL.|n")
-
-        # Notify target if they still exist and are online
-        try:
-            from evennia.objects.models import ObjectDB
-            target = ObjectDB.objects.get(pk=char_pk)
-            if target.has_account:
-                target.msg(f"|rYour access to {device.key} has been revoked.|n")
-        except ObjectDB.DoesNotExist:
-            pass
-    else:
-        caller.msg(f"|rEntry not found in ACL.|n")
-
-    # Return to list
-    return ("node_device_acl_list", {"device": device})
-
-
-def node_device_acl_exit(caller, raw_string, **kwargs):
-    """Exit the menu."""
-    return None
