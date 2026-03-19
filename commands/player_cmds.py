@@ -38,7 +38,7 @@ class CmdXp(Command):
             _skill_cap_level,
         )
         from world.levels import get_stat_grade, get_skill_grade, MAX_STAT_LEVEL, MAX_LEVEL
-        from world.chargen import STAT_KEYS
+        from world.rpg.chargen import STAT_KEYS
         from world.skills import SKILL_KEYS, SKILL_DISPLAY_NAMES
 
         caller = self.caller
@@ -89,7 +89,7 @@ class CmdXp(Command):
                         name_pad, letter_part, adj_pad, cost_str
                     )
             # Languages: 0-400% per language (basic/learning/fluent/native). Costs XP to improve; exact gains are hidden.
-            from world.language import (
+            from world.rpg.language import (
                 LEARNABLE_LANGUAGE_KEYS,
                 get_language_percent,
                 get_language_level_name,
@@ -166,7 +166,7 @@ class CmdXp(Command):
                         caller.db.xp_spent_on_languages = float(
                             getattr(caller.db, "xp_spent_on_languages", 0) or 0
                         ) + total_spent
-                        from world.language import get_language_level_name
+                        from world.rpg.language import get_language_level_name
 
                         level_name = get_language_level_name(new_val)
                         spent_str = (
@@ -419,7 +419,7 @@ class CmdXp(Command):
             return
 
         if sub == "language":
-            from world.language import (
+            from world.rpg.language import (
                 resolve_language_key,
                 LEARNABLE_LANGUAGE_KEYS,
                 get_language_percent,

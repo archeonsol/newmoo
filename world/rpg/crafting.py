@@ -156,3 +156,4 @@ def substitute_tease_for_viewer(template, doer, target, viewer, item=None):
     if not target:
         result = re.sub(r"\s+at\s*$", "", result)
     return result
+

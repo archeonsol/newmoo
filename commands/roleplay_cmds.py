@@ -89,7 +89,7 @@ def _run_emote(caller, text, improvise=False):
                 # Resolve sdesc/target refs for caller's echo (same targets as third-person)
                 third = first_to_third(segments[i].strip(), caller)
                 try:
-                    from world.language import parse_quoted_speech
+                    from world.rpg.language import parse_quoted_speech
                     third, _ = parse_quoted_speech(third)
                 except Exception:
                     pass
@@ -143,7 +143,7 @@ def _run_emote(caller, text, improvise=False):
                 # Keep " .word" so first_to_third can conjugate those verbs (dot = verb tell)
                 third = first_to_third(seg.strip(), caller)
                 try:
-                    from world.language import parse_quoted_speech, process_language_for_viewer, get_speaker_language
+                    from world.rpg.language import parse_quoted_speech, process_language_for_viewer, get_speaker_language
                     third, lang_bits = parse_quoted_speech(third)
                 except Exception:
                     lang_bits = []
@@ -152,7 +152,7 @@ def _run_emote(caller, text, improvise=False):
                 lang_key = get_speaker_language(caller)
                 for ph, quote_text in lang_bits:
                     try:
-                        from world.language import process_language_for_viewer
+                        from world.rpg.language import process_language_for_viewer
                         processed = process_language_for_viewer(caller, quote_text, lang_key, viewer)
                         body_part = body_part.replace(ph, processed)
                     except Exception:
@@ -193,7 +193,7 @@ def _run_emote(caller, text, improvise=False):
         for seg in segments:
             third = first_to_third(seg.strip(), caller)
             try:
-                from world.language import parse_quoted_speech, process_language_for_viewer, get_speaker_language
+                from world.rpg.language import parse_quoted_speech, process_language_for_viewer, get_speaker_language
                 third, lang_bits = parse_quoted_speech(third)
             except Exception:
                 lang_bits = []
@@ -202,7 +202,7 @@ def _run_emote(caller, text, improvise=False):
             lang_key = get_speaker_language(caller)
             for ph, quote_text in lang_bits:
                 try:
-                    from world.language import process_language_for_viewer
+                    from world.rpg.language import process_language_for_viewer
                     processed = process_language_for_viewer(caller, quote_text, lang_key, None)
                     body_part = body_part.replace(ph, processed)
                 except Exception:
@@ -428,7 +428,7 @@ class CmdLanguage(Command):
     help_category = "General"
 
     def func(self):
-        from world.language import (
+        from world.rpg.language import (
             resolve_language_key, get_speaker_language, get_language_percent,
             LEARNABLE_LANGUAGE_KEYS, get_language_level_name,
         )
@@ -723,7 +723,7 @@ class CmdRecog(Command):
             clear_helmet_recog_for_viewer,
         )
         try:
-            from world.sdesc import character_has_mask_or_helmet
+            from world.rpg.sdesc import character_has_mask_or_helmet
         except ImportError:
             character_has_mask_or_helmet = lambda c: False
         caller = self.caller
@@ -856,7 +856,7 @@ class CmdSdesc(Command):
     help_category = "General"
 
     def func(self):
-        from world.sdesc import get_short_desc, get_gender_term, get_gender_terms_list, _article_for
+        from world.rpg.sdesc import get_short_desc, get_gender_term, get_gender_terms_list, _article_for
         from world.staff_pending import add_pending, get_pending
         caller = self.caller
         args = (self.args or "").strip().lower()
@@ -1403,7 +1403,7 @@ class CmdTease(Command):
         if not template:
             caller.msg("That item has no tease message set.")
             return
-        from world.crafting import substitute_tease_for_viewer
+        from world.rpg.crafting import substitute_tease_for_viewer
         from world.rpg.emote import format_emote_message
         room = caller.location
         if not room:

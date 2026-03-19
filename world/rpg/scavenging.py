@@ -343,8 +343,6 @@ def _determine_rarity(env, final_roll):
     # Above 100 effective, we are in the "good scavenger" range: mostly blue, sometimes purple,
     # and very rarely yellow. We use probabilities so yellows stay truly legendary even at
     # high skill.
-    import random
-
     if effective <= 125:
         # Solid but not insane: mostly blue, small chance of purple.
         roll = random.random()
@@ -372,7 +370,7 @@ def _pick_t1_weapon():
     Only tier-1 (scavenger) weapons; no fists.
     """
     try:
-        from world.combat.weapon_tiers import WEAPON_TIERS, get_weapon_tier
+        from world.combat.weapon_tiers import get_weapon_tier
     except ImportError:
         return None, None
     candidates = []

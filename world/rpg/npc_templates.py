@@ -219,3 +219,4 @@ def create_npc_from_template(template_key, name=None, location=None):
         return None
     apply_npc_template(npc, template_key, template=template)
     return npc
+

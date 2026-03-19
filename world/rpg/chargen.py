@@ -398,7 +398,6 @@ def node_skills(caller, raw_string, **kwargs):
     if picks_left <= 0:
         caller.db.chargen_mark_tier_index = tier_index + 1
         if tier_index + 1 < len(MARKS_LADDER):
-            _, _, next_label = MARKS_LADDER[tier_index + 1]
             next_count = MARKS_LADDER[tier_index + 1][0]
             caller.db.chargen_mark_tier_picks_left = next_count
         return node_skills(caller, raw_string, **kwargs)
@@ -527,8 +526,6 @@ def node_apply_build_and_weight(caller, raw_string, **kwargs):
     Free-input build: player types e.g. 'tall heavy' or 'short average'.
     We parse height and weight words; any missing part defaults to 'average'.
     """
-    import random
-
     raw = (raw_string or "").lower()
     tokens = [tok for tok in raw.replace(",", " ").split() if tok]
     height = None
@@ -583,3 +580,4 @@ def node_finish(caller, raw_string, **kwargs):
         "|RYou are in the world.|n"
     )
     return text, []
+

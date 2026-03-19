@@ -20,7 +20,7 @@ from evennia.utils import delay
 from evennia.utils.evmore import EvMore
 
 from commands.base_cmds import Command as ICBaseCommand
-from world.network_decoys import DECOY_COUNT_RANGE, generate_decoy_entries
+from world.network.network_decoys import DECOY_COUNT_RANGE, generate_decoy_entries
 from world.utils import get_containing_room, room_has_network_coverage
 
 from typeclasses.characters import Character

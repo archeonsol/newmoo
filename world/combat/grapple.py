@@ -669,3 +669,4 @@ def grapple_strike(grappler, victim):
                 continue
             v.msg("%s strangles %s." % (_combat_display_name(grappler, v), _combat_display_name(victim, v)))
     return True, "You tighten your grip."
+

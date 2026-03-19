@@ -103,30 +103,38 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
             except Exception:
                 pass
 
-    # Order: room name (header), desc, blank line, objects (you see), furniture (seats/beds), characters (poses), exits
-    appearance_template = """
-{header}
-{desc}
-
-{things}
-{furniture}
-{characters}
-{exits}
-{footer}"""
-
     def return_appearance(self, looker, **kwargs):
         """
         Override to explicitly call all display methods including furniture.
         """
-        appearance = self.appearance_template.format(
-            header=self.get_display_header(looker, **kwargs),
-            desc=self.get_display_desc(looker, **kwargs),
-            things=self.get_display_things(looker, **kwargs),
-            furniture=self.get_display_furniture(looker, **kwargs),
-            characters=self.get_display_characters(looker, **kwargs),
-            exits=self.get_display_exits(looker, **kwargs),
-            footer=self.get_display_footer(looker, **kwargs),
-        )
+        header = self.get_display_header(looker, **kwargs)
+        desc = self.get_display_desc(looker, **kwargs)
+        things = self.get_display_things(looker, **kwargs)
+        furniture = self.get_display_furniture(looker, **kwargs)
+        characters = self.get_display_characters(looker, **kwargs)
+        exits = self.get_display_exits(looker, **kwargs)
+        footer = self.get_display_footer(looker, **kwargs)
+
+        # Format with intentional paragraph breaks:
+        # - Always: header + desc (no blank line between), blank line, things
+        # - If furniture exists: blank line before and after furniture
+        # - Characters and exits remain tightly grouped (no blank line between them)
+        head = "\n".join([p for p in (header, desc) if p])
+        parts = [head, things]
+
+        if furniture:
+            parts.append(furniture)
+
+        tail = "\n".join([p for p in (characters, exits, footer) if p])
+        if tail:
+            if furniture:
+                parts.append(tail)  # will be separated by blank line via join below
+            else:
+                # No furniture: keep a tight join from things -> characters/exits.
+                parts[-1] = "\n".join([parts[-1], tail]) if parts[-1] else tail
+
+        # Use blank lines between major sections.
+        appearance = "\n\n".join([p for p in parts if p])
         return self.format_appearance(appearance, looker, **kwargs)
 
     def format_appearance(self, appearance, looker, **kwargs):
@@ -197,6 +205,9 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                 pose = "idling here." if getattr(obj, "engine_running", False) else "parked here."
                 vehicle_poses.append((obj, pose))
                 continue
+            # Operating tables - skip here, handled in furniture section
+            if _is_operating_table(obj):
+                continue
             # Seats/beds - skip here, handled in furniture section
             if _is_seat(obj) or _is_bed(obj):
                 continue
@@ -218,7 +229,7 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
         for obj, pose in set_place_objects:
             if pose:
                 try:
-                    from world.crafting import substitute_clothing_desc
+                    from world.rpg.crafting import substitute_clothing_desc
                     pose = substitute_clothing_desc(pose, obj)
                 except Exception:
                     pass
@@ -259,7 +270,7 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
         except ImportError:
             is_flatlined = lambda o: False
         # Patients lying on an operating table (db.lying_on_table = table; they stay in room)
-        table_pose_parts = []
+        # Displayed in furniture section; here we just track so we can suppress normal poses.
         on_table = set()  # characters shown in "lying on table" so we skip them in normal poses
         for obj in self.contents:
             if not _is_operating_table(obj) or not self.filter_visible([obj], looker, **kwargs):
@@ -270,9 +281,6 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                 if not self.filter_visible([char], looker, **kwargs):
                     continue
                 on_table.add(char)
-                name = char.get_display_name(looker, **kwargs)
-                table_name = obj.get_display_name(looker, **kwargs)
-                table_pose_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{name}|n is lying on {ROOM_DESC_OBJECT_NAME_COLOR}{table_name}|n.")
         # Track sitting/lying characters so we exclude them from normal character poses
         sitting_set = set()
         lying_set = set()
@@ -355,7 +363,7 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
             pose = (pose or "").strip().rstrip(".")
             if pose:
                 try:
-                    from world.crafting import substitute_clothing_desc
+                    from world.rpg.crafting import substitute_clothing_desc
                     pose = substitute_clothing_desc(pose, char)
                 except Exception:
                     pass
@@ -404,8 +412,6 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
         char_pose_line = " ".join(char_pose_parts) if char_pose_parts else ""
         if grappled_parts:
             char_pose_line = " ".join(filter(None, [char_pose_line, " ".join(grappled_parts)]))
-        if table_pose_parts:
-            char_pose_line = " ".join(filter(None, [char_pose_line, " ".join(table_pose_parts)]))
         return char_pose_line
 
     def at_object_receive(self, obj, source_location, move_type="move", **kwargs):
@@ -427,10 +433,36 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
 
     def get_display_furniture(self, looker, **kwargs):
         """
-        Furniture section: Seats/beds display.
-        Delegates to each furniture object's get_room_appearance() method.
+        Furniture section: Seats/beds AND operating tables.
+        Delegates to each furniture object's get_room_appearance() method when available,
+        and also shows patients lying on operating tables.
         """
         lines = []
+
+        # Operating tables: show "X is lying on <table>." here so it groups with dive rigs/seats.
+        characters = self.filter_visible(
+            self.contents_get(content_type="character"), looker, **kwargs
+        )
+        for obj in self.contents:
+            if not _is_operating_table(obj):
+                continue
+            if not self.filter_visible([obj], looker, **kwargs):
+                continue
+            table_name = obj.get_display_name(looker, **kwargs)
+            any_patients = False
+            for char in characters:
+                if getattr(char.db, "lying_on_table", None) != obj:
+                    continue
+                if not self.filter_visible([char], looker, **kwargs):
+                    continue
+                any_patients = True
+                name = char.get_display_name(looker, **kwargs)
+                lines.append(
+                    f"{ROOM_DESC_CHARACTER_NAME_COLOR}{name}|n is lying on {ROOM_DESC_OBJECT_NAME_COLOR}{table_name}|n."
+                )
+            if not any_patients:
+                lines.append(f"The {ROOM_DESC_OBJECT_NAME_COLOR}{table_name}|n is waiting for a patient.")
+
         for obj in self.contents:
             if not (_is_seat(obj) or _is_bed(obj)):
                 continue

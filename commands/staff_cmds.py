@@ -27,7 +27,7 @@ class CmdStats(Command):
     help_category = "General"
 
     def func(self):
-        from world.chargen import STAT_KEYS
+        from world.rpg.chargen import STAT_KEYS
         from world.skills import SKILL_KEYS, SKILL_DISPLAY_NAMES
         from evennia.utils.utils import inherits_from
         caller = self.caller
@@ -214,7 +214,7 @@ class CmdStaffSheet(Command):
         if not hasattr(target, "db") or not hasattr(target.db, "stats"):
             caller.msg("That is not a character with a sheet.")
             return
-        from world.chargen import STAT_KEYS
+        from world.rpg.chargen import STAT_KEYS
         from world.skills import SKILL_KEYS, SKILL_DISPLAY_NAMES
         from world.levels import get_stat_grade, get_skill_grade
         _db = target.db
@@ -275,7 +275,7 @@ class CmdStaffSetStat(Command):
         target = caller.search(parts[0], global_search=True)
         if not target or not hasattr(target, "db"):
             return
-        from world.chargen import STAT_KEYS
+        from world.rpg.chargen import STAT_KEYS
         stat_key = None
         for s in STAT_KEYS:
             if s.startswith(parts[1].lower()) or parts[1].lower() == s:
@@ -1493,7 +1493,7 @@ class CmdNpc(Command):
         caller.msg("Usage: @npc/list | @npc/summon <template>[=<name>] | @npc/unsummon <npc> | @npc/rename <npc>=<name> | @npc/attr <npc>/<attr>=<value>")
 
     def _do_list(self, caller):
-        from world.npc_templates import NPC_TEMPLATES
+        from world.rpg.npc_templates import NPC_TEMPLATES
         from evennia.utils.evtable import EvTable
         table = EvTable("|wtemplate|n", "|wdescription|n", border="cells")
         for key, t in sorted(NPC_TEMPLATES.items()):
@@ -1502,7 +1502,7 @@ class CmdNpc(Command):
         caller.msg(table)
 
     def _do_summon(self, caller, rest):
-        from world.npc_templates import create_npc_from_template, get_npc_template
+        from world.rpg.npc_templates import create_npc_from_template, get_npc_template
         name = None
         if "=" in rest:
             template_part, name = rest.split("=", 1)
@@ -1624,7 +1624,7 @@ class CmdNpc(Command):
             caller.msg("|rValue must be an integer.|n")
             return
         from world.skills import SKILL_KEYS
-        from world.chargen import STAT_KEYS
+        from world.rpg.chargen import STAT_KEYS
         if attr in STAT_KEYS:
             if not hasattr(target.db, "stats") or target.db.stats is None:
                 target.db.stats = {}

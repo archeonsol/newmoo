@@ -103,8 +103,6 @@ def apply_clone_snapshot(character, snapshot):
 
 def _splinter_narrative_step(character_id, step_index):
     """One step of the splinter narrative; schedules next or stores snapshot."""
-    from evennia.utils.search import search_object
-    from evennia.utils import delay
     try:
         result = search_object("#%s" % character_id)
         if not result:
@@ -128,14 +126,11 @@ def run_splinter_sequence(character):
     if not character:
         return
     character.msg(SPLINTER_NARRATIVE[0])
-    from evennia.utils import delay
     delay(2.5, _splinter_narrative_step, character.id, 1)
 
 
 def _awakening_narrative_step(account_id, step_index, clone_char_id, spawn_room_id):
     """One step of the awakening narrative; at the end puppets account to clone and clears temp data."""
-    from evennia.utils.search import search_object
-    from evennia.utils import delay
     if step_index < len(AWAKENING_NARRATIVE):
         try:
             from evennia.accounts.accounts import AccountDB
@@ -186,7 +181,6 @@ def run_awakening_sequence(account, clone_character, spawn_room):
     if not account or not clone_character:
         return
     account.msg(AWAKENING_NARRATIVE[0])
-    from evennia.utils import delay
     delay(2.2, _awakening_narrative_step,
           account.id, 1,
           clone_character.id, spawn_room.id if spawn_room else None)
@@ -196,7 +190,6 @@ def get_clone_spawn_room():
     """Return the room where clones awaken (tagged 'clone_spawn'). Creates one if missing.
     Builders: stand in a room and type |wbuclone_spawn|n to tag it, or |wbutag here = clone_spawn|n."""
     from evennia.utils.search import search_tag
-    from evennia.utils.create import create_object
     rooms = search_tag(key="clone_spawn")
     if rooms:
         return rooms[0]
@@ -212,3 +205,4 @@ def get_clone_spawn_room():
             "antiseptic and something older, coppery. This is where the shards wake."
         )
     return room
+

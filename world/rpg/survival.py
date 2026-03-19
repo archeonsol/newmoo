@@ -17,7 +17,7 @@ Alcohol:
 
 import time
 
-from world.scavenging import SCAVENGE_TAGS_WILD, SCAVENGE_TAGS_URBAN
+from world.rpg.scavenging import SCAVENGE_TAGS_WILD, SCAVENGE_TAGS_URBAN
 
 
 HUNGER_MAX = 100

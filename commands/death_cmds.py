@@ -301,7 +301,7 @@ class CmdSplinterMe(Command):
                 return
         except ImportError as e:
             logger.log_trace("death_cmds.CmdSplinterMe is_flatlined/is_permanently_dead: %s" % e)
-        from world.cloning import run_splinter_sequence
+        from world.rpg.cloning import run_splinter_sequence
         caller.msg("|xYou speak the words. The mechanism answers.|n")
         run_splinter_sequence(caller)
 
@@ -357,7 +357,7 @@ class CmdGoShard(Command):
             caller.msg("|yYou have no stored shard. Only |wgo light|n is left.|n")
             return
         try:
-            from world.cloning import (
+            from world.rpg.cloning import (
                 get_clone_spawn_room,
                 apply_clone_snapshot,
                 run_awakening_sequence,

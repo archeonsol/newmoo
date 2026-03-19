@@ -96,7 +96,7 @@ class CmdAttack(Command):
             logger.log_trace("combat_cmds.CmdAttack stamina check: %s" % e)
         # If you're holding them in a grapple, attack = strangle (stamina drain until knockout); starts recurring tick
         if getattr(caller.db, "grappling", None) == target:
-            from world.grapple import grapple_strike, start_grapple_strike_ticker
+            from world.combat.grapple import grapple_strike, start_grapple_strike_ticker
             success, msg = grapple_strike(caller, target)
             if success:
                 caller.msg("|g%s|n" % msg)
@@ -248,7 +248,7 @@ class CmdFlee(Command):
             caller.db.grappled_by = None
             # Break-away clears grappled state; remove grapple command lock too.
             try:
-                from world.grapple import _clear_grappled_cmdset
+                from world.combat.grapple import _clear_grappled_cmdset
                 _clear_grappled_cmdset(caller)
             except Exception:
                 pass
@@ -303,12 +303,12 @@ class CmdGrapple(Command):
             return
         # Third party trying to grapple someone already in another's grasp (with delay like normal grapple)
         if getattr(target.db, "grappled_by", None):
-            from world.grapple import start_grapple_third_party_attempt
+            from world.combat.grapple import start_grapple_third_party_attempt
             started, err = start_grapple_third_party_attempt(caller, target)
             if not started:
                 caller.msg("|r%s|n" % err)
             return
-        from world.grapple import start_grapple_attempt
+        from world.combat.grapple import start_grapple_attempt
         started, err = start_grapple_attempt(caller, target)
         if not started:
             caller.msg("|r%s|n" % err)
@@ -330,7 +330,7 @@ class CmdLetGo(Command):
             self.caller.msg("You must be in character to do that.")
             return
         victim = getattr(caller.db, "grappling", None)
-        from world.grapple import release_grapple
+        from world.combat.grapple import release_grapple
         success, msg = release_grapple(caller)
         if success:
             caller.msg("|g%s|n" % msg)
@@ -361,7 +361,7 @@ class CmdResist(Command):
             self.caller.msg("You must be in character to do that.")
             return
         grappler = getattr(caller.db, "grappled_by", None)
-        from world.grapple import attempt_resist
+        from world.combat.grapple import attempt_resist
         freed, msg_you, msg_holder = attempt_resist(caller)
         caller.msg("|g%s|n" % msg_you if freed else "|r%s|n" % msg_you)
         if grappler and msg_holder:
