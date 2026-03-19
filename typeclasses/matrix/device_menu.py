@@ -657,6 +657,115 @@ def node_exit(caller, raw_string, **kwargs):
     return None
 
 
+# =========================================================================
+# ACL Management Menu Nodes
+# =========================================================================
+
+def node_device_acl_list(caller, raw_string, **kwargs):
+    """
+    Display ACL entries and allow selection for deletion.
+    """
+    device = kwargs.get("device")
+    from_matrix = kwargs.get("from_matrix", False)
+    if not device:
+        caller.msg("|rError: No device specified.|n")
+        return None
+
+    if not hasattr(device.db, 'acl') or not device.db.acl:
+        text = f"|c=== ACL for {device.key} ===|n\n\n"
+        text += "No ACL entries (public device).\n"
+        return text, [{"key": "q", "desc": "Back to main menu", "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})}]
+
+    text = f"|c=== ACL for {device.key} ===|n\n"
+
+    from evennia.objects.models import ObjectDB
+
+    acl_list = []
+    for char_pk, level in device.db.acl.items():
+        try:
+            obj = ObjectDB.objects.get(pk=char_pk)
+            if obj.typeclass_path and 'MatrixAvatar' in obj.typeclass_path:
+                name = f"{obj.key} (matrix, level {level})"
+            else:
+                name = f"{obj.key} (physical, level {level})"
+        except ObjectDB.DoesNotExist:
+            name = f"<err> (<err>, level {level})"
+        acl_list.append((char_pk, name))
+
+    options = []
+    for i, (char_pk, display_name) in enumerate(acl_list, 1):
+        options.append({
+            "key": str(i),
+            "desc": display_name,
+            "goto": ("node_device_acl_confirm", {"device": device, "from_matrix": from_matrix, "char_pk": char_pk, "name": display_name})
+        })
+    options.append({"key": "q", "desc": "Back to main menu", "goto": ("device_main_menu", {"device": device, "from_matrix": from_matrix})})
+
+    return text, options
+
+
+def node_device_acl_confirm(caller, raw_string, **kwargs):
+    """
+    Confirm deletion of an ACL entry.
+    """
+    device = kwargs.get("device")
+    from_matrix = kwargs.get("from_matrix", False)
+    char_pk = kwargs.get("char_pk")
+    name = kwargs.get("name")
+
+    if not device or char_pk is None:
+        caller.msg("|rError: Invalid parameters.|n")
+        return ("node_device_acl_list", {"device": device, "from_matrix": from_matrix})
+
+    text = f"|yConfirm removal of:|n\n"
+    text += f"  {name}\n\n"
+    text += "This will revoke all access for this user.\n"
+
+    options = [
+        {
+            "key": "y",
+            "desc": "Yes, remove",
+            "goto": ("node_device_acl_delete", {"device": device, "from_matrix": from_matrix, "char_pk": char_pk, "name": name})
+        },
+        {
+            "key": "n",
+            "desc": "No, go back",
+            "goto": ("node_device_acl_list", {"device": device, "from_matrix": from_matrix})
+        }
+    ]
+
+    return text, options
+
+
+def node_device_acl_delete(caller, raw_string, **kwargs):
+    """
+    Delete the ACL entry and return to the list.
+    """
+    device = kwargs.get("device")
+    from_matrix = kwargs.get("from_matrix", False)
+    char_pk = kwargs.get("char_pk")
+    name = kwargs.get("name")
+
+    if not device or char_pk is None:
+        caller.msg("|rError: Invalid parameters.|n")
+        return ("node_device_acl_list", {"device": device, "from_matrix": from_matrix})
+
+    if hasattr(device.db, 'acl') and char_pk in device.db.acl:
+        del device.db.acl[char_pk]
+        caller.msg(f"|gRemoved {name} from ACL.|n")
+        try:
+            from evennia.objects.models import ObjectDB
+            target = ObjectDB.objects.get(pk=char_pk)
+            if target.has_account:
+                target.msg(f"|rYour access to {device.key} has been revoked.|n")
+        except ObjectDB.DoesNotExist:
+            pass
+    else:
+        caller.msg(f"|rEntry not found in ACL.|n")
+
+    return ("node_device_acl_list", {"device": device, "from_matrix": from_matrix})
+
+
 def start_device_menu(caller, device, from_matrix=False):
     """
     Start the device interface menu.
