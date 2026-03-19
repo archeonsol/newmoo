@@ -15,12 +15,13 @@ class MatrixCleanupScript(DefaultScript):
     Global script that periodically cleans up empty ephemeral Matrix node clusters.
 
     Runs every 60 seconds and:
-    1. Checks device connectivity for devices with ephemeral nodes
-    2. Ejects avatars from devices that have lost network connectivity
-    3. Deletes ephemeral node clusters where both nodes are empty
+    1. Deletes ephemeral node clusters where both nodes are empty
 
     This prevents ephemeral nodes (cameras, locks, simple devices) from
     accumulating in the database after users disconnect.
+
+    Ejection of avatars from devices that have lost connectivity is handled
+    by MatrixConnectionScript, which runs every 10 seconds.
     """
 
     def at_script_creation(self):
@@ -33,7 +34,7 @@ class MatrixCleanupScript(DefaultScript):
         self.start_delay = True  # Wait one interval before first run
 
     def at_repeat(self):
-        """Called every interval. Checks device connectivity and cleans up empty clusters."""
+        """Called every interval. Cleans up empty ephemeral node clusters."""
         from typeclasses.matrix.rooms import MatrixNode, Room
         from typeclasses.matrix.avatars import MatrixAvatar
 
@@ -43,7 +44,6 @@ class MatrixCleanupScript(DefaultScript):
         ephemeral_nodes = [node for node in all_nodes if getattr(node.db, 'ephemeral', False)]
 
         deleted_count = 0
-        ejected_count = 0
         processed_devices = set()  # Track devices we've already processed
 
         for node in ephemeral_nodes:
@@ -83,33 +83,6 @@ class MatrixCleanupScript(DefaultScript):
                 except MatrixNode.DoesNotExist:
                     pass
 
-            # Check if device is connected to network
-            device_connected = False
-            actual_room = get_containing_room(parent_device)
-
-            if actual_room:
-                network_router = getattr(actual_room.db, 'network_router', None)
-                if network_router:
-                    device_connected = True
-
-            # If device lost connectivity, eject any avatars in the cluster
-            if not device_connected:
-                avatars_to_eject = []
-
-                if checkpoint_node:
-                    avatars_to_eject.extend([obj for obj in checkpoint_node.contents
-                                            if isinstance(obj, MatrixAvatar)])
-                if interface_node:
-                    avatars_to_eject.extend([obj for obj in interface_node.contents
-                                            if isinstance(obj, MatrixAvatar)])
-
-                for avatar in avatars_to_eject:
-                    rig = getattr(avatar.db, 'rig', None)
-                    if rig and hasattr(rig, 'disconnect'):
-                        from typeclasses.matrix.constants import JackoutSeverity
-                        rig.disconnect(severity=JackoutSeverity.EMERGENCY)
-                        ejected_count += 1
-
             # Check if the entire cluster is empty
             cluster_empty = True
 
@@ -138,9 +111,9 @@ class MatrixCleanupScript(DefaultScript):
                 parent_device.db.interface_node = None
 
         # Log cleanup activity
-        if ejected_count > 0 or deleted_count > 0:
+        if deleted_count > 0:
             from evennia.utils import logger
-            logger.log_info(f"Matrix cleanup: ejected {ejected_count} avatar(s), deleted {deleted_count} empty ephemeral node(s)")
+            logger.log_info(f"Matrix cleanup: deleted {deleted_count} empty ephemeral node(s)")
 
     def at_start(self):
         """Called when script starts (including after server restart)."""
@@ -164,7 +137,7 @@ class MatrixConnectionScript(DefaultScript):
     def at_script_creation(self):
         """Called when script is first created."""
         self.key = "matrix_connection_check"
-        self.desc = "Checks Matrix dive and teleop connections periodically"
+        self.desc = "Checks Matrix dive connections periodically"
         self.interval = 10  # Run every 10 seconds
         self.repeats = 0  # Run forever
         self.persistent = True  # Survive server restarts
