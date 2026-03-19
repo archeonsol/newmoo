@@ -47,9 +47,9 @@ def get_accounts_script():
         script = script[0]
 
     # Ensure attributes exist
-    if not script.db.accounts:
+    if script.db.accounts is None:
         script.db.accounts = {}
-    if not script.db.alias_to_dbref:
+    if script.db.alias_to_dbref is None:
         script.db.alias_to_dbref = {}
 
     return script
@@ -103,7 +103,7 @@ def validate_alias(alias):
         alias (str): The alias to validate
 
     Returns:
-        tuple: (is_valid, error_message)
+        tuple: (True, normalized_alias) on success, (False, error_message) on failure
     """
     if not alias:
         return False, "Alias cannot be empty."
@@ -198,7 +198,9 @@ def set_alias(character, alias):
     if not account.get('created'):
         account['created'] = datetime.utcnow().isoformat()
 
-    # Update matrix ID if needed
+    # Update matrix ID snapshot. NOTE: if ID recycling is ever enabled in
+    # matrix_ids.py, this snapshot can silently drift — a reassigned ID would
+    # not be reflected here. Audit this if recycling becomes active.
     if hasattr(character, 'get_matrix_id'):
         account['matrix_id'] = character.get_matrix_id()
 
