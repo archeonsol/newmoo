@@ -121,32 +121,15 @@ class NetworkedMixin(MatrixIdMixin):
         interface.db.ephemeral = True
         interface.db.node_type = "device_interface"
 
-        # Set interface description based on device type
-        if device_type == "hub":
-            # Hub uses custom description or default
-            hub_desc = getattr(self.db, 'hub_desc', None)
-            if hub_desc:
-                interface.db.desc = hub_desc
-            else:
-                interface.db.desc = (
-                    "A blank virtual space, waiting to be customized. "
-                    "This is your private network node - shape it as you see fit."
-                )
-            # Restore hub details if they exist
-            hub_details = getattr(self.db, 'hub_details', None)
-            if hub_details:
-                for key, value in hub_details.items():
-                    interface.db.details[key] = value
+        # Set interface description - devices override interface_desc to customize
+        device_desc = getattr(self.db, 'interface_desc', None)
+        if device_desc:
+            interface.db.desc = device_desc
         else:
-            # Generic device interface
-            device_desc = getattr(self.db, 'interface_desc', None)
-            if device_desc:
-                interface.db.desc = device_desc
-            else:
-                interface.db.desc = (
-                    f"A sterile virtual interface space. The {device_type}'s "
-                    "systems are accessible here through command consoles."
-                )
+            interface.db.desc = (
+                f"A sterile virtual interface space. The {device_type}'s "
+                "systems are accessible here through command consoles."
+            )
 
         # Create exits between rooms
         from evennia.utils.create import create_object
