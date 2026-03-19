@@ -1,231 +1,159 @@
 # Matrix Concepts
 
-This document outlines the core concepts and design of the Matrix system - the city's cyberspace network.
+The Matrix is the city's cyberspace network — a traversable virtual space that mirrors and connects physical infrastructure. Characters can "jack in" via a DiveRig, spawning an avatar that navigates virtual geography while their body remains in meatspace.
 
-## Overview
+Sections marked **[planned]** describe intended design that is not yet implemented in code.
 
-The Matrix is a traversable virtual space that mirrors and connects the physical city. Players can "dive" into the Matrix, spawning an avatar that navigates virtual geography while their physical body remains in meatspace.
+---
 
 ## Network Architecture
 
-### The Frame (Mainframe)
+### The Frame
 The central AGI that runs the city's core infrastructure. A mysterious, possibly sentient intelligence housed in a heavily fortified server farm. The guilds have historically worked to keep The Frame in check.
 
-### CORTEX (Central Operations Relay & Traffic Exchange)
-The main street of the Matrix. A public marketplace and social hub where data and programs are bought/sold. Acts as the central routing point between all major spine networks.
-
-Could be lore like: "Originally stood for something technical, but everyone just calls it the Cortex now. Some old-timers insist it meant 'Central Operations...' but nobody remembers the rest."
+### CORTEX
+The main street of the Matrix. A public marketplace and social hub where data and programs are bought and sold. Acts as the central routing point between major spine networks. ("Originally stood for something technical, but everyone just calls it the Cortex now.")
 
 ### Spines
-The hardwired backbone of the network. Major infrastructure branches throughout the city, made up of relay switches. Examples: Spine A (controlled by The Frame), Spine B (guild territory), Spine C (bougie district), Spine W (working class).
-
-Each spine has associated "Subframes" - district-level hangout spaces/hubs.
-
-### Relays
-Individual network nodes that make up a spine. Handle connection routing for a network segment:
-- Provide wireless coverage over physical rooms
-- Host hardwired port connections
-- Each relay has an associated Matrix room (spine room)
-- Not physical objects - pure infrastructure logic
-
-### Hubs
-Private network devices that create isolated network spaces:
-- Can be wireless (hacked/unofficial) or hardwired (legitimate installation)
-- Act as firewalls/security layers
-- Create a Matrix node (virtual room) for the physical space they serve
-- Most rooms have an implicit/basic hub by default
-- Upgraded hubs offer better security, customization, sub-nodes
-
-### Nodes
-Virtual rooms in the Matrix. All nodes are persistent:
-- **Spine nodes**: Relay rooms along the network backbone (permanent infrastructure)
-- **Hub nodes**: Private network spaces for homes/offices/corps
-- **Device nodes**: Interface spaces for individual devices (cameras, terminals, etc.)
-- **Public nodes**: The Cortex, shops, clubs, social spaces
-
-Device nodes exist as long as their parent device exists. If you're diving into someone's handset and they walk to another room, when you exit you'll be in a different physical location!
-
-## Devices
-
-### Handsets
-Free, basic devices issued to all citizens:
-- Tied to your Frame ID (your identity on the network)
-- Alone: Basic Matrix access (posts, DMs, reading pages)
-- Can be slotted into tablets/consoles to give them wireless access
-- Your handset IS your identity - stealing one = identity theft
-
-### Tablets
-Mid-tier portable devices:
-- Full Matrix browsing capabilities
-- Wireless only (no hardwired connection)
-- Slower than consoles
-- Requires slotted handset for wireless access
-
-### Consoles
-Stationary workstations:
-- Full Matrix capabilities
-- Can be hardwired (faster, more reliable, can access restricted systems)
-- Requires slotted handset for wireless access (unless hardwired)
-- Best for serious diving
-
-### Connection Types
-- **Wireless**: Mobile, flexible, connects through relays, easier to trace generally
-- **Hardwired**: Fixed location, faster, more reliable, precise location (specific port), can access systems requiring physical connection
-
-## Diving & Jacking Out
-
-### Access Points (AP)
-The device you're using to dive. When you jack out, you return to wherever that device currently is.
-
-### Beacons
-Physical objects you can drop in Matrix nodes:
-- Mark locations for quick recall
-- Persist indefinitely until destroyed
-- Very fragile (easy to destroy)
-- Limited capacity (3-5 beacons per character)
-- Visible to others (can be destroyed by ICE/daemons/players)
-
-### Recall Programs
-Pre-crafted escape routes:
-- Target a specific beacon
-- Single-use consumables
-- Have casting time (can be interrupted)
-- Tiers: basic (slow), advanced (fast), emergency (instant but damaging)
-
-### Disconnection
-If your device loses connection while diving:
-
-**Graceful** (signal degrading):
-- Warning messages
-- Can safely recall or jack out
-
-**Sudden** (instant loss):
-- Short grace period (5-10 seconds)
-- Then forced jack-out
-- Minor damage/debuffs
-
-**Violent** (device destroyed):
-- Forced jack-out
-- Major damage, possible unconsciousness
-
-Forced jack-out dumps you to the nearest relay node or back to meatspace (depending on severity).
-
-## Matrix Content
-
-### Router Objects
-Interactive kiosks in spine/relay rooms:
-- Show connected nodes (hubs/upgraded spaces)
-- Interface for routing to connected devices/nodes
-- Don't show all connected devices by default (would be overwhelming)
-
-### Programs
-Craftable/buyable tools:
-- **CRUD**: Basic data manipulation
-- **Cryptography**: Encrypt/decrypt data
-- **Trace**: Locate devices on the network (which relay, physical location)
-- **Probe/Scan**: Search for specific devices on current relay
-- **Recall**: Return to beacon
-- **Daemons**: Background processes (monitoring, ICE, auto-defense)
-- **Weapons**: Attack programs (may also be daemons)
-
-### Data
-Generic blobs of information that exist as physical objects in the Matrix. Can be carried, dropped, transferred, encrypted, etc.
-
-### ICE (Intrusion Countermeasures Electronics)
-Defensive programs/daemons that protect nodes:
-- Auto-spawned for basic/unprotected devices
-- Persistent and customizable in upgraded hubs
-- Can destroy beacons
-- Combat capable
-
-## Public Services (Subframe B)
-
-Historically controlled by the guilds, these services live in Subframe B:
-
-### The Feed
-Twitter-like microblogging:
-- Short public posts
-- Topics (hashtags) for organization
-- Auto-archived in The Archives
-
-### The Archives
-Public library/historical record:
-- All Feed posts permanently preserved
-- Curated section for approved pages/content
-- Managed by curator (NPC or player role)
-- Searchable
-
-### Pages
-Static content hosting (FrameML markup language):
-- Personal pages, manifestos, ASCII art
-- Support alt text for accessibility
-- Basic formatting (headers, links, text styling)
-- Can be archived if curator approves
-
-### Chat/DMs
-Direct messaging between Frame IDs.
-
-## Accounts & Identity
-
-### Frame ID
-Your handle on the network (@username). Tied to your physical identity.
-
-### Account Types
-- **Citizen account**: One per person, tied to city ID
-- **Corporate/work accounts**: Issued by employers, monitored, multiple possible
-- **Clandestine accounts**: Burner accounts, spoofed IDs, relay exploits
-
-### Verification
-Only corporations and government entities get verified badges. Regular citizens have no badge, which provides some anonymity mixed in with burner accounts.
-
-### Profile vs Record
-- **Profile**: Public-facing info anyone can see (editable by user)
-- **Record**: Official backend data (identity, linked accounts, logs, infractions) - requires authority access or hacking
-
-## Political Structure
-
-### The Frame (AGI)
-Runs core city infrastructure but is politically constrained by the guilds.
-
-### The Guilds
-Control Subframe B and public services. Historically restructured the network to keep The Frame in check (moved Spine A connection from Cortex to Spine B, creating Firewall A-B as a choke point).
-
-### Spine Territories
+The hardwired backbone of the network. Major infrastructure branches throughout the city, composed of relay nodes. Each spine has territorial associations:
 - **Spine A**: Frame territory, connects through Firewall A-B to Spine B
-- **Spine B**: Guild territory, hosts public services in Subframe B
-- **Spine C**: Bougie/upper class district
+- **Spine B**: Guild territory, hosts public services
+- **Spine C**: Upper class district
 - **Spine W**: Working class/service district
 
 Firewalls between spines create security boundaries and political control points.
 
-## Tunneling & Tracing
+### Routers
+Virtual relay objects that sit in Matrix relay nodes and provide network connectivity to meatspace areas. A meatspace room linked to a router has "network coverage." Devices in that room are discoverable and accessible via the Matrix. Routers can be taken online or offline.
 
-### Tunneling
-Routing connections through intermediate consoles to hide your location:
-- Each hop slows connection but obscures origin
-- Requires credentials or exploits on each console in the chain
-- Creates a connection tree: Your device → Console X → Console Y → Target
+### Nodes
+Virtual rooms in the Matrix. There are two broad categories:
 
-### Tracing
-Following connection hops backward:
-- Lazy traces stop at first hop
-- Thorough investigations follow entire chain
-- Requires access to systems along the route
-- Better trace programs are faster/stealthier
+- **Persistent nodes**: Spine rooms, public spaces, and any manually built Matrix geography. These exist permanently.
+- **Ephemeral device nodes**: Created on-demand when an avatar routes to a networked device. Automatically cleaned up when empty. See [device_clusters.md](device_clusters.md).
+
+---
+
+## Identity & Matrix IDs
+
+Every object with a Matrix presence has a **Matrix ID** — a unique 6-character alphanumeric code in the format `^XXXXXX`. This is how objects are referenced IC across the network. IDs are permanent and never recycled.
+
+### Aliases
+Characters can set a human-readable **alias** linked to their Matrix ID. An alias is used as a callsign: it appears as your avatar's name, your sender ID on network messages, and (eventually) your social media handle. Aliases follow `@username` conventions. One alias per character; changes have a cooldown.
+
+### Jailbroken Handsets **[planned]**
+Long-term, handsets will be able to act as their own independent Matrix identities. Slotting a jailbroken handset into a DiveRig allows diving as a *different* avatar with a *different* alias — effectively a fake identity. Handsets can be stolen, making this a risk/reward mechanic. This means the character↔avatar relationship is not always 1:1.
+
+### Account Types **[planned]**
+- **Citizen**: One per person, tied to city ID
+- **Corporate/work**: Issued by employers, monitored
+- **Clandestine**: Burner accounts, spoofed IDs, relay exploits
+
+### Profile vs Record **[planned]**
+- **Profile**: Public-facing info (editable by user)
+- **Record**: Official backend data — identity, linked accounts, logs, infractions. Requires authority access or hacking to view.
+
+---
+
+## Diving & Jacking Out
+
+Characters jack in from a **DiveRig** (a reclined chair/console). The rig must be in a room with network coverage (linked to an online router). Jacking in creates a MatrixAvatar at the router's location and puppets the controlling account over to it.
+
+### Proxy Tunnel
+At any given time, a diving avatar has up to three routers to track:
+
+1. **Session origin** — the router the DiveRig is connected to. This is where your connection anchors to meatspace.
+2. **Proxy tunnel** *(optional)* — an intermediate router you've designated as a waypoint. Set by visiting a router and opening a proxy tunnel in its menu. This becomes your "recall" point: `route back` from anywhere will return you here first.
+3. **Device router** — the router a remote device is connected to, if you are currently inside that device's ephemeral cluster.
+
+`route back` always returns you one step up the chain. To get all the way back to session origin, you must close the proxy tunnel first. If your proxy is in an inconvenient place, you have to physically navigate back to it to close it — there is no shortcut.
+
+The proxy tunnel "sticks" on the avatar, so it persists even if you use different DiveRigs across sessions. Session origin may change, but the proxy does not.
+
+### Jackout Severity
+- **Normal**: Clean disconnect, no penalty.
+- **Emergency**: Uncontrolled disconnect, minor penalties.
+- **Forced**: Violent disconnect, physical damage to the character's body.
+- **Fatal**: Avatar death propagates to the physical body.
+
+### Disconnection **[planned]**
+If a device loses connection while a character is diving:
+- **Graceful** (signal degrading): Warning messages, time to safely jack out.
+- **Sudden** (instant loss): Short grace period, then forced jack-out with minor penalties.
+- **Violent** (device destroyed): Forced jack-out, major damage, possible unconsciousness.
+
+---
+
+## Devices
+
+### Networked Devices
+Any physical object implementing `NetworkedMixin` has a Matrix presence. Devices in a room with network coverage are discoverable via the router serving that room, and can be accessed by avatars navigating to them.
+
+Accessing a device creates an ephemeral 2-room cluster (Checkpoint + Interface). See [device_clusters.md](device_clusters.md).
+
+### DiveRig
+The hardware required to jack in. A DiveRig is a seat (characters must be sitting to dive) that also acts as a networked device, with an associated router providing the session origin.
+
+### Handsets **[planned — partial implementation]**
+Personal communicators, functionally a cyberpunk smartphone. Tied to a character's Frame ID/alias. Used for texting, network messaging, and (eventually) browsing public services. The handset system is partially implemented; full integration with the Matrix identity and social systems is future work.
+
+### Other Device Types **[planned]**
+- **Tablets**: Mid-tier portable devices
+- **Consoles**: Stationary workstations, can be hardwired for faster/more reliable access
+- **Cameras, terminals, locks**: Specific-purpose networked objects with device-type-specific commands
+
+---
+
+## Programs **[planned — framework implemented, programs mostly not]**
+
+Programs are portable executable objects avatars carry. They are run via `patch <program>` (or `patch <program> <args>`). The execution framework exists; most individual programs are not yet implemented.
+
+Planned program types:
+- **CRUD**: Basic file manipulation on device storage
+- **exfil.exe / infil.exe**: Extract files to portable data chips / upload chips to device storage
+- **Skeleton.key**: ACL manipulation (illegal)
+- **cmd.exe / sudo.exe**: Pull up device operation menu at various ACL levels
+- **ICEpick.exe**: Combat program for fighting ICE
+- **Trace / Probe / Scan**: Network investigation tools
+- **Recall**: Return to beacon location
+- **Daemons**: Background processes (monitoring, auto-defense, ICE)
+
+See [programs.md](programs.md) for full design intent.
+
+---
+
+## Security & ICE **[planned]**
+
+The checkpoint room in every device cluster is the structural hook for future security enforcement. When implemented:
+- Avatars not on a device's ACL will trigger ICE spawn in the checkpoint room
+- ICE are daemon creatures that must be defeated (or bypassed via skill/programs) to reach the interface
+- The exit from checkpoint to interface will be locked until ACL clears or ICE is defeated
+
+### Decker Trace **[planned]**
+Skilled deckers will be able to trace an avatar's connection chain through proxy routers:
+- Low-skill result: sees only the exit point
+- High-skill result: identifies session origin
+- Expert: can force-close a proxy tunnel remotely
+
+This is the adversarial counterpart to the proxy tunnel system.
+
+---
+
+## Public Services (Subframe B) **[planned]**
+
+Historically controlled by the guilds, these services will live in Subframe B:
+
+- **The Feed**: Short public posts, topics/hashtags, auto-archived
+- **The Archives**: Permanent record of Feed posts, curated content library
+- **Pages**: Static content hosting with FrameML markup
+- **Chat/DMs**: Direct messaging between Frame IDs
+
+---
 
 ## Design Philosophy
 
-- **No perfect crimes**: Every action leaves traces
-- **Distance is compressed**: Relays cover large physical areas, but walking between relays in the Matrix is still required
-- **Persistence over temporary**: All nodes persist (no cleanup needed)
-- **Tools create depth**: Programs like Trace and Probe aren't default commands - you need the right tools
-- **Physical/virtual interplay**: Moving a device in meatspace affects Matrix navigation
-- **Security through obscurity works (somewhat)**: Devices aren't automatically visible - someone needs to scan for them
-
-
-as a decker there are up to three routers that you need to worry about:
-the one your rig is connected to,
-the one you are using as a proxy (if you have one, eventually this will be a skill-check so you need decking skill),
-the one that a device is connected to (if you are accessing the device),
-
-if you go to a router you will get an option to return back to your home router. if you are using a proxy you will wind up there and you can close the proxy then run it again.... (so if you put your proxy in a dumb place good luck. you gotta go back there to close it)
+- **No perfect crimes**: Every action leaves traces.
+- **Physical/virtual interplay**: Moving a device in meatspace affects Matrix navigation. Device node location follows the device.
+- **Tools create depth**: Investigation programs (Trace, Probe) are not default commands — you need the right tools.
+- **Security through obscurity works (somewhat)**: Devices aren't automatically visible; someone needs to scan or know the Matrix ID.
+- **Persistence where it counts**: Public nodes and spine infrastructure are permanent. Device clusters are ephemeral.
