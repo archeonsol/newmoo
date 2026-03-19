@@ -92,10 +92,7 @@ def node_execute_command(caller, raw_string, **kwargs):
     text = f"|c=== Execute: {command} ===|n\n\n"
     text += "Enter command arguments (or 'back' to cancel):\n"
 
-    options = {
-        "key": "_default",
-        "goto": ("node_process_command", {"device": device, "command": command, "from_matrix": from_matrix})
-    }
+    options = [{"key": "_default", "desc": None, "goto": ("node_process_command", {"device": device, "command": command, "from_matrix": from_matrix})}]
 
     return text, options
 
@@ -184,10 +181,7 @@ def node_read_file_prompt(caller, raw_string, **kwargs):
     text = "|c=== Read File ===|n\n\n"
     text += "Enter filename to read (or 'back' to cancel):\n"
 
-    options = {
-        "key": "_default",
-        "goto": ("node_read_file", {"device": device, "from_matrix": from_matrix})
-    }
+    options = [{"key": "_default", "desc": None, "goto": ("node_read_file", {"device": device, "from_matrix": from_matrix})}]
 
     return text, options
 
@@ -213,10 +207,7 @@ def node_read_file(caller, raw_string, **kwargs):
         text += file_obj.get('contents', '[empty]')
         text += "\n\nPress any key to return to file browser."
 
-    options = {
-        "key": "_default",
-        "goto": ("node_browse_files", {"device": device, "from_matrix": from_matrix})
-    }
+    options = [{"key": "_default", "desc": None, "goto": ("node_browse_files", {"device": device, "from_matrix": from_matrix})}]
 
     return text, options
 
