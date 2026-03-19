@@ -36,8 +36,8 @@ class Handset(NetworkedItem):
 
         # Handset-specific attributes
         self.db.device_type = "handset"
-        self.db.has_storage = True  # Store contacts, messages
-        self.db.has_controls = False  # No customization like hubs
+        self.db.has_storage = False  # Future: contacts, messages
+        self.db.has_controls = True  # Has account/communication controls
         self.db.security_level = 0  # Personal device, low security
         self.db.is_jailbroken = False  # Future feature
 
@@ -46,14 +46,16 @@ class Handset(NetworkedItem):
             "account",
             "handle_account_info",
             help_text="View your Matrix account information",
-            auth_level=0
+            auth_level=0,
+            visibility_threshold=0
         )
         self.register_device_command(
             "set_alias",
             "handle_set_alias",
             help_text="Set your Matrix alias: set_alias @name",
             auth_level=0,
-            physical_only=True
+            physical_only=True,
+            visibility_threshold=0
         )
 
     def get_authenticated_user(self):
