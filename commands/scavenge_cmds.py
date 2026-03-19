@@ -64,7 +64,7 @@ class CmdScavenge(Command):
     def func(self):
         from evennia.utils import delay
         from world.skills import SKILL_STATS
-        from world.scavenging import (
+        from world.rpg.scavenging import (
             perform_scavenge,
             _pick_loot_table,
             get_scavenge_daily_limit,

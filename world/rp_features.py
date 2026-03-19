@@ -94,7 +94,7 @@ def get_character_sdesc_for_viewer(character, viewer):
     if character is None:
         return ""
     try:
-        from world.sdesc import get_short_desc
+        from world.rpg.sdesc import get_short_desc
         return get_short_desc(character, viewer) or (getattr(character, "key", None) or "")
     except Exception:
         return getattr(character, "key", None) or ""
@@ -164,7 +164,7 @@ def get_display_name_for_viewer(character, viewer, **kwargs):
         return getattr(character, "key", None) or "Someone"
     # Face hidden (mask/helmet): prefer temporary helmet-recog overlay if set; otherwise show sdesc.
     try:
-        from world.sdesc import character_has_mask_or_helmet
+        from world.rpg.sdesc import character_has_mask_or_helmet
         if character_has_mask_or_helmet(character):
             temp = get_helmet_recog_for_viewer(viewer, character)
             if temp:
@@ -208,7 +208,7 @@ def get_move_display_for_viewer(character, viewer):
         sdesc = f"{sdesc} {move_suffix}"
     # Don't reveal recog when face is hidden by mask/helmet.
     try:
-        from world.sdesc import character_has_mask_or_helmet
+        from world.rpg.sdesc import character_has_mask_or_helmet
         if character_has_mask_or_helmet(character):
             return sdesc
     except Exception:

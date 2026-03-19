@@ -33,7 +33,7 @@ def at_server_start():
     from evennia import create_script, create_channel, search_channel
     from evennia.scripts.models import ScriptDB
     from world.staff_pending import PENDING_SCRIPT_KEY, STAFF_PENDING_CHANNEL_ALIAS
-    from world.language import ensure_lore_languages
+    from world.rpg.language import ensure_lore_languages
     ensure_lore_languages()
     if not ScriptDB.objects.filter(db_key="stamina_regen").first():
         create_script(

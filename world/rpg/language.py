@@ -9,8 +9,8 @@ Spend XP via @xp advance language <name>; cost is 10 XP per purchase; % gained p
 Number of non-English languages you can learn is limited by intelligence (average = 1, smarter = more).
 
 ensure_lore_languages() runs at server start (server/conf/at_server_startstop.py). To run manually:
-  In-game: @py from world.language import ensure_lore_languages; ensure_lore_languages()
-  Evennia shell: from world.language import ensure_lore_languages; ensure_lore_languages()
+  In-game: @py from world.rpg.language import ensure_lore_languages; ensure_lore_languages()
+  Evennia shell: from world.rpg.language import ensure_lore_languages; ensure_lore_languages()
 """
 
 import re
@@ -115,13 +115,13 @@ def get_language_percent(character, lang_key):
     """Return stored percent (0-400) for a language; 0 if not set. English defaults to 400."""
     if not character or not hasattr(character, "db"):
         return 400 if lang_key == "english" else 0
-        
+
     # Safely extract the _SaverDict as a standard dictionary
     skills = dict(getattr(character.db, "languages", None) or {})
-    
+
     if lang_key == "english":
         return skills.get("english", LANGUAGE_MAX_PERCENT)
-        
+
     val = skills.get(lang_key, 0)
     try:
         return max(0, min(LANGUAGE_MAX_PERCENT, int(val)))
@@ -270,3 +270,4 @@ def parse_quoted_speech(text):
         last_end = m.end()
     out.append(text[last_end:])
     return ("".join(out), result)
+

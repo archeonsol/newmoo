@@ -31,7 +31,7 @@ def _at_say_whisper_overhear(location, speaker, message, receivers):
     if not location or not receivers:
         return
     try:
-        from world.language import get_speaker_language, process_language_for_viewer
+        from world.rpg.language import get_speaker_language, process_language_for_viewer
         exclude = make_iter(receivers)
         exclude = list(exclude) + [speaker]
         chars_here = location.contents_get(content_type="character")
@@ -167,7 +167,7 @@ class RoleplayMixin:
 
         # Whisper or explicit receivers: send per-receiver with language processing, then overhear
         if kwargs.get("whisper", False) or receivers:
-            from world.language import get_speaker_language, process_language_for_viewer
+            from world.rpg.language import get_speaker_language, process_language_for_viewer
             custom_mapping = kwargs.get("mapping", {})
             location = self.location
             msg_type = "say"
@@ -211,7 +211,7 @@ class RoleplayMixin:
         msg_type = "say"
         voice_phrase = get_voice_phrase(self)
         improvise = getattr(self.ndb, "performance_improvising", False)
-        from world.language import get_speaker_language, process_language_for_viewer
+        from world.rpg.language import get_speaker_language, process_language_for_viewer
 
         if msg_self:
             self_mapping = {

@@ -229,7 +229,7 @@ def make_flatlined(character, attacker):
     except Exception:
         pass
     try:
-        from world.grapple import release_grapple_forced
+        from world.combat.grapple import release_grapple_forced
         victim = getattr(character.db, "grappling", None)
         if victim:
             def _flatline_grapple_msg(v):

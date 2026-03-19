@@ -678,7 +678,7 @@ class CmdToggleClothing(Command):
 
         item_name_you = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
         if you_emote:
-            from world.crafting import substitute_clothing_desc
+            from world.rpg.crafting import substitute_clothing_desc
 
             caller.msg(substitute_clothing_desc(you_emote, caller, item=target))
         else:
@@ -691,7 +691,7 @@ class CmdToggleClothing(Command):
                 vcaller = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.name
                 vitem = target.get_display_name(viewer) if hasattr(target, "get_display_name") else target.name
                 if you_emote:
-                    from world.crafting import substitute_clothing_desc
+                    from world.rpg.crafting import substitute_clothing_desc
 
                     viewer.msg(substitute_clothing_desc(you_emote, caller, item=target))
                 else:

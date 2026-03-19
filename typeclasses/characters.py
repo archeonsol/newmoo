@@ -219,7 +219,7 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         """Short desc next to name when they see your name/recog: (a tall man wearing...)."""
         if looker == self:
             try:
-                from world.sdesc import get_short_desc
+                from world.rpg.sdesc import get_short_desc
                 sdesc = get_short_desc(self, looker)
                 if sdesc:
                     return " (" + sdesc + ")"
@@ -318,7 +318,7 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
                 self.db.needs_chargen = False
             else:
                 from evennia.utils.evmenu import EvMenu
-                EvMenu(self, "world.chargen", startnode="node_start")
+                EvMenu(self, "world.rpg.chargen", startnode="node_start")
                 return
         # CHECK: Are we jacked into the Matrix? Ask the rig to reconnect if valid.
         rig = self.db.sitting_on
@@ -337,7 +337,7 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         # Wake-up message to room when logging in (not during first-time chargen)
         if self.location:
             try:
-                from world.crafting import substitute_clothing_desc
+                from world.rpg.crafting import substitute_clothing_desc
                 msg = getattr(self.db, "wake_up_message", None) or "$N wakes up."
                 msg = substitute_clothing_desc(msg, self)
                 if msg:
@@ -362,7 +362,7 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
             import time
             self.db.last_logout_time = time.time()  # for 30-min rule: get/strip from logged-off only after this
             try:
-                from world.grapple import release_grapple_forced
+                from world.combat.grapple import release_grapple_forced
                 victim = getattr(self.db, "grappling", None)
                 if victim:
                     def _sleep_grapple_msg(v):
@@ -374,7 +374,7 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
                 logger.log_trace("characters.at_post_unpuppet release_grapple: %s" % err)
             if self.location:
                 try:
-                    from world.crafting import substitute_clothing_desc
+                    from world.rpg.crafting import substitute_clothing_desc
                     msg = getattr(self.db, "fall_asleep_message", None) or "$N falls asleep."
                     msg = substitute_clothing_desc(msg, self)
                     if msg:

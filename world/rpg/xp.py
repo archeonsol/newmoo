@@ -93,7 +93,7 @@ def total_xp_for_stat(stored_level):
 # -----------------------------------------------------------------------------
 def _stat_level(character, stat_key):
     """Return stored stat level 0-300."""
-    from world.chargen import STAT_KEYS
+    from world.rpg.chargen import STAT_KEYS
     if stat_key not in STAT_KEYS:
         return 0
     stats = getattr(character.db, "stats", None) or {}

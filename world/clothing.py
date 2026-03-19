@@ -12,7 +12,7 @@ from world.medical import (
     format_body_part_injuries,
     get_untreated_injuries_by_part,
 )
-from world.crafting import substitute_clothing_desc
+from world.rpg.crafting import substitute_clothing_desc
 
 # Class-level constants for body part groups (for merging look paragraphs)
 _HEAD_FACE = ("head", "face", "left eye", "right eye", "neck")
