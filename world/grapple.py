@@ -55,6 +55,31 @@ except ImportError:
     pass
 
 
+def _apply_grappled_cmdset(character):
+    """Lock victim commands while held in a grapple (look + resist only)."""
+    if not character:
+        return
+    try:
+        # Idempotent: remove any prior one first, then re-add.
+        character.cmdset.remove("GrappledCmdSet")
+    except Exception:
+        pass
+    try:
+        character.cmdset.add("commands.default_cmdsets.GrappledCmdSet")
+    except Exception:
+        pass
+
+
+def _clear_grappled_cmdset(character):
+    """Remove grappled command lock from character (if present)."""
+    if not character:
+        return
+    try:
+        character.cmdset.remove("GrappledCmdSet")
+    except Exception:
+        pass
+
+
 def _roll_result(character, stat_list, skill_name, modifier=0):
     """Return (result_string, final_result) from character's roll_check."""
     if not hasattr(character, "roll_check"):
@@ -276,6 +301,7 @@ def attempt_grapple(grappler, victim):
     for key in ("lying_on_table", "sitting_on", "lying_on"):
         if hasattr(victim.db, key) and getattr(victim.db, key) is not None:
             victim.attributes.remove(key)
+    _apply_grappled_cmdset(victim)
     return True, "You lock {} in your grasp.".format(_combat_display_name(victim, grappler))
 
 
@@ -399,6 +425,7 @@ def attempt_grapple_third_party(third_party, victim):
     str_display = getattr(third_party, "get_display_stat", lambda x: 0)("strength") or 0
     victim.db.grapple_hold_strength = HOLD_STRENGTH_BASE + (str_display * HOLD_STRENGTH_PER_STR // 10)
     victim.db.grapple_resist_cooldown = time.time()
+    _apply_grappled_cmdset(victim)
 
     msg_room = lambda v: "%s grabs %s from %s and locks them in their grasp!" % (_combat_display_name(third_party, v), _combat_display_name(victim, v), _combat_display_name(grappler, v))
     return True, "You grab %s from %s and lock them in your grasp!" % (_combat_display_name(victim, third_party), _combat_display_name(grappler, third_party)), "%s grabs %s from you!" % (_combat_display_name(third_party, grappler), _combat_display_name(victim, grappler)), "%s grabs you from %s and has you in their grasp!" % (_combat_display_name(third_party, victim), _combat_display_name(grappler, victim)), msg_room
@@ -416,6 +443,7 @@ def release_grapple(grappler):
     for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
         if hasattr(victim.db, key):
             victim.attributes.remove(key)
+    _clear_grappled_cmdset(victim)
     return True, "You release {}.".format(_combat_display_name(victim, grappler))
 
 
@@ -435,6 +463,7 @@ def release_grapple_forced(grappler, room_message=None):
     for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
         if hasattr(victim.db, key):
             victim.attributes.remove(key)
+    _clear_grappled_cmdset(victim)
     if room_message and grappler.location:
         loc = grappler.location
         if hasattr(loc, "contents_get"):
@@ -491,6 +520,7 @@ def attempt_resist(victim):
         for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
             if hasattr(victim.db, key):
                 victim.attributes.remove(key)
+        _clear_grappled_cmdset(victim)
         return True, "You wrench free of {}'s grasp!".format(_combat_display_name(grappler, victim)), "{} breaks free of your grasp!".format(_combat_display_name(victim, grappler))
     return False, "You strain but cannot break free yet. Your efforts weaken their hold.", "{} struggles but you keep hold.".format(_combat_display_name(victim, grappler))
 
@@ -619,6 +649,7 @@ def grapple_strike(grappler, victim):
         for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
             if hasattr(victim.db, key):
                 victim.attributes.remove(key)
+        _clear_grappled_cmdset(victim)
         set_unconscious(victim)
         grappler.msg("|rYou choke %s until they go limp. They're out cold.|n" % v_name_for_g)
         if loc and hasattr(loc, "contents_get"):

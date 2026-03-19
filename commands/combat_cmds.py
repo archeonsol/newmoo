@@ -187,6 +187,9 @@ class CmdFlee(Command):
         if not getattr(caller, "db", None) or not hasattr(caller.db, "stats"):
             self.caller.msg("You must be in character to do that.")
             return
+        if getattr(caller.db, "grappled_by", None):
+            caller.msg("You're locked in someone's grasp. Use |wresist|n to break free.")
+            return
         from world.combat import _get_combat_target, remove_both_combat_tickers
         opponent = _get_combat_target(caller)
         if not opponent:
@@ -243,6 +246,12 @@ class CmdFlee(Command):
         victim = getattr(caller.db, "grappling", None)
         if getattr(caller.db, "grappled_by", None) == opponent:
             caller.db.grappled_by = None
+            # Break-away clears grappled state; remove grapple command lock too.
+            try:
+                from world.grapple import _clear_grappled_cmdset
+                _clear_grappled_cmdset(caller)
+            except Exception:
+                pass
             if hasattr(opponent.db, "grappling") and opponent.db.grappling == caller:
                 opponent.db.grappling = None
         dir_name = (getattr(exit_obj, "key", None) or "away").strip()

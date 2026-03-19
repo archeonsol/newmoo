@@ -1554,6 +1554,9 @@ class CmdSit(Command):
         args = (self.args or "").strip()
         if args.lower().startswith("on "):
             args = args[3:].strip()
+        if getattr(caller.db, "grappled_by", None):
+            caller.msg("You can't sit down while grappled. Use |wresist|n to break free.")
+            return
         if not args:
             caller.msg("Sit on what? Usage: sit <seat>")
             return
@@ -1606,6 +1609,9 @@ class CmdLieOnTable(Command):
         args = (self.args or "").strip()
         if args.lower().startswith("on "):
             args = args[3:].strip()
+        if getattr(caller.db, "grappled_by", None):
+            caller.msg("You can't lie down while grappled. Use |wresist|n to break free.")
+            return
         if not args:
             caller.msg("Lie on what? Usage: lie on <operating table|bed>")
             return
@@ -1666,6 +1672,9 @@ class CmdGetOffTable(Command):
 
     def func(self):
         caller = self.caller
+        if getattr(caller.db, "grappled_by", None):
+            caller.msg("You can't get up while grappled. Use |wresist|n to break free.")
+            return
         cleared = []
         if getattr(caller.db, "lying_on_table", None):
             cleared.append("operating table")
