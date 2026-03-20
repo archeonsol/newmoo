@@ -20,17 +20,18 @@ from world.medical.injuries import (
     compute_effective_bleed_level,
     rebuild_derived_trauma_views,
 )
+from world.theme_colors import COMBAT_COLORS as CC, MEDICAL_COLORS as MC
  
 # ── Visual constants ─────────────────────────────────────────────────────────
  
 _DIM = "|x"
 _N = "|n"
 _W = "|w"
-_C = "|c"
-_Y = "|y"
-_R = "|r"
-_G = "|g"
-_M = "|m"
+_C = CC["parry"]
+_Y = MC["compensated"]
+_R = MC["critical"]
+_G = MC["stable"]
+_M = MC["infection"]
 _BORDER = "|x"
 _WIDTH = 56
  
@@ -79,7 +80,7 @@ _STATUS_DISPLAY = {
     "compromised": f"{_Y}COMPROMISED{_N}",
     "critical": f"{_R}CRITICAL{_N}",
     "failing": f"{_R}FAILING{_N}",
-    "arrest": f"|RARREST{_N}",
+    "arrest": f"{MC['arrest']}ARREST{_N}",
 }
  
  
@@ -113,7 +114,7 @@ _ORGAN_LABELS = {
 _ORGAN_SEVERITY = {
     1: "contusion / minor insult",
     2: "structural compromise",
-    3: f"|RNON-VIABLE — replacement indicated{_N}",
+    3: f"{MC['arrest']}NON-VIABLE — replacement indicated{_N}",
 }
  
 _BONE_LABELS = {
@@ -137,14 +138,14 @@ _BLEED_SEVERITY = [
     (1.5, f"{_Y}active{_N}"),
     (2.5, f"{_Y}significant{_N}"),
     (3.5, f"{_R}severe{_N}"),
-    (999, f"|Rcritical{_N}"),
+    (999, f"{MC['arrest']}critical{_N}"),
 ]
  
 _INFECTION_STAGE_LABELS = {
     1: "localised inflammation",
     2: "tissue-level spread",
     3: "systemic involvement",
-    4: f"|Rseptic cascade{_N}",
+    4: f"{MC['arrest']}septic cascade{_N}",
 }
  
 _RECOVERY_LABELS = {
@@ -158,7 +159,7 @@ def _bleed_word(rate):
     for threshold, label in _BLEED_SEVERITY:
         if rate <= threshold:
             return label
-    return f"|Rcritical{_N}"
+    return f"{MC['arrest']}critical{_N}"
  
  
 # ── Main readout builder ─────────────────────────────────────────────────────
@@ -239,7 +240,7 @@ def get_scanner_readout(target):
  
     bar = _perfusion_bar(hp, mx)
     if in_arrest:
-        perf_label = f"|Rno perfusion detected{_N}"
+        perf_label = f"{MC['arrest']}no perfusion detected{_N}"
     elif pct >= 80:
         perf_label = f"{_G}adequate{_N}"
     elif pct >= 50:
@@ -247,7 +248,7 @@ def get_scanner_readout(target):
     elif pct >= 25:
         perf_label = f"{_R}critical deficit{_N}"
     else:
-        perf_label = f"|Rnear-total depletion{_N}"
+        perf_label = f"{MC['arrest']}near-total depletion{_N}"
  
     lines.append(f"  {bar}  {perf_label}")
  
@@ -342,7 +343,7 @@ def get_scanner_readout(target):
             stage = inf.get("stage", 0)
             stage_label = _INFECTION_STAGE_LABELS.get(stage, "progressing")
             if stage >= 4:
-                color = "|R"
+                color = MC["arrest"]
             elif stage >= 3:
                 color = _R
             else:
@@ -380,15 +381,15 @@ def get_scanner_readout(target):
                 elif chrome_pct >= 0.2:
                     integrity = f"{_R}compromised{_N}"
                 elif chrome_pct > 0:
-                    integrity = f"|Rfailing{_N}"
+                    integrity = f"{MC['arrest']}failing{_N}"
                 else:
-                    integrity = f"|RDESTROYED{_N}"
+                    integrity = f"{MC['arrest']}DESTROYED{_N}"
             else:
                 integrity = f"{_DIM}n/a{_N}"
  
             # Functional status
             if malfunctioning:
-                func_status = f"|RMALFUNCTION{_N}"
+                func_status = f"{MC['arrest']}MALFUNCTION{_N}"
             else:
                 func_status = f"{_G}operational{_N}"
  
@@ -417,7 +418,7 @@ def get_scanner_readout(target):
     if destroyed:
         lines.append(_section("ORGAN REPLACEMENT REQUIRED"))
         for label, name in destroyed:
-            lines.append(f"  {_W}{label}{_N}: |Rnon-viable — chrome replacement indicated{_N}")
+            lines.append(f"  {_W}{label}{_N}: {MC['arrest']}non-viable — chrome replacement indicated{_N}")
  
     # ── Footer ───────────────────────────────────────────────────────────
     lines.append("")

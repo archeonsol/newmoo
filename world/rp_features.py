@@ -210,7 +210,13 @@ def get_move_display_for_viewer(character, viewer):
     try:
         from world.rpg.sdesc import character_has_mask_or_helmet
         if character_has_mask_or_helmet(character):
-            return sdesc
+            out = sdesc
+            try:
+                from world.skin_tones import format_ic_move_line
+
+                return format_ic_move_line(character, viewer, out)
+            except Exception:
+                return out
     except Exception:
         pass
     # Append recog in parentheses if viewer has one.
@@ -218,5 +224,12 @@ def get_move_display_for_viewer(character, viewer):
     if hasattr(viewer, "recog") and callable(getattr(viewer.recog, "get", None)):
         recog = (viewer.recog.get(character) or "").strip()
     if recog:
-        return f"{sdesc} ({recog})"
-    return sdesc
+        out = f"{sdesc} ({recog})"
+    else:
+        out = sdesc
+    try:
+        from world.skin_tones import format_ic_move_line
+
+        return format_ic_move_line(character, viewer, out)
+    except Exception:
+        return out

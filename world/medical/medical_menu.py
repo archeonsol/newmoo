@@ -13,17 +13,18 @@ from world.medical import _ensure_medical_db, get_medical_summary, BLEEDING_LEVE
 from world.medical.injuries import compute_effective_bleed_level
 from world.medical.medical_treatment import get_treatment_options, TOOL_SCANNER
 from typeclasses.medical_tools import get_medical_tools_from_inventory
+from world.theme_colors import COMBAT_COLORS as CC, MEDICAL_COLORS as MC
  
 # ── Visual constants ─────────────────────────────────────────────────────────
  
 _W = 58  # inner width
 _BORDER_COLOR = "|x"  # dim grey for frame
-_HEADER_COLOR = "|c"  # cyan for section titles
+_HEADER_COLOR = CC["parry"]  # cyan for section titles
 _LABEL_COLOR = "|w"   # white for field labels
 _DIM = "|x"           # grey for secondary info
-_WARN = "|y"           # yellow for caution
-_CRIT = "|r"           # red for danger
-_GOOD = "|g"           # green for stable/ok
+_WARN = MC["compensated"]           # yellow for caution
+_CRIT = MC["critical"]           # red for danger
+_GOOD = MC["stable"]           # green for stable/ok
 _N = "|n"
  
  
@@ -109,7 +110,7 @@ def _trauma_summary_ic(target):
         "liver": "hepatic", "spleen": "splenic", "stomach": "gastric",
         "kidneys": "renal", "pelvic_organs": "pelvic",
     }
-    severity_words = {1: "bruised", 2: "damaged", 3: "|RDESTROYED|n"}
+    severity_words = {1: "bruised", 2: "damaged", 3: f"{MC['arrest']}DESTROYED{_N}"}
     if organ_damage:
         parts = []
         for organ_key, sev in organ_damage.items():
@@ -150,7 +151,7 @@ def _trauma_summary_ic(target):
         itype = injury.get("infection_type") or "surface_cellulitis"
         ilabel = INFECTION_CATALOG.get(itype, {}).get("label", itype.replace("_", " "))
         part = (injury.get("body_part") or "wound").strip()
-        color = _CRIT if stage >= 3 else "|m"
+        color = _CRIT if stage >= 3 else MC["infection"]
         infected.append(f"{color}{part}: {ilabel}{_N}")
     if infected:
         lines.append(f"  {_LABEL_COLOR}Infection:{_N} " + "; ".join(infected))
@@ -609,7 +610,7 @@ def node_wound_detail(caller, raw_string, **kwargs):
             if inf_stage > 0:
                 inf_words = {1: "localised", 2: "spreading", 3: "systemic", 4: "septic"}
                 inf_word = inf_words.get(min(inf_stage, 4), "infected")
-                color = _CRIT if inf_stage >= 3 else "|m"
+                color = _CRIT if inf_stage >= 3 else MC["infection"]
                 inf_type = inj.get("infection_type") or ""
                 from world.medical.infection import INFECTION_CATALOG
                 inf_label = INFECTION_CATALOG.get(inf_type, {}).get("label", "")

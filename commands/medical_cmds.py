@@ -7,6 +7,8 @@ from commands.inventory_cmds import _obj_in_hands
 from evennia.utils import logger
 from evennia.utils.ansi import strip_ansi
 
+from world.theme_colors import MEDICAL_COLORS as MC
+
 
 def _norm_name(text):
     return " ".join((strip_ansi(text or "")).strip().lower().split())
@@ -247,9 +249,9 @@ class CmdSedate(Command):
             return
         success, msg = table.use_for_sedation(caller, target)
         if success:
-            caller.msg("|g" + msg + "|n")
+            caller.msg(MC["stable"] + msg + "|n")
         else:
-            caller.msg("|r" + (msg or "Sedation failed.") + "|n")
+            caller.msg(MC["critical"] + (msg or "Sedation failed.") + "|n")
 
 
 class CmdWakePatient(Command):
@@ -291,9 +293,9 @@ class CmdWakePatient(Command):
             return
         success, msg = table.wake_patient(caller, target)
         if success:
-            caller.msg("|g" + msg + "|n")
+            caller.msg(MC["stable"] + msg + "|n")
         else:
-            caller.msg("|r" + (msg or "Wake attempt failed.") + "|n")
+            caller.msg(MC["critical"] + (msg or "Wake attempt failed.") + "|n")
 
 
 class CmdStabilize(Command):
@@ -364,13 +366,13 @@ class CmdStabilize(Command):
         success, msg = attempt_stop_bleeding(caller, target, tool_type)
         tool.consume_use()  # consume a use whether the roll succeeds or fails
         if success:
-            caller.msg("|g" + msg + "|n")
+            caller.msg(MC["stable"] + msg + "|n")
             if target != caller:
-                target.msg("|g%s works to control the bleeding: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
+                target.msg(MC["stable"] + "%s works to control the bleeding: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
         else:
-            caller.msg("|r" + msg + "|n")
+            caller.msg(MC["critical"] + msg + "|n")
             if target != caller:
-                target.msg("|r%s tries to stem the bleed: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
+                target.msg(MC["critical"] + "%s tries to stem the bleed: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
 
 
 class CmdApply(Command):
@@ -496,13 +498,13 @@ class CmdApply(Command):
         success, msg = tool.use_for_treatment(caller, target, action_id, target_info)
         tool.consume_use()  # consume a use whether the roll succeeds or fails
         if success:
-            caller.msg("|g" + msg + "|n")
+            caller.msg(MC["stable"] + msg + "|n")
             if target != caller:
-                target.msg("|g%s works on you: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
+                target.msg(MC["stable"] + "%s works on you: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
         else:
-            caller.msg("|r" + msg + "|n")
+            caller.msg(MC["critical"] + msg + "|n")
             if target != caller:
-                target.msg("|r%s tries to help: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
+                target.msg(MC["critical"] + "%s tries to help: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
 
 
 class CmdSurgery(Command):
@@ -628,7 +630,7 @@ class CmdSurgery(Command):
                     )
                 )
                 if getattr(cw, "surgery_requires_sedation", True) and not sedated:
-                    caller.msg("|yPatient is not sedated. Surgery difficulty will be significantly higher.|n")
+                    caller.msg(f"{MC['compensated']}Patient is not sedated. Surgery difficulty will be significantly higher.|n")
                 started, err = start_cybersurgery_install(caller, target, table, cw)
                 if not started:
                     caller.msg(err or "You cannot perform that surgery now.")

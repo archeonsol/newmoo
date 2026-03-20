@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from evennia.utils.search import search_object
 
+from world.theme_colors import COMBAT_COLORS as CC
+
 _ACTIVE_ATTACKERS = {}
 _ACTIVE_DEFENDERS = {}
 
@@ -9,7 +11,7 @@ _ACTIVE_DEFENDERS = {}
 # - base line tint distinguishes combat traffic from normal room text
 # - attacker/defender names are role-colored for quick parsing
 COMBAT_BASE_COLOR = "|b"
-COMBAT_ATTACKER_COLOR = "|R"
+COMBAT_ATTACKER_COLOR = CC["crit"]
 COMBAT_DEFENDER_COLOR = "|Y"
 
 

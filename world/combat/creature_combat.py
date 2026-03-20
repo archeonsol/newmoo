@@ -19,6 +19,7 @@ from world.combat.range_system import (
 )
 from world.combat.cover import try_take_cover, clear_cover_state, set_suppressed
 from world.ammo import is_ranged_weapon
+from world.theme_colors import COMBAT_COLORS as CC
 
 # Seconds per "tick" for creature telegraphs (wind-up then execute).
 CREATURE_TICK_INTERVAL = 3.0
@@ -296,11 +297,11 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
                     continue
                 tname = _combat_display_name(target, v)
                 cname = _combat_display_name(creature, v)
-                v.msg("|cThe blow lands on %s's %s but their armor absorbs it.|n" % (tname, body_part))
+                v.msg(CC["soak"] + "The blow lands on %s's %s but their armor absorbs it.|n" % (tname, body_part))
         if hasattr(creature, "msg"):
-            creature.msg("|cYour strike hits %s's %s — their armor takes it.|n" % (_combat_display_name(target, creature), body_part))
+            creature.msg(CC["soak"] + "Your strike hits %s's %s — their armor takes it.|n" % (_combat_display_name(target, creature), body_part))
         if hasattr(target, "msg"):
-            target.msg("|c%s's strike hits your %s; your armor takes it.|n" % (_combat_display_name(creature, target), body_part))
+            target.msg(CC["soak"] + "%s's strike hits your %s; your armor takes it.|n" % (_combat_display_name(creature, target), body_part))
         return True
 
     # Main hit message (creature move flavor). Skip room if we already used this line as the attack announcement.
@@ -336,7 +337,7 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
                     for v in loc.contents_get(content_type="character"):
                         if v == creature:
                             continue
-                        v.msg("|rThe blow tears into %s's %s — blood splashes everywhere like a waterfall|n" % (_combat_display_name(target, v), body_part))
+                        v.msg(CC["trauma_bleed"] + "The blow tears into %s's %s — blood splashes everywhere like a waterfall|n" % (_combat_display_name(target, v), body_part))
                 trauma_room_sent = True
         except Exception:
             pass
@@ -344,7 +345,7 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
             for v in loc.contents_get(content_type="character"):
                 if v == creature:
                     continue
-                v.msg("|yThe blow lands on %s's %s.|n" % (_combat_display_name(target, v), body_part))
+                v.msg(CC["trauma_bone"] + "The blow lands on %s's %s.|n" % (_combat_display_name(target, v), body_part))
         target.at_damage(creature, damage, body_part=body_part, weapon_key=weapon_key, weapon_obj=None)
 
     return True

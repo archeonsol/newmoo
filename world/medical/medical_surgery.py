@@ -5,6 +5,8 @@ Patient must be lying on an operating table; surgeon runs the surgery <organ> co
 from evennia.utils import delay
 import time
 
+from world.theme_colors import MEDICAL_COLORS as MC
+
 # Delays in seconds (longer than defib: ~5, 12, 20, 28 then finish)
 SURGERY_MSG1, SURGERY_MSG2, SURGERY_MSG3, SURGERY_MSG4 = 5, 12, 20, 28
 
@@ -215,7 +217,7 @@ def _surgery_finish(ids, organ_key):
     success_level, _ = _medicine_roll(caller, max(0, difficulty - table_mod), table_mod)
 
     if success_level == 0:
-        caller.msg("|rYou do what you can. The damage is too deep, or your hands betray you. The organ does not hold. They will need more — or they will not make it.|n")
+        caller.msg(f"{MC['critical']}You do what you can. The damage is too deep, or your hands betray you. The organ does not hold. They will need more — or they will not make it.|n")
         if target != caller and target.location and hasattr(target.location, "contents_get"):
             for v in target.location.contents_get(content_type="character"):
                 if v in (caller, target):
@@ -264,14 +266,14 @@ def _surgery_finish(ids, organ_key):
     target.db.injuries = injuries
     rebuild_derived_trauma_views(target)
 
-    caller.msg("|gThe organ holds. You have done what you could. They may yet live.|n")
+    caller.msg(f"{MC['stable']}The organ holds. You have done what you could. They may yet live.|n")
     if target != caller:
-        target.msg("|gYou drift back. The pain is still there, but the worst has passed. Someone has pulled you through.|n")
+        target.msg(f"{MC['stable']}You drift back. The pain is still there, but the worst has passed. Someone has pulled you through.|n")
         if target.location and hasattr(target.location, "contents_get"):
             for v in target.location.contents_get(content_type="character"):
                 if v in (caller, target):
                     continue
-                v.msg("|g%s finishes the procedure. %s lies still on the table — alive.|n" % (
+                v.msg(f"{MC['stable']}%s finishes the procedure. %s lies still on the table — alive.|n" % (
                     caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name,
                     target.get_display_name(v) if hasattr(target, "get_display_name") else target.name,
                 ))
@@ -310,7 +312,7 @@ def start_surgery_sequence(caller, target, table, organ_key):
         )
     )
     if not sedated and hasattr(caller, "msg"):
-        caller.msg("|yWarning: patient is not sedated. The surgery will be harder.|n")
+        caller.msg(f"{MC['compensated']}Warning: patient is not sedated. The surgery will be harder.|n")
 
     caller.db.surgery_in_progress = True
     ids = (caller.id, target.id, table.id)

@@ -138,6 +138,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         from commands.crafting_cmds import CmdSurvey, CmdRepairArmor, CmdTailor
         from commands.media_cmds import CmdCamera, CmdTuneTelevision, CmdLabel
         from commands.roleplay_cmds import CmdTease, CmdDescribeBodypart, CmdDescribeMeAs, CmdBody, CmdVoice, CmdSmellSet, CmdLanguage, CmdSdesc, CmdPending, CmdLookPlace, CmdTempPlace, CmdSleepPlace, CmdWakeMsg, CmdFlatlineMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch, CmdCount, CmdRecog, CmdMemorize, CmdMemory, CmdSmell
+        from commands.skintone_cmd import CmdSkintone
+        from commands.chromework_cmd import CmdChromework
         from commands.roleplay_cmds import CmdSit, CmdLieOnTable, CmdGetOffTable
         from commands.performance_cmds import CmdPerformance
         from typeclasses.perfume import CmdUsePerfume
@@ -244,6 +246,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdXp())
         self.add(CmdDescribeBodypart())
         self.add(CmdDescribeMeAs())
+        self.add(CmdSkintone())
+        self.add(CmdChromework())
         self.add(CmdBody())
         self.add(CmdVoice())
         self.add(CmdSmellSet())

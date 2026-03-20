@@ -19,6 +19,8 @@ from world.combat.range_system import (
 )
 from world.combat.cover import force_leave_cover
 
+from world.theme_colors import COMBAT_COLORS as CC
+
 # Delay (seconds) between "lunge" and resolution
 GRAPPLE_DELAY_MIN, GRAPPLE_DELAY_MAX = 3.0, 4.0
 
@@ -43,6 +45,44 @@ UNCONSCIOUS_WAKE_MAX = 30   # seconds (endurance scales within this range)
 
 # Unarmed flat bonus for holding/contesting the grapple (third party grab and defender both use it).
 GRAPPLE_UNARMED_BONUS = 5
+
+# Room @lp while KO / OR sedation (must match set_*_unconscious_* assignments below).
+_UNCONSCIOUS_ROOM_POSE_TEXT = "lying here, unconscious"
+
+
+def _room_pose_is_unconscious_placeholder(text):
+    p = (text or "").strip().lower().rstrip(".")
+    return p == _UNCONSCIOUS_ROOM_POSE_TEXT
+
+
+def _snapshot_room_pose_before_unconscious(character):
+    """Never store the unconscious placeholder as 'previous' or wake will restore stuck @lp."""
+    raw = getattr(character.db, "room_pose", None) or "standing here"
+    if _room_pose_is_unconscious_placeholder(raw):
+        return "standing here"
+    return raw
+
+
+def _restore_prev_room_pose_after_unconscious(character):
+    prev_pose = getattr(character.db, "_unconscious_prev_room_pose", None)
+    if prev_pose is None:
+        return
+    if _room_pose_is_unconscious_placeholder(prev_pose):
+        character.db.room_pose = "standing here"
+    else:
+        character.db.room_pose = prev_pose
+    try:
+        character.attributes.remove("_unconscious_prev_room_pose")
+    except Exception:
+        pass
+
+
+def _clear_operating_room_sedation(character):
+    """Clear OR anesthesia flags when medical unconsciousness ends (timer or wake command)."""
+    if not character or not getattr(character, "db", None):
+        return
+    character.db.sedated_until = 0.0
+    character.db.sedated_by = None
 
 
 def _apply_grappled_cmdset(character):
@@ -88,7 +128,7 @@ def _resolve_pair(grappler_id, victim_id):
         return None, None
 
 
-def _validate_grapple_resolution(actor, victim, actor_err="|yThe moment passed; the grapple doesn't connect.|n"):
+def _validate_grapple_resolution(actor, victim, actor_err="" + CC["dodge"] + "The moment passed; the grapple doesn't connect.|n"):
     if not actor or not victim or actor.location != victim.location:
         if hasattr(actor, "msg") and actor:
             actor.msg(actor_err)
@@ -105,21 +145,21 @@ def _resolve_grapple_callback(grappler_id, victim_id):
         return
     if getattr(victim.db, "grappled_by", None) or getattr(grappler.db, "grappling", None):
         if hasattr(grappler, "msg") and grappler:
-            grappler.msg("|yThey're no longer in a position to be grappled.|n")
+            grappler.msg("" + CC["dodge"] + "They're no longer in a position to be grappled.|n")
         return
     success, msg = attempt_grapple(grappler, victim)
     loc = grappler.location
     if success:
         grappler.msg("|g%s|n" % msg)
         if victim != grappler:
-            victim.msg("|r%s has you locked in their grasp! You can try |wresist|n to break free.|n" % _combat_display_name(grappler, victim))
+            victim.msg("" + CC["miss"] + "%s has you locked in their grasp! You can try |wresist|n to break free.|n" % _combat_display_name(grappler, victim))
         if loc and hasattr(loc, "contents_get"):
             for v in loc.contents_get(content_type="character"):
                 if v in (grappler, victim):
                     continue
                 v.msg("%s locks %s in their grasp." % (_combat_display_name(grappler, v), _combat_display_name(victim, v)))
     else:
-        grappler.msg("|r%s|n" % msg)
+        grappler.msg("" + CC["miss"] + "%s|n" % msg)
         victim.msg("|gYou slip free of %s's grab!|n" % _combat_display_name(grappler, victim))
         if loc and hasattr(loc, "contents_get"):
             for v in loc.contents_get(content_type="character"):
@@ -159,9 +199,9 @@ def start_grapple_attempt(grappler, victim):
     # Phase 1: grappler sees lunge; room sees tense + lunge; target sees tense then lunge (per-viewer display names)
     v_name_for_grappler = _combat_display_name(victim, grappler)
     g_name_for_victim = _combat_display_name(grappler, victim)
-    grappler.msg("|rYou lunge towards %s!|n" % v_name_for_grappler)
-    victim.msg("|yYou see %s tense up!|n" % g_name_for_victim)
-    victim.msg("|r%s lunges towards you!|n" % g_name_for_victim)
+    grappler.msg("" + CC["miss"] + "You lunge towards %s!|n" % v_name_for_grappler)
+    victim.msg("" + CC["dodge"] + "You see %s tense up!|n" % g_name_for_victim)
+    victim.msg("" + CC["miss"] + "%s lunges towards you!|n" % g_name_for_victim)
     if grappler.location:
         loc = grappler.location
         if hasattr(loc, "contents_get"):
@@ -190,14 +230,14 @@ def _resolve_third_party_grapple_callback(third_party_id, victim_id):
     grappler = getattr(victim.db, "grappled_by", None)
     if not grappler or getattr(grappler.db, "grappling", None) != victim:
         if hasattr(third_party, "msg") and third_party:
-            third_party.msg("|yThey're no longer in a position to be grappled.|n")
+            third_party.msg("" + CC["dodge"] + "They're no longer in a position to be grappled.|n")
         return
     success, msg_you, msg_grappler, msg_victim, msg_room = attempt_grapple_third_party(third_party, victim)
-    third_party.msg("|g%s|n" % msg_you if success else "|r%s|n" % msg_you)
+    third_party.msg("|g%s|n" % msg_you if success else "" + CC["miss"] + "%s|n" % msg_you)
     if grappler and hasattr(grappler, "msg"):
-        grappler.msg("|r%s|n" % msg_grappler if success else "|y%s|n" % msg_grappler)
+        grappler.msg("" + CC["miss"] + "%s|n" % msg_grappler if success else "" + CC["dodge"] + "%s|n" % msg_grappler)
     if victim and hasattr(victim, "msg"):
-        victim.msg("|y%s|n" % msg_victim)
+        victim.msg("" + CC["dodge"] + "%s|n" % msg_victim)
     if msg_room and third_party.location:
         loc = third_party.location
         if hasattr(loc, "contents_get"):
@@ -235,10 +275,10 @@ def start_grapple_third_party_attempt(third_party, victim):
     v_name_for_g = _combat_display_name(victim, grappler)
     loc = third_party.location
     # Phase 1: lunge messages (third_party = you, victim = target, grappler = current holder)
-    third_party.msg("|rYou lunge towards %s, trying to pull them from %s's grasp!|n" % (v_name_for_tp, g_name_for_tp))
-    victim.msg("|yYou see %s tense up!|n" % tp_name_for_v)
-    victim.msg("|r%s lunges towards you!|n" % tp_name_for_v)
-    grappler.msg("|yYou see %s tense up and lunge towards %s!|n" % (_combat_display_name(third_party, grappler), v_name_for_g))
+    third_party.msg("" + CC["miss"] + "You lunge towards %s, trying to pull them from %s's grasp!|n" % (v_name_for_tp, g_name_for_tp))
+    victim.msg("" + CC["dodge"] + "You see %s tense up!|n" % tp_name_for_v)
+    victim.msg("" + CC["miss"] + "%s lunges towards you!|n" % tp_name_for_v)
+    grappler.msg("" + CC["dodge"] + "You see %s tense up and lunge towards %s!|n" % (_combat_display_name(third_party, grappler), v_name_for_g))
     if loc and hasattr(loc, "contents_get"):
         for v in loc.contents_get(content_type="character"):
             if v in (third_party, victim, grappler):
@@ -298,7 +338,7 @@ def attempt_grapple(grappler, victim):
     victim.db.grappled_by = grappler
     grappler.db.grappling = victim
     set_combat_range(grappler, victim, RANGE_CLINCH)
-    force_leave_cover(victim, reason_msg="|rYou're pulled from cover!|n")
+    force_leave_cover(victim, reason_msg="" + CC["miss"] + "You're pulled from cover!|n")
     str_display = getattr(grappler, "get_display_stat", lambda x: 0)("strength") or 0
     victim.db.grapple_hold_strength = HOLD_STRENGTH_BASE + (str_display * HOLD_STRENGTH_PER_STR // 10)
     for key in ("lying_on_table", "sitting_on", "lying_on"):
@@ -426,7 +466,7 @@ def attempt_grapple_third_party(third_party, victim):
     victim.db.grappled_by = third_party
     third_party.db.grappling = victim
     set_combat_range(third_party, victim, RANGE_CLINCH)
-    force_leave_cover(victim, reason_msg="|rYou're pulled from cover!|n")
+    force_leave_cover(victim, reason_msg="" + CC["miss"] + "You're pulled from cover!|n")
     str_display = getattr(third_party, "get_display_stat", lambda x: 0)("strength") or 0
     victim.db.grapple_hold_strength = HOLD_STRENGTH_BASE + (str_display * HOLD_STRENGTH_PER_STR // 10)
     victim.db.grapple_resist_cooldown = time.time()
@@ -572,13 +612,7 @@ def _wake_unconscious_callback(character_id):
     character.db.unconscious_until = 0.0
     med_active = bool(getattr(character.db, "medical_unconscious", False))
     if not med_active:
-        prev_pose = getattr(character.db, "_unconscious_prev_room_pose", None)
-        if prev_pose is not None:
-            character.db.room_pose = prev_pose
-            try:
-                character.attributes.remove("_unconscious_prev_room_pose")
-            except Exception:
-                pass
+        _restore_prev_room_pose_after_unconscious(character)
         try:
             character.cmdset.remove("UnconsciousCmdSet")
         except Exception:
@@ -614,8 +648,8 @@ def set_unconscious_for_seconds(character, seconds):
     old_until = float(getattr(character.db, "unconscious_until", 0.0) or 0.0)
     character.db.unconscious_until = max(old_until, until)
     if not hasattr(character.db, "_unconscious_prev_room_pose"):
-        character.db._unconscious_prev_room_pose = getattr(character.db, "room_pose", None) or "standing here"
-    character.db.room_pose = "lying here, unconscious"
+        character.db._unconscious_prev_room_pose = _snapshot_room_pose_before_unconscious(character)
+    character.db.room_pose = _UNCONSCIOUS_ROOM_POSE_TEXT
     try:
         character.cmdset.add("commands.default_cmdsets.UnconsciousCmdSet")
     except Exception:
@@ -656,8 +690,8 @@ def set_medical_unconscious_for_seconds(character, seconds):
     old_until = float(getattr(character.db, "medical_unconscious_until", 0.0) or 0.0)
     character.db.medical_unconscious_until = max(old_until, until)
     if not hasattr(character.db, "_unconscious_prev_room_pose"):
-        character.db._unconscious_prev_room_pose = getattr(character.db, "room_pose", None) or "standing here"
-    character.db.room_pose = "lying here, unconscious"
+        character.db._unconscious_prev_room_pose = _snapshot_room_pose_before_unconscious(character)
+    character.db.room_pose = _UNCONSCIOUS_ROOM_POSE_TEXT
     try:
         character.cmdset.add("commands.default_cmdsets.UnconsciousCmdSet")
     except Exception:
@@ -676,13 +710,7 @@ def force_wake_unconscious(character, silent=False):
     character.db.unconscious_until = 0.0
     med_active = bool(getattr(character.db, "medical_unconscious", False))
     if not med_active:
-        prev_pose = getattr(character.db, "_unconscious_prev_room_pose", None)
-        if prev_pose is not None:
-            character.db.room_pose = prev_pose
-            try:
-                character.attributes.remove("_unconscious_prev_room_pose")
-            except Exception:
-                pass
+        _restore_prev_room_pose_after_unconscious(character)
         try:
             character.cmdset.remove("UnconsciousCmdSet")
         except Exception:
@@ -705,15 +733,10 @@ def force_wake_medical_unconscious(character, silent=False):
     was_uncon = bool(getattr(character.db, "medical_unconscious", False))
     character.db.medical_unconscious = False
     character.db.medical_unconscious_until = 0.0
+    _clear_operating_room_sedation(character)
     trauma_active = bool(getattr(character.db, "unconscious", False))
     if not trauma_active:
-        prev_pose = getattr(character.db, "_unconscious_prev_room_pose", None)
-        if prev_pose is not None:
-            character.db.room_pose = prev_pose
-            try:
-                character.attributes.remove("_unconscious_prev_room_pose")
-            except Exception:
-                pass
+        _restore_prev_room_pose_after_unconscious(character)
         try:
             character.cmdset.remove("UnconsciousCmdSet")
         except Exception:
@@ -762,13 +785,8 @@ def reconcile_unconscious_state(character):
         character.db.medical_unconscious_until = 0.0
 
     if not bool(getattr(character.db, "unconscious", False)) and not bool(getattr(character.db, "medical_unconscious", False)):
-        prev_pose = getattr(character.db, "_unconscious_prev_room_pose", None)
-        if prev_pose is not None:
-            character.db.room_pose = prev_pose
-            try:
-                character.attributes.remove("_unconscious_prev_room_pose")
-            except Exception:
-                pass
+        _restore_prev_room_pose_after_unconscious(character)
+        _clear_operating_room_sedation(character)
         try:
             character.cmdset.remove("UnconsciousCmdSet")
         except Exception:
@@ -829,7 +847,7 @@ def grapple_strike(grappler, victim):
                 victim.attributes.remove(key)
         _clear_grappled_cmdset(victim)
         set_unconscious(victim)
-        grappler.msg("|rYou choke %s until they go limp. They're out cold.|n" % v_name_for_g)
+        grappler.msg("" + CC["miss"] + "You choke %s until they go limp. They're out cold.|n" % v_name_for_g)
         if loc and hasattr(loc, "contents_get"):
             for v in loc.contents_get(content_type="character"):
                 if v in (grappler, victim):
@@ -839,8 +857,8 @@ def grapple_strike(grappler, victim):
                 v.msg("%s chokes %s until they go limp. %s is out cold." % (gv, vv, vv))
         return True, "They go limp. Out cold."
 
-    grappler.msg("|rYou tighten your grip; %s gasps and sags.|n" % v_name_for_g)
-    victim.msg("|r%s's grip tightens; you gasp, strength fading.|n" % g_name_for_v)
+    grappler.msg("" + CC["miss"] + "You tighten your grip; %s gasps and sags.|n" % v_name_for_g)
+    victim.msg("" + CC["miss"] + "%s's grip tightens; you gasp, strength fading.|n" % g_name_for_v)
     if loc and hasattr(loc, "contents_get"):
         for v in loc.contents_get(content_type="character"):
             if v in (grappler, victim):

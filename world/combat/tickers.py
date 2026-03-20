@@ -23,14 +23,15 @@ from .instance import ensure_instance, leave_instance
 from .range_system import on_combat_start, on_combat_end
 from .cover import clear_suppression, clear_cover_state, maybe_reset_room_cover, mark_room_combat_activity
 from world.combat.weapon_definitions import COMBAT_READY_ATTACKER_MSG
+from world.theme_colors import COMBAT_COLORS as CC
 
 COMBAT_INTERVAL = 5
 COMBAT_STAGGER = COMBAT_INTERVAL / 2.0
 COMBAT_START_DELAY_MIN, COMBAT_START_DELAY_MAX = 5.0, 6.0
 
-COMBAT_READY_DEFENDER_MSG = "|rYou square up, getting ready to fight.|n"
-COMBAT_READY_ROOM_MSG = "|r{defender} squares up, getting ready to fight.|n"
-COMBAT_READY_ATTACKER_ROOM_MSG = "|r{attacker} gets ready to fight {target}.|n"
+COMBAT_READY_DEFENDER_MSG = CC["miss"] + "You square up, getting ready to fight.|n"
+COMBAT_READY_ROOM_MSG = CC["miss"] + "{defender} squares up, getting ready to fight.|n"
+COMBAT_READY_ATTACKER_ROOM_MSG = CC["miss"] + "{attacker} gets ready to fight {target}.|n"
 
 
 def ticker_id(attacker, defender):
@@ -160,7 +161,7 @@ def defender_first_attack(defender_id, attacker_id):
     except Exception as e:
         tb = traceback.format_exc()
         if hasattr(defender, "msg"):
-            combat_msg(defender, f"|rCombat error: {e}|n")
+            combat_msg(defender, f"{CC['miss']}Combat error: {e}|n")
         try:
             from evennia import logger
 
@@ -181,7 +182,7 @@ def defender_first_attack(defender_id, attacker_id):
             )
         except Exception as e:
             if hasattr(defender, "msg"):
-                combat_msg(defender, f"|rTicker add failed: {e}|n")
+                combat_msg(defender, f"{CC['miss']}Ticker add failed: {e}|n")
 
 
 def _start_first_round(attacker_id, target_id):
@@ -203,7 +204,7 @@ def _start_first_round(attacker_id, target_id):
         execute_combat_turn(attacker, target)
     except Exception as e:
         tb = traceback.format_exc()
-        combat_msg(attacker, f"|rCombat error: {e}|n")
+        combat_msg(attacker, f"{CC['miss']}Combat error: {e}|n")
         try:
             from evennia import logger
 
@@ -226,7 +227,7 @@ def _start_first_round(attacker_id, target_id):
             )
         except Exception as e:
             if hasattr(attacker, "msg"):
-                combat_msg(attacker, f"|rTicker add failed: {e}|n")
+                combat_msg(attacker, f"{CC['miss']}Ticker add failed: {e}|n")
     delay(COMBAT_STAGGER, defender_first_attack, target.id, attacker.id)
 
 
@@ -244,8 +245,8 @@ def start_combat_ticker(attacker, target):
             conn = rig.db.active_connection
             if conn and conn.get('character') == target:
                 # Emergency disconnect - rig safety systems detect combat stress
-                combat_msg(target, "|y*** EMERGENCY DISCONNECT ***|n")
-                combat_msg(target, "|yRig safety protocols detect physical distress - forcing jack-out!|n")
+                combat_msg(target, CC["dodge"] + "*** EMERGENCY DISCONNECT ***|n")
+                combat_msg(target, CC["dodge"] + "Rig safety protocols detect physical distress - forcing jack-out!|n")
                 from typeclasses.matrix.avatars import JACKOUT_EMERGENCY
                 rig.disconnect(target, severity=JACKOUT_EMERGENCY, reason="Combat initiated")
 
@@ -278,7 +279,7 @@ def start_combat_ticker(attacker, target):
             if v is target:
                 combat_msg(
                     v,
-                    "|r{attacker} gets ready to fight you.|n".format(
+                    (CC["miss"] + "{attacker} gets ready to fight you.|n").format(
                         attacker=combat_role_name(attacker, v, role="attacker")
                     )
                 )
@@ -322,10 +323,10 @@ def stop_combat_ticker(attacker, target):
     if not attacker or not target:
         return
     if get_combat_target(attacker) != target:
-        combat_msg(attacker, "|yYou're not attacking them.|n")
+        combat_msg(attacker, CC["dodge"] + "You're not attacking them.|n")
         return
     if not is_attacking_target(attacker, target):
-        combat_msg(attacker, "|yYou're not pressing an attack right now.|n")
+        combat_msg(attacker, CC["dodge"] + "You're not pressing an attack right now.|n")
         return
     id_at = ticker_id(attacker, target)
     if id_at:
@@ -339,11 +340,11 @@ def stop_combat_ticker(attacker, target):
     other_still_attacking = is_attacking_target(target, attacker)
     if reciprocal and not other_still_attacking:
         remove_both_combat_tickers(attacker, target)
-        combat_msg(attacker, "|yNeither of you press the attack and you disengage completely.|n")
-        combat_msg(target, "|yNeither of you press the attack and you disengage completely.|n")
+        combat_msg(attacker, CC["dodge"] + "Neither of you press the attack and you disengage completely.|n")
+        combat_msg(target, CC["dodge"] + "Neither of you press the attack and you disengage completely.|n")
         return
     target_name = combat_role_name(target, attacker, role="defender")
-    combat_msg(attacker, f"|yYou stop attacking at {target_name}.|n")
+    combat_msg(attacker, f"{CC['dodge']}You stop attacking at {target_name}.|n")
     if hasattr(target, "msg"):
         attacker_name = combat_role_name(attacker, target, role="attacker")
-        combat_msg(target, f"|y{attacker_name} stops attacking you.|n")
+        combat_msg(target, f"{CC['dodge']}{attacker_name} stops attacking you.|n")

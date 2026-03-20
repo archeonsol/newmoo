@@ -7,6 +7,8 @@ from __future__ import annotations
 import random
 import time
 
+from world.theme_colors import COMBAT_COLORS as CC
+
 RANGED_COVER_DAMAGE_TYPES = {"penetrating", "burn", "freeze", "arc", "void"}
 
 COVER_EXPOSED = 0
@@ -345,11 +347,11 @@ def _handle_cover_degradation(defender):
             defender.db.cover_quality = quality
             defender.db.cover_hp = hp
             defender.db.cover_flavor_text = _pick_cover_flavor(room, quality, degraded=True)
-            defender.msg("|rYour cover is shot to pieces. You scramble to what's left.|n")
+            defender.msg(CC["miss"] + "Your cover is shot to pieces. You scramble to what's left.|n")
             if defender.db.cover_flavor_text:
                 defender.db.room_pose = f"crouching behind {defender.db.cover_flavor_text}"
         else:
             defender.db.cover_quality = COVER_EXPOSED
             defender.db.cover_hp = 0
-            force_leave_cover(defender, reason_msg="|rThe last of your cover disintegrates. You're exposed.|n")
+            force_leave_cover(defender, reason_msg=CC["miss"] + "The last of your cover disintegrates. You're exposed.|n")
             break

@@ -87,6 +87,10 @@ class CyberwareBase(DefaultObject):
         self.db.chrome_max_hp = int(getattr(self, "chrome_max_hp", 100) or 100)
         self.db.chrome_hp = int(getattr(self.db, "chrome_hp", self.db.chrome_max_hp) or self.db.chrome_max_hp)
         self.db.malfunctioning = bool(getattr(self.db, "malfunctioning", False))
+        # Cosmetic chromework (before install); color applies at render time
+        self.db.custom_color = None
+        self.db.custom_descriptions = {}
+        self.db.customized_by = None
 
     def on_install(self, character):
         """
@@ -102,16 +106,19 @@ class CyberwareBase(DefaultObject):
         if self.buff_class:
             character.buffs.add(self.buff_class)
 
+        from world.skin_tones import get_chrome_desc_text
+
         for part, (mode, text) in self.body_mods.items():
+            desc_text = get_chrome_desc_text(self, part) or text
             if mode == "lock":
                 locked = dict(character.db.locked_descriptions or {})
-                locked[part] = text
+                locked[part] = desc_text
                 character.db.locked_descriptions = locked
             elif mode == "append":
                 appended = dict(character.db.appended_descriptions or {})
                 if part not in appended:
                     appended[part] = {}
-                appended[part][self.typeclass_path] = text
+                appended[part][self.typeclass_path] = desc_text
                 character.db.appended_descriptions = appended
             else:
                 logger.log_warn(

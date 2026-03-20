@@ -59,7 +59,6 @@ def _run_emote(caller, text, improvise=False):
     segments = split_emote_segments(text)
     # Comma-start = no "You " prefix in echo (scene-setting style)
     starts_with_comma = bool(segments and segments[0].strip().startswith(","))
-    emitter_name = caller.get_display_name(caller)
     chars_here = location.filter_visible(location.contents_get(content_type="character"), caller)
     viewers = list(chars_here) + [caller]
     debug_on = getattr(caller.db, "emote_debug", False) and caller.account
@@ -114,16 +113,21 @@ def _run_emote(caller, text, improvise=False):
             # Replace target refs in caller's echo (sdesc/recog from emitter's perspective)
             try:
                 from world.rp_features import get_display_name_for_viewer
+                from world.skin_tones import format_ic_character_name, format_ic_character_name_possessive
             except ImportError:
                 get_display_name_for_viewer = lambda c, v: getattr(c, "key", str(c))
+                format_ic_character_name = lambda c, v, p: p
+                format_ic_character_name_possessive = lambda c, v, p: (p or "") + "'s"
             for matched_name, char in sorted(caller_targets, key=lambda x: -len(x[0])):
                 if char == caller:
                     replacement = "you"
                     full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", "your", full_echo, flags=re.IGNORECASE)
                     full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, full_echo, flags=re.IGNORECASE)
                 else:
-                    replacement = get_display_name_for_viewer(char, caller)
-                    full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", replacement + "'s", full_echo, flags=re.IGNORECASE)
+                    pln = get_display_name_for_viewer(char, caller)
+                    replacement = format_ic_character_name(char, caller, pln)
+                    repl_poss = format_ic_character_name_possessive(char, caller, pln)
+                    full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", repl_poss, full_echo, flags=re.IGNORECASE)
                     full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, full_echo, flags=re.IGNORECASE)
             # Comma-start: no "You " prefix; else template adds "You " and we avoid double capital
             if starts_with_comma:
@@ -158,7 +162,7 @@ def _run_emote(caller, text, improvise=False):
                 except Exception:
                     lang_bits = []
                 targets = find_targets_in_text(third, location.contents_get(content_type="character"), caller)
-                body_part = build_emote_for_viewer(third, viewer, targets, emitter_name)
+                body_part = build_emote_for_viewer(third, viewer, targets)
                 lang_key = get_speaker_language(caller)
                 for ph, quote_text in lang_bits:
                     try:
@@ -181,10 +185,10 @@ def _run_emote(caller, text, improvise=False):
                 logger.log_trace("roleplay_cmds._run_emote voice tag: %s" % e)
             if starts_with_comma:
                 pronoun_key = getattr(caller.db, "pronoun", "neutral")
-                full_body = replace_first_pronoun_with_name(full_body, pronoun_key, emitter_name)
+                full_body = replace_first_pronoun_with_name(full_body, pronoun_key, caller, viewer)
                 msg = full_body
             else:
-                msg = format_emote_message(emitter_name, full_body)
+                msg = format_emote_message(caller, viewer, full_body)
             # Slur emote output for drunk callers (level 2+) for other viewers as well.
             try:
                 from world.rpg.survival import slur_text_if_drunk
@@ -208,7 +212,7 @@ def _run_emote(caller, text, improvise=False):
             except Exception:
                 lang_bits = []
             targets = find_targets_in_text(third, location.contents_get(content_type="character"), caller)
-            body_part = build_emote_for_viewer(third, None, targets, emitter_name)
+            body_part = build_emote_for_viewer(third, None, targets)
             lang_key = get_speaker_language(caller)
             for ph, quote_text in lang_bits:
                 try:
@@ -222,10 +226,10 @@ def _run_emote(caller, text, improvise=False):
         full_body = re.sub(r"\.\s+(\w)", lambda m: ". " + m.group(1).upper(), full_body)
         if starts_with_comma:
             pronoun_key = getattr(caller.db, "pronoun", "neutral")
-            full_body = replace_first_pronoun_with_name(full_body, pronoun_key, emitter_name)
+            full_body = replace_first_pronoun_with_name(full_body, pronoun_key, caller, None)
             room_line = (full_body[0].upper() + full_body[1:]) if full_body and full_body[0].islower() else (full_body or "")
         else:
-            room_line = format_emote_message(emitter_name, full_body)
+            room_line = format_emote_message(caller, None, full_body)
     else:
         room_line = None
     if room_line:
@@ -293,6 +297,15 @@ class CmdDescribeBodypart(Command):
         if part in locked:
             caller.msg(f"|r{part.title()} is locked by installed cyberware and cannot be edited.|n")
             return
+        if not caller.check_permstring("Builder"):
+            from world.skin_tones import strip_color_codes
+
+            stripped = strip_color_codes(rest)
+            if stripped != rest:
+                caller.msg(
+                    "Color codes are not allowed in body descriptions. Your skin tone provides the coloring."
+                )
+            rest = stripped
         caller.get_body_descriptions()
         caller.db.body_descriptions[part] = rest
         caller.msg(f"Set your |w{part}|n description: {rest}")
@@ -319,6 +332,15 @@ class CmdDescribeMeAs(Command):
         if "=" in args:
             _, _, rest = args.partition("=")
             rest = rest.strip()
+            if not caller.check_permstring("Builder"):
+                from world.skin_tones import strip_color_codes
+
+                stripped = strip_color_codes(rest)
+                if stripped != rest:
+                    caller.msg(
+                        "Color codes are not allowed in your general description. Your skin tone provides the coloring."
+                    )
+                rest = stripped
             caller.db.general_desc = rest if rest else "This is a character."
             if rest:
                 caller.msg("When someone looks at you, they will see: |w%s|n" % rest)
@@ -1423,7 +1445,6 @@ class CmdTease(Command):
         room = caller.location
         if not room:
             return
-        doer_name = caller.get_display_name(caller)
         for viewer in room.contents:
             if not hasattr(viewer, "msg"):
                 continue
@@ -1432,7 +1453,9 @@ class CmdTease(Command):
                 if viewer == caller:
                     viewer.msg(body)
                 else:
-                    viewer.msg(format_emote_message(doer_name, body))
+                    from world.rpg.emote import format_emote_message
+
+                    viewer.msg(format_emote_message(caller, viewer, body))
         return
 
 

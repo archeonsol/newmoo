@@ -13,6 +13,8 @@ import time
 from datetime import datetime
 from collections.abc import Mapping
 
+from world.theme_colors import COMM_COLORS as COMM, MEDICAL_COLORS as MC
+
 MAX_GROUPS_PER_HANDSET = 8
 MAX_GROUP_MEMBERS = 20
 GROUP_NAME_MIN_LEN = 2
@@ -71,17 +73,17 @@ def create_group(handset, name: str) -> tuple[bool, str, str | None]:
     """Create a group on this handset. Returns (success, message, group_id)."""
     ok, n = validate_group_name(name)
     if not ok:
-        return False, f"|r{n}|n", None
+        return False, f"{MC['critical']}{n}|n", None
     chats = _groups(handset)
     if len(chats) >= MAX_GROUPS_PER_HANDSET:
-        return False, "|rYou can only be in 8 group chats on one handset.|n", None
+        return False, f"{MC['critical']}You can only be in 8 group chats on one handset.|n", None
     try:
         self_id = handset.get_matrix_id() if hasattr(handset, "get_matrix_id") else None
     except Exception:
         self_id = None
     self_id = normalize_matrix_id(self_id or "")
     if not self_id:
-        return False, "|rNo Matrix ID on this handset.|n", None
+        return False, f"{MC['critical']}No Matrix ID on this handset.|n", None
     gid = generate_group_id(handset)
     now = time.time()
     entry = {
@@ -97,7 +99,7 @@ def create_group(handset, name: str) -> tuple[bool, str, str | None]:
     }
     chats[gid] = entry
     _save_groups(handset, chats)
-    return True, f"|gStarted group|n |w{n}|n |x({gid})|n.", gid
+    return True, f"{MC['stable']}Started group|n {COMM['say']}{n}|n {COMM['timestamp']}({gid})|n.", gid
 
 
 def add_member_to_group(handset, group_id: str, matrix_id: str, role: str | None = None) -> None:
@@ -313,8 +315,8 @@ def format_inbox_line(handset, entry: dict) -> str:
         disp = handset.display_alias_or_id(sender) if hasattr(handset, "display_alias_or_id") else sender
         cnt = len(members) if isinstance(members, list) else 0
         return (
-            f"[{ts}]|c{disp}|n invited you to |w'{name}'|n ({cnt} members). "
-            f"|whs group accept {gid}|n |xor|n |whs group decline {gid}|n."
+            f"[{ts}]{COMM['phone_call']}{disp}|n invited you to {COMM['say']}'{name}'|n ({cnt} members). "
+            f"{COMM['say']}hs group accept {gid}|n {COMM['timestamp']}or|n {COMM['say']}hs group decline {gid}|n."
         )
     gid = entry.get("group")
     if gid:
@@ -322,12 +324,12 @@ def format_inbox_line(handset, entry: dict) -> str:
         gname = (g or {}).get("name", gid) if isinstance(g, dict) else gid
         msg = entry.get("msg", "")
         if entry.get("system"):
-            return f"[{ts}]|x[{gname}]|n {msg}"
+            return f"[{ts}]{COMM['timestamp']}[{gname}]|n {msg}"
         frm = entry.get("from", "")
         display = handset.display_alias_or_id(frm) if hasattr(handset, "display_alias_or_id") else frm
         kind = (entry.get("kind") or "").strip().lower()
         tag = " [voicemail]" if kind == "voicemail" else ""
-        return f"[{ts}]{tag}|c[{gname}]|n {display}: {msg}"
+        return f"[{ts}]{tag}{COMM['phone_call']}[{gname}]|n {display}: {msg}"
     frm = entry.get("from", "")
     msg = entry.get("msg", "")
     display = handset.display_alias_or_id(frm) if hasattr(handset, "display_alias_or_id") else frm
@@ -378,7 +380,7 @@ def send_group_message(sender_handset, group_id: str, message: str) -> tuple[int
     for mid in members:
         entry = {"t": now, "ts": ts, "from": sender, "msg": msg, "group": group_id}
         if mid == sender:
-            line = f"|c[{gname}]|n You: {msg}"
+            line = f"{COMM['phone_call']}[{gname}]|n You: {msg}"
             deliver_texts_entry(sender_handset, entry, line)
             delivered += 1
             continue
@@ -386,7 +388,7 @@ def send_group_message(sender_handset, group_id: str, message: str) -> tuple[int
         if not target or not target.has_network_coverage():
             continue
         disp = target.display_alias_or_id(sender) if hasattr(target, "display_alias_or_id") else sender
-        line = f"|c[{gname}]|n {disp}: {msg}"
+        line = f"{COMM['phone_call']}[{gname}]|n {disp}: {msg}"
         deliver_texts_entry(target, entry, line)
         delivered += 1
     return delivered, total
@@ -434,7 +436,7 @@ def notify_group_members(
         "member_sync": members_norm,
         "admin_sync": admins_norm,
     }
-    line = f"|x[{gname}]|n {system_message}"
+    line = f"{COMM['timestamp']}[{gname}]|n {system_message}"
     for mid in members_norm:
         if mid in exclude_delivery_to:
             continue
@@ -451,19 +453,19 @@ def invite_to_group(sender_handset, group_resolved_id: str, target_matrix_id: st
     target_matrix_id = normalize_matrix_id(target_matrix_id)
     self_id = _self_id(sender_handset)
     if not target_matrix_id or not self_id:
-        return False, "|rInvalid invite target.|n"
+        return False, f"{MC['critical']}Invalid invite target.|n"
     chats = dict(_groups(sender_handset))
     g = chats.get(group_resolved_id)
     if not isinstance(g, dict):
-        return False, "|rNo such group.|n"
+        return False, f"{MC['critical']}No such group.|n"
     members = [normalize_matrix_id(str(m)) for m in (g.get("members") or [])]
     admins = [normalize_matrix_id(str(a)) for a in (g.get("admins") or [])]
     if self_id not in members:
-        return False, "|rYou are not in that group.|n"
+        return False, f"{MC['critical']}You are not in that group.|n"
     if target_matrix_id in members:
-        return False, "|rThey're already in that group.|n"
+        return False, f"{MC['critical']}They're already in that group.|n"
     if len(members) >= MAX_GROUP_MEMBERS:
-        return False, "|rThat group is full.|n"
+        return False, f"{MC['critical']}That group is full.|n"
     pending = list(g.get("pending_invites") or [])
     if target_matrix_id not in pending:
         pending.append(target_matrix_id)
@@ -473,7 +475,7 @@ def invite_to_group(sender_handset, group_resolved_id: str, target_matrix_id: st
 
     target = lookup_handset(target_matrix_id)
     if not target or not target.has_network_coverage():
-        return True, "|yInvite queued on your end; their handset had no signal.|n"
+        return True, f"{MC['compensated']}Invite queued on your end; their handset had no signal.|n"
 
     ts = _ts_display()
     now = time.time()
@@ -491,11 +493,11 @@ def invite_to_group(sender_handset, group_resolved_id: str, target_matrix_id: st
     name = str(g.get("name", ""))
     cnt = len(members)
     line = (
-        f"|c{disp}|n invited you to group chat |w'{name}'|n ({cnt} members). "
-        f"Use |whs group accept {group_resolved_id}|n or |whs group decline {group_resolved_id}|n."
+        f"{COMM['phone_call']}{disp}|n invited you to group chat {COMM['say']}'{name}'|n ({cnt} members). "
+        f"Use {COMM['say']}hs group accept {group_resolved_id}|n {COMM['timestamp']}or|n {COMM['say']}hs group decline {group_resolved_id}|n."
     )
     deliver_texts_entry(target, entry, line)
-    return True, "|gInvite sent.|n"
+    return True, f"{MC['stable']}Invite sent.|n"
 
 
 def remove_invite_entries(handset, group_id: str) -> None:
@@ -521,9 +523,9 @@ def accept_group_invite(handset, group_id: str) -> tuple[bool, str]:
             invite = e
             break
     if not invite:
-        return False, "|rNo pending invite for that group.|n"
+        return False, f"{MC['critical']}No pending invite for that group.|n"
     if len(_groups(handset)) >= MAX_GROUPS_PER_HANDSET:
-        return False, "|rYour handset is already in 8 groups.|n"
+        return False, f"{MC['critical']}Your handset is already in 8 groups.|n"
 
     self_id = _self_id(handset)
     members = [normalize_matrix_id(str(m)) for m in (invite.get("group_invite_members") or [])]
@@ -531,7 +533,7 @@ def accept_group_invite(handset, group_id: str) -> tuple[bool, str]:
     if self_id not in members:
         members.append(self_id)
     if len(members) > MAX_GROUP_MEMBERS:
-        return False, "|rThat group is full.|n"
+        return False, f"{MC['critical']}That group is full.|n"
     name = str(invite.get("group_invite_name", "Group"))
     ok, name_clean = validate_group_name(name)
     if not ok:
@@ -581,7 +583,7 @@ def accept_group_invite(handset, group_id: str) -> tuple[bool, str]:
         pass
     sys_msg = f"{label} joined the group."
     notify_group_members(handset, gid, sys_msg, members, admins, exclude_delivery_to=set())
-    return True, f"|gYou joined|n |w{name_clean}|n."
+    return True, f"{MC['stable']}You joined|n {COMM['say']}{name_clean}|n."
 
 
 def decline_group_invite(handset, group_id: str) -> tuple[bool, str]:
@@ -602,14 +604,14 @@ def decline_group_invite(handset, group_id: str) -> tuple[bool, str]:
         ih = lookup_handset(inviter)
         if ih and ih.has_network_coverage():
             _beep_decline_notice(ih, handset, gname)
-    return True, "|yInvite declined.|n"
+    return True, f"{MC['compensated']}Invite declined.|n"
 
 
 def _beep_decline_notice(inviter_handset, declining_handset, group_name: str) -> None:
     holder = inviter_handset.get_authenticated_user() if hasattr(inviter_handset, "get_authenticated_user") else None
     if holder:
         holder.msg("Your handset beeps.")
-        holder.msg(f"|yYour invite to|n |w'{group_name}'|n |ywas declined.|n")
+        holder.msg(f"{MC['compensated']}Your invite to|n {COMM['say']}'{group_name}'|n {MC['compensated']}was declined.|n")
 
 
 def leave_group(handset, group_id: str) -> tuple[bool, str]:
@@ -617,11 +619,11 @@ def leave_group(handset, group_id: str) -> tuple[bool, str]:
     chats = _groups(handset)
     g = chats.get(group_id)
     if not isinstance(g, dict):
-        return False, "|rYou are not in that group.|n"
+        return False, f"{MC['critical']}You are not in that group.|n"
     members = [normalize_matrix_id(str(m)) for m in (g.get("members") or [])]
     admins = [normalize_matrix_id(str(a)) for a in (g.get("admins") or [])]
     if self_id not in members:
-        return False, "|rYou are not in that group.|n"
+        return False, f"{MC['critical']}You are not in that group.|n"
 
     new_members = [m for m in members if m != self_id]
     new_admins = [a for a in admins if a != self_id]
@@ -648,7 +650,7 @@ def leave_group(handset, group_id: str) -> tuple[bool, str]:
             new_admins,
             group_display_name=gname,
         )
-    return True, "|yYou left the group.|n"
+    return True, f"{MC['compensated']}You left the group.|n"
 
 
 def kick_member(admin_handset, group_id: str, target_mid: str) -> tuple[bool, str]:
@@ -656,15 +658,15 @@ def kick_member(admin_handset, group_id: str, target_mid: str) -> tuple[bool, st
     self_id = _self_id(admin_handset)
     g = _groups(admin_handset).get(group_id)
     if not isinstance(g, dict):
-        return False, "|rNo such group.|n"
+        return False, f"{MC['critical']}No such group.|n"
     admins = [normalize_matrix_id(str(a)) for a in (g.get("admins") or [])]
     if self_id not in admins:
-        return False, "|rOnly an admin can remove someone.|n"
+        return False, f"{MC['critical']}Only an admin can remove someone.|n"
     members = [normalize_matrix_id(str(m)) for m in (g.get("members") or [])]
     if target_mid not in members:
-        return False, "|rThey're not in that group.|n"
+        return False, f"{MC['critical']}They're not in that group.|n"
     if target_mid == self_id:
-        return False, "|rYou can't kick yourself. Use leave.|n"
+        return False, f"{MC['critical']}You can't kick yourself. Use leave.|n"
 
     new_members = [m for m in members if m != target_mid]
     new_admins = [a for a in admins if a != target_mid]
@@ -677,7 +679,7 @@ def kick_member(admin_handset, group_id: str, target_mid: str) -> tuple[bool, st
             holder = victim.get_authenticated_user() if hasattr(victim, "get_authenticated_user") else None
             if holder:
                 holder.msg("Your handset beeps.")
-                holder.msg(f"|rYou were removed from|n |w'{gname}'|n.")
+                holder.msg(f"{MC['critical']}You were removed from|n {COMM['say']}'{gname}'|n.")
 
     chats_ad = dict(_groups(admin_handset))
     g_ad = chats_ad.get(group_id)
@@ -693,7 +695,7 @@ def kick_member(admin_handset, group_id: str, target_mid: str) -> tuple[bool, st
         new_members,
         new_admins,
     )
-    return True, "|gRemoved from the group.|n"
+    return True, f"{MC['stable']}Removed from the group.|n"
 
 
 def promote_member(admin_handset, group_id: str, target_mid: str) -> tuple[bool, str]:
@@ -701,15 +703,15 @@ def promote_member(admin_handset, group_id: str, target_mid: str) -> tuple[bool,
     self_id = _self_id(admin_handset)
     g = _groups(admin_handset).get(group_id)
     if not isinstance(g, dict):
-        return False, "|rNo such group.|n"
+        return False, f"{MC['critical']}No such group.|n"
     admins = [normalize_matrix_id(str(a)) for a in (g.get("admins") or [])]
     if self_id not in admins:
-        return False, "|rOnly an admin can promote someone.|n"
+        return False, f"{MC['critical']}Only an admin can promote someone.|n"
     members = [normalize_matrix_id(str(m)) for m in (g.get("members") or [])]
     if target_mid not in members:
-        return False, "|rThey're not in that group.|n"
+        return False, f"{MC['critical']}They're not in that group.|n"
     if target_mid in admins:
-        return False, "|rThey're already an admin.|n"
+        return False, f"{MC['critical']}They're already an admin.|n"
     new_admins = admins + [target_mid]
     gname = str(g.get("name", group_id))
     disp = admin_handset.display_alias_or_id(target_mid) if hasattr(admin_handset, "display_alias_or_id") else target_mid
@@ -726,32 +728,32 @@ def promote_member(admin_handset, group_id: str, target_mid: str) -> tuple[bool,
         members,
         new_admins,
     )
-    return True, f"|gPromoted|n {disp}."
+    return True, f"{MC['stable']}Promoted|n {disp}."
 
 
 def rename_group_local(handset, group_id: str, new_name: str) -> tuple[bool, str]:
     ok, n = validate_group_name(new_name)
     if not ok:
-        return False, f"|r{n}|n"
+        return False, f"{MC['critical']}{n}|n"
     chats = dict(_groups(handset))
     g = chats.get(group_id)
     if not isinstance(g, dict):
-        return False, "|rNo such group.|n"
+        return False, f"{MC['critical']}No such group.|n"
     g["name"] = n
     chats[group_id] = g
     _save_groups(handset, chats)
-    return True, f"|gRenamed locally to|n |w{n}|n."
+    return True, f"{MC['stable']}Renamed locally to|n {COMM['say']}{n}|n."
 
 
 def set_group_muted(handset, group_id: str, muted: bool) -> tuple[bool, str]:
     chats = dict(_groups(handset))
     g = chats.get(group_id)
     if not isinstance(g, dict):
-        return False, "|rNo such group.|n"
+        return False, f"{MC['critical']}No such group.|n"
     g["muted"] = bool(muted)
     chats[group_id] = g
     _save_groups(handset, chats)
-    return True, "|yNotifications muted for that group.|n" if muted else "|gNotifications on for that group.|n"
+    return True, f"{MC['compensated']}Notifications muted for that group.|n" if muted else f"{MC['stable']}Notifications on for that group.|n"
 
 
 def mark_group_read(handset, group_id: str) -> None:

@@ -319,7 +319,7 @@ def _second_person_form(form_type):
     return "yours"
 
 
-def build_emote_for_viewer(text, viewer, targets, emitter_name):
+def build_emote_for_viewer(text, viewer, targets):
     # 1. Resolve pronouns to referents (last-mentioned character with that pronoun set)
     pronoun_occurrences = _get_pronoun_referents(text, targets)
     # Replace from end to start so positions don't shift; poss_det keeps following word (e.g. " hand")
@@ -333,8 +333,11 @@ def build_emote_for_viewer(text, viewer, targets, emitter_name):
     # 2. Name replacement: each target's matched string -> "you" for viewer, else viewer's display name for that char
     try:
         from world.rp_features import get_display_name_for_viewer
+        from world.skin_tones import format_ic_character_name, format_ic_character_name_possessive
     except ImportError:
         get_display_name_for_viewer = lambda c, v: getattr(c, "key", str(c))
+        format_ic_character_name = lambda c, v, p: p
+        format_ic_character_name_possessive = lambda c, v, p: (p or "") + "'s"
     # Use (?<!\w)(?!\w) instead of \b so "1-average" etc. are replaced correctly (Python \b + digits+hyphen is unreliable)
     for matched_name, char in sorted(targets, key=lambda t: -len(t[0])):
         if char == viewer:
@@ -342,8 +345,10 @@ def build_emote_for_viewer(text, viewer, targets, emitter_name):
             text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", "your", text, flags=re.IGNORECASE)
             text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, text, flags=re.IGNORECASE)
         else:
-            replacement = get_display_name_for_viewer(char, viewer)
-            text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", replacement + "'s", text, flags=re.IGNORECASE)
+            plain = get_display_name_for_viewer(char, viewer)
+            replacement = format_ic_character_name(char, viewer, plain)
+            repl_poss = format_ic_character_name_possessive(char, viewer, plain)
+            text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", repl_poss, text, flags=re.IGNORECASE)
             text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, text, flags=re.IGNORECASE)
     # 3. Replace placeholders: you/your/yours if referent is viewer, else original (suffix " hand" already in text for poss_det)
     for ph, referent, form_type, original, suffix in placeholders:
@@ -355,19 +360,46 @@ def build_emote_for_viewer(text, viewer, targets, emitter_name):
         text = text.replace(ph, replacement)
     return text
 
-def format_emote_message(emitter_name, body):
-    return f"|c{emitter_name}|n {body}"
+def format_emote_message(emitter, viewer, body):
+    """Third-person emote line: emitter name (skin tone or default) + body."""
+    try:
+        from world.rp_features import get_display_name_for_viewer
+        from world.skin_tones import format_ic_character_name
+    except ImportError:
+        plain = getattr(emitter, "key", str(emitter))
+        return f"|c{plain}|n {body}"
+    plain = get_display_name_for_viewer(emitter, viewer)
+    name = format_ic_character_name(emitter, viewer, plain)
+    return f"{name} {body}"
 
 
-def replace_first_pronoun_with_name(body, pronoun_key, emitter_name, color_name=True):
+def replace_first_pronoun_with_name(body, pronoun_key, emitter, viewer, color_name=True):
     """
     Replace the first occurrence of the emitter's third-person pronoun with their name.
     Used for comma-start emotes so the name appears in the pose (e.g. "He looks" -> "TS looks").
     """
     key = (pronoun_key or "neutral").lower()
     sub, poss, obj = PRONOUN_MAP.get(key, PRONOUN_MAP["neutral"])
-    name = f"|c{emitter_name}|n" if color_name else emitter_name
-    name_poss = f"|c{emitter_name}|n's" if color_name else emitter_name + "'s"
+    if not color_name or emitter is None:
+        try:
+            from world.rp_features import get_display_name_for_viewer
+            en = get_display_name_for_viewer(emitter, viewer) if emitter else ""
+        except ImportError:
+            en = getattr(emitter, "key", "") if emitter else ""
+        name = en
+        name_poss = en + "'s"
+    else:
+        try:
+            from world.rp_features import get_display_name_for_viewer
+            from world.skin_tones import format_ic_character_name, format_ic_character_name_possessive
+        except ImportError:
+            en = getattr(emitter, "key", str(emitter))
+            name = f"|c{en}|n"
+            name_poss = f"|c{en}|n's"
+        else:
+            plain = get_display_name_for_viewer(emitter, viewer)
+            name = format_ic_character_name(emitter, viewer, plain)
+            name_poss = format_ic_character_name_possessive(emitter, viewer, plain)
     candidates = []  # (start, end, replacement)
     for pattern, repl in [
         (r"\b" + re.escape(sub) + r"\b", name),
