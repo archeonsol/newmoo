@@ -40,7 +40,7 @@ class MatrixNode(Room):
     default_description = "A vast data space, humming with virtual activity."
 
     # Matrix nodes have a different color scheme to distinguish from meatspace
-    matrix_name_color = "|m"  # purple/magenta for matrix locations
+    matrix_name_color = "|415"  # purple/magenta for matrix locations
 
     def at_object_creation(self):
         """Called when the node is first created."""

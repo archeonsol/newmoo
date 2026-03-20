@@ -74,10 +74,10 @@ class MatrixAvatar(RoleplayMixin, FurnitureMixin, DefaultCharacter):
         The @ prefix signals to observers that this is a Matrix identity.
         """
         if self.db.matrix_alias:
-            return f"@{self.db.matrix_alias}"
+            return f"|431@{self.db.matrix_alias}|n"
         if self.db.matrix_id:
-            return f"@{self.db.matrix_id}"
-        return self.key
+            return f"|431@{self.db.matrix_id}|n"
+        return f"|431{self.key}|n"
 
     def get_controlling_character(self):
         """
