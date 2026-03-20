@@ -643,7 +643,7 @@ def hit_message(
                     "The punch catches your {loc}. You taste blood. Still up.",
                 ),
                 (
-                    "You hit them in the {loc}. They reel but keep their feet.",
+                    "You hit {defender} in the {loc}. They reel but keep their feet.",
                     "|R{attacker}|n's blow finds your {loc}. You blink and stay in it.",
                 ),
             ]

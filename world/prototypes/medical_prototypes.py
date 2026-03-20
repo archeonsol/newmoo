@@ -62,42 +62,49 @@ MED_SURGICAL_KIT = {
 MED_CO_AMOXICLAV = {
     "prototype_key": "MED_CO_AMOXICLAV",
     "prototype_tags": _MED_CONS,
+    "key": "co-amoxiclav",
     "typeclass": "typeclasses.medical_tools.CoAmoxiclav",
 }
 
 MED_CEPHALEXIN = {
     "prototype_key": "MED_CEPHALEXIN",
     "prototype_tags": _MED_CONS,
+    "key": "cephalexin",
     "typeclass": "typeclasses.medical_tools.Cephalexin",
 }
 
 MED_DOXYCYCLINE = {
     "prototype_key": "MED_DOXYCYCLINE",
     "prototype_tags": _MED_CONS,
+    "key": "doxycycline",
     "typeclass": "typeclasses.medical_tools.Doxycycline",
 }
 
 MED_METRONIDAZOLE = {
     "prototype_key": "MED_METRONIDAZOLE",
     "prototype_tags": _MED_CONS,
+    "key": "metronidazole",
     "typeclass": "typeclasses.medical_tools.Metronidazole",
 }
 
 MED_CLINDAMYCIN = {
     "prototype_key": "MED_CLINDAMYCIN",
     "prototype_tags": _MED_CONS,
+    "key": "clindamycin",
     "typeclass": "typeclasses.medical_tools.Clindamycin",
 }
 
 MED_PIP_TAZO = {
     "prototype_key": "MED_PIP_TAZO",
     "prototype_tags": _MED_CONS,
+    "key": "piperacillin/tazobactam",
     "typeclass": "typeclasses.medical_tools.PiperacillinTazobactam",
 }
 
 MED_VANCOMYCIN = {
     "prototype_key": "MED_VANCOMYCIN",
     "prototype_tags": _MED_CONS,
+    "key": "vancomycin",
     "typeclass": "typeclasses.medical_tools.Vancomycin",
 }
 

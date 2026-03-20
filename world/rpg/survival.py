@@ -106,6 +106,8 @@ def apply_drink_effects(character, drink_obj):
     if alcohol_strength <= 0.0:
         thirst = int(getattr(character.db, "thirst", THIRST_MAX) or THIRST_MAX)
         character.db.thirst = _clamp(thirst + thirst_restore, 0, THIRST_MAX)
+        # Mark a recent hydration event for short-term stamina recovery bonuses.
+        character.db.last_hydrating_drink = time.time()
     # Alcohol: no thirst benefit, adjust intoxication
     update_intoxication(character, alcohol_strength)
 
