@@ -60,12 +60,15 @@ def get_containing_room(obj, max_depth=10):
     return None
 
 
-def room_has_network_coverage(room):
+def room_has_network_coverage(room, include_matrix_nodes=False):
     """
     Check if a room has active Matrix network coverage.
 
     Args:
         room: The room object to check
+        include_matrix_nodes (bool): If True, MatrixNode rooms are always
+            considered to have coverage regardless of router state.
+            Defaults to False so callers must opt in explicitly.
 
     Returns:
         bool: True if the room has an active and online network router, False otherwise
@@ -78,6 +81,11 @@ def room_has_network_coverage(room):
     """
     if not room:
         return False
+
+    if include_matrix_nodes:
+        from typeclasses.matrix.rooms import MatrixNode
+        if isinstance(room, MatrixNode):
+            return True
 
     router_dbref = getattr(room.db, 'network_router', None)
     if not router_dbref:
