@@ -34,22 +34,61 @@ ID_COL_WIDTH = 14
 TAG_COL_WIDTH = TABLE_WIDTH - 7 - ID_COL_WIDTH  # see row template: "| {ID:<idw} | {TAG:<tagw} |"
 
 
-def _resolve_meatspace_character(obj) -> Character | None:
+def _resolve_meatspace_character(obj):
     """
-    Resolve the physical `Character` required for meatspace-only networking.
+    Resolve the caller to a character eligible for Network commands.
+
+    Returns the object as-is if it is a physical Character or a MatrixAvatar
+    (avatars are accepted because their signal traces back to their meat body
+    in a dive rig, and coverage is checked via include_matrix_nodes=True).
+
+    Returns None for anything else.
     """
-    if obj is None or not isinstance(obj, Character):
+    from typeclasses.matrix.avatars import MatrixAvatar
+    if obj is None:
         return None
-    return obj
+    if isinstance(obj, Character):
+        return obj
+    if isinstance(obj, MatrixAvatar):
+        return obj
+    return None
 
 
 def _matrix_alias_for_character(character) -> str:
     """
-    Network alias.
+    Network alias for a physical Character or MatrixAvatar.
 
-    Prefers the Matrix account alias (set via handset `set_alias`), and falls
-    back to the character's Matrix ID if no alias is set.
+    For MatrixAvatars, resolves through the rig's get_active_alias() so that
+    jailbroken handset identities are respected — same path used at jack-in.
+    Falls back to db.matrix_alias, then db.matrix_id cached on the avatar.
+
+    For physical Characters, prefers the Matrix account alias (set via
+    handset `set_alias`), falling back to the character's Matrix ID.
     """
+    from typeclasses.matrix.avatars import MatrixAvatar
+
+    if isinstance(character, MatrixAvatar):
+        # Prefer the rig's active alias (handles jailbroken handset spoofing).
+        rig = getattr(character.db, "entry_device", None)
+        if rig and hasattr(rig, "get_active_alias"):
+            try:
+                alias = rig.get_active_alias()
+                if alias:
+                    return f"@{str(alias).lstrip('@')}"
+            except Exception:
+                pass
+
+        # Fall back to values cached on the avatar itself.
+        cached_alias = getattr(character.db, "matrix_alias", None)
+        if cached_alias:
+            return f"@{str(cached_alias).lstrip('@')}"
+        cached_id = getattr(character.db, "matrix_id", None)
+        if cached_id:
+            return str(cached_id)
+
+        return getattr(character, "key", None) or str(character)
+
+    # Physical character path.
     try:
         account_alias = get_alias(character)
     except Exception:
@@ -83,26 +122,122 @@ def _network_tag_for_character(character) -> str:
 
 def _iter_network_physical_characters() -> Iterable[Character]:
     """
-    Yield physical `Character` objects currently eligible for The Network:
+    Yield every physical `Character` currently eligible for The Network:
     their containing room has active Matrix signal coverage.
+
+    Used for `who` listings.  Walks *all* multi-puppet slots per account so
+    that every covered puppet appears as its own entry, regardless of which
+    one the player is currently controlling.
     """
+    from commands.multipuppet_cmds import _multi_puppet_list
+    from evennia.utils.search import search_object
+    from typeclasses.matrix.avatars import MatrixAvatar
+
+    seen_puppet_ids: set[int] = set()
+    seen_account_ids: set[int] = set()
+
     for session in evennia.SESSION_HANDLER.get_sessions():
         if hasattr(session, "logged_in") and not session.logged_in:
             continue
 
         puppet = getattr(session, "puppet", None)
-        if not puppet or not isinstance(puppet, Character) or not hasattr(puppet, "msg"):
+        if not puppet or not isinstance(puppet, (Character, MatrixAvatar)):
             continue
 
-        room = get_containing_room(puppet)
-        if not room_has_network_coverage(room):
+        account = getattr(puppet, "account", None) or getattr(session, "account", None)
+
+        if account is not None:
+            account_id = getattr(account, "id", None) or id(account)
+            if account_id in seen_account_ids:
+                continue
+            seen_account_ids.add(account_id)
+
+            # Yield every covered puppet in this account's multi-puppet set.
+            for oid in _multi_puppet_list(account):
+                try:
+                    result = search_object("#%s" % int(oid))
+                    char = result[0] if result else None
+                except (TypeError, ValueError):
+                    char = None
+                if not char or not isinstance(char, (Character, MatrixAvatar)):
+                    continue
+                char_id = getattr(char, "pk", None) or id(char)
+                if char_id in seen_puppet_ids:
+                    continue
+                seen_puppet_ids.add(char_id)
+                if room_has_network_coverage(get_containing_room(char), include_matrix_nodes=True):
+                    yield char
+        else:
+            # No account (e.g. NPC): direct coverage check on the session puppet.
+            puppet_id = getattr(puppet, "pk", None) or id(puppet)
+            if puppet_id in seen_puppet_ids:
+                continue
+            seen_puppet_ids.add(puppet_id)
+            if room_has_network_coverage(get_containing_room(puppet), include_matrix_nodes=True):
+                yield puppet
+
+
+def _iter_network_sessions_for_broadcast() -> Iterable[Character]:
+    """
+    Yield one Character per logged-in player that should receive a Network
+    broadcast.  A player qualifies if *any* of their multi-puppet characters
+    is in a room with active Matrix signal coverage.
+
+    Deduplicates by account so a player with multiple puppets only receives
+    the message once, delivered through their currently-active session puppet.
+    For characters without an account (e.g. NPCs), falls back to a direct
+    coverage check on the session puppet.
+    """
+    from commands.multipuppet_cmds import _multi_puppet_list
+    from evennia.utils.search import search_object
+    from typeclasses.matrix.avatars import MatrixAvatar
+
+    seen_account_ids: set[int] = set()
+
+    for session in evennia.SESSION_HANDLER.get_sessions():
+        if hasattr(session, "logged_in") and not session.logged_in:
             continue
-        yield puppet
+
+        puppet = getattr(session, "puppet", None)
+        if not puppet or not isinstance(puppet, (Character, MatrixAvatar)) or not hasattr(puppet, "msg"):
+            continue
+
+        account = getattr(puppet, "account", None) or getattr(session, "account", None)
+
+        if account is not None:
+            account_id = getattr(account, "id", None) or id(account)
+            if account_id in seen_account_ids:
+                continue
+            seen_account_ids.add(account_id)
+
+            # Check every puppet in this account's multi-puppet set for coverage.
+            has_coverage = False
+            for oid in _multi_puppet_list(account):
+                try:
+                    result = search_object("#%s" % int(oid))
+                    char = result[0] if result else None
+                except (TypeError, ValueError):
+                    char = None
+                if char and isinstance(char, (Character, MatrixAvatar)):
+                    if room_has_network_coverage(get_containing_room(char), include_matrix_nodes=True):
+                        has_coverage = True
+                        break
+
+            if has_coverage:
+                yield puppet
+        else:
+            # No account (e.g. NPC): direct coverage check on the session puppet.
+            if room_has_network_coverage(get_containing_room(puppet), include_matrix_nodes=True):
+                yield puppet
 
 
 class CmdNetworkWho(ICBaseCommand):
     """
     List characters currently on The Network.
+
+    Usage:
+      who           - list all users on The Network
+      who <filter>  - filter results by alias (e.g. `who ja` matches @jazzy)
     """
 
     key = "who"
@@ -117,29 +252,31 @@ class CmdNetworkWho(ICBaseCommand):
 
         # Caller must have signal to query the network.
         room = get_containing_room(caller)
-        if not room_has_network_coverage(room):
+        if not room_has_network_coverage(room, include_matrix_nodes=True):
             self.msg("|rYour signal is lost. The Network cannot reach you.|n")
             return
 
+        filter_str = (self.args or "").strip().lower()
+
         # Staged "terminal" output for aesthetics.
         caller.msg("|gReceiving data stream...|n")
-        delay(2, self._who_stage2, caller)
+        delay(2, self._who_stage2, caller, filter_str)
 
-    def _who_stage2(self, caller):
+    def _who_stage2(self, caller, filter_str=""):
         caller = _resolve_meatspace_character(caller)
         if not caller:
             return
         caller.msg("|gResolving data...|n")
-        delay(2, self._who_stage3, caller)
+        delay(2, self._who_stage3, caller, filter_str)
 
-    def _who_stage3(self, caller):
+    def _who_stage3(self, caller, filter_str=""):
         caller = _resolve_meatspace_character(caller)
         if not caller:
             return
 
         # Re-check signal at time of display.
         room = get_containing_room(caller)
-        if not room_has_network_coverage(room):
+        if not room_has_network_coverage(room, include_matrix_nodes=True):
             caller.msg("|rYour signal is lost. The Network cannot reach you.|n")
             return
 
@@ -156,22 +293,26 @@ class CmdNetworkWho(ICBaseCommand):
             tag = _network_tag_for_character(controller)
             entries.append((alias, tag))
 
-        # Inject decoys (staff-editable) to emulate a busier global network.
-        decoy_n = random.randint(int(DECOY_COUNT_RANGE[0]), int(DECOY_COUNT_RANGE[1]))
-        entries.extend(
-            generate_decoy_entries(
-                count=decoy_n,
-                id_col_width=ID_COL_WIDTH,
-                tag_col_width=TAG_COL_WIDTH,
-                existing_aliases=[a for a, _t in entries],
+        if not filter_str:
+            decoy_n = random.randint(int(DECOY_COUNT_RANGE[0]), int(DECOY_COUNT_RANGE[1]))
+            entries.extend(
+                generate_decoy_entries(
+                    count=decoy_n,
+                    id_col_width=ID_COL_WIDTH,
+                    tag_col_width=TAG_COL_WIDTH,
+                    existing_aliases=[a for a, _t in entries],
+                )
             )
-        )
+
+        # Apply filter if provided (case-insensitive substring match on alias).
+        if filter_str:
+            entries = [(a, t) for a, t in entries if filter_str in a.lower()]
 
         # --- Visual aesthetic ---
         border = "=" * TABLE_WIDTH
 
         title = "THE NETWORK"
-        subtitle = f"On Network - Active Users [{len(entries)}]"
+        subtitle = f"On Network - Active Users [{len(entries)}]" if not filter_str else f"On Network - Filter: {filter_str} [{len(entries)}]"
 
         # Randomize the order each time.
         random.shuffle(entries)
@@ -231,16 +372,15 @@ class CmdNetworkSend(ICBaseCommand):
             return
 
         room = get_containing_room(sender_controller)
-        if not room_has_network_coverage(room):
+        if not room_has_network_coverage(room, include_matrix_nodes=True):
             self.msg("|rYour signal is lost. You cannot send over The Network.|n")
             return
 
         sender_alias = _matrix_alias_for_character(sender_controller)
-        line = f"|g[{sender_alias}] >> {raw}|n"
+        line = f"|m{sender_alias} |x>>|g {raw}"
 
         sent_anywhere = False
-        for puppet in _iter_network_physical_characters():
-            # If a session has a puppet with msg, we can show it.
+        for puppet in _iter_network_sessions_for_broadcast():
             puppet.msg(line)
             sent_anywhere = True
 
@@ -296,4 +436,3 @@ class CmdNetworkNtag(ICBaseCommand):
 
         caller.db.network_tag = cleaned
         self.msg("|gNetwork tag updated.|n")
-
