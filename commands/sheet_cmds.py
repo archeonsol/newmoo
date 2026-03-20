@@ -76,17 +76,14 @@ class CmdStats(Command):
                 logger.log_trace("sheet_cmds.CmdStats fragmented_at format: %s" % e)
 
         w = 50
-        rule = fade_rule(w - 2, "─")
-        edge = "|x├" + rule + "|n"
-
-        output = "|x┌" + rule + "|n\n"
+        output = "|x┌" + fade_rule(w - 2, "─") + "|n\n"
         output += "|x│|n |R■|n |wSOUL READOUT|n  |x—|n  " + display_name.ljust(18) + "\n"
         output += "|x│|n   |wOrigin|n " + (bg or "Unknown").ljust(w - 18) + "\n"
-        output += edge + "\n"
+        output += "|x├" + fade_rule(w - 2, "─") + "|n\n"
         output += "|x│|n |wXP|n " + str(xp).ljust(w - 10) + "\n"
         if fragmented_str:
             output += "|x│|n |wLast fragmented|n " + fragmented_str.ljust(w - 21) + "\n"
-        output += edge + "\n"
+        output += "|x├" + fade_rule(w - 2, "─") + "|n\n"
         output += "|x│|n |R CORE|n" + " ".ljust(w - 9) + "\n"
 
         base_stat_display = {}
@@ -121,7 +118,7 @@ class CmdStats(Command):
             marker = " |g+|n" if delta > 0 else (" |r-|n" if delta < 0 else "")
             output += "|x│|n   |w{}|n  |R[{}]|n {}{}\n".format(label.ljust(12), letter, adj, marker)
 
-        output += edge + "\n"
+        output += "|x├" + fade_rule(w - 2, "─") + "|n\n"
         output += "|x│|n |R IMPLANTS|n" + " ".ljust(w - 14) + "\n"
 
         base_skill_levels = {}
@@ -158,5 +155,5 @@ class CmdStats(Command):
             marker = " |g+|n" if delta > 0 else (" |r-|n" if delta < 0 else "")
             output += "|x│|n   |w{}|n  |R[{}]|n {}{}\n".format(label.ljust(skill_label_width), letter, adj, marker)
 
-        output += "|x└" + rule + "|n\n"
+        output += "|x└" + fade_rule(w - 2, "─") + "|n\n"
         caller.msg(output)

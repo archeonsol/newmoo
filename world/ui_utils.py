@@ -1,6 +1,7 @@
 """
 Shared UI rendering helpers for text menus/panels.
 """
+import random
 
 
 def fade_rule(
@@ -10,6 +11,7 @@ def fade_rule(
     decay: float = 0.62,
     initial_gap: int = 1,
     gap_growth_every: int = 2,
+    jitter: float = 0.2,
 ) -> str:
     """
     Build a left-to-right fading horizontal rule at a specific width.
@@ -21,6 +23,8 @@ def fade_rule(
         decay: Multiplier applied to each subsequent run length.
         initial_gap: Spaces inserted after the first run.
         gap_growth_every: Increase gap size every N segments.
+        jitter: Random variation applied to each displayed run length, in [0, 1).
+            0.0 is fully deterministic. 0.2 is a reasonable default for variation.
     """
     remaining = max(0, int(width))
     if remaining <= 0:
@@ -32,7 +36,11 @@ def fade_rule(
     step = 0
 
     while remaining > 0:
-        seg = min(run, remaining)
+        if jitter > 0:
+            display_run = max(1, int(run * random.uniform(1 - jitter, 1 + jitter)))
+        else:
+            display_run = run
+        seg = min(display_run, remaining)
         parts.append(ch * seg)
         remaining -= seg
         if remaining <= 0:
