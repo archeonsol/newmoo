@@ -332,7 +332,7 @@ class CmdNetworkWho(ICBaseCommand):
                 tail = fade_rule(TABLE_WIDTH - col_div_pos, "─", start_ratio=0.45, decay=0.55, initial_gap=1, gap_growth_every=2, jitter=0.25)
                 return solid + tail
 
-        title = f"|yTHE NETWORK |x-|g Active Users [{len(entries)}]" if not filter_str else f"On Network - Filter: {filter_str} [{len(entries)}]"
+        title = f"|431THE NETWORK |x-|g Active Users [{len(entries)}]" if not filter_str else f"On Network - Filter: {filter_str} [{len(entries)}]"
 
         # Randomize the order each time.
         random.shuffle(entries)
@@ -349,7 +349,7 @@ class CmdNetworkWho(ICBaseCommand):
         out_lines.append(f"|r{_rule('┠', '╂', heavy=False)}|n")
 
         for alias, tag in entries:
-            out_lines.append(f"|r┃|m {alias:<{ID_COL_WIDTH}} |r┃|n {tag:<{TAG_COL_WIDTH}}")
+            out_lines.append(f"|r┃|431 {alias:<{ID_COL_WIDTH}} |r┃|n {tag:<{TAG_COL_WIDTH}}")
 
         out_lines.append(f"|r{_rule('┗', '┹')}|n")
 
@@ -395,7 +395,7 @@ class CmdNetworkSend(ICBaseCommand):
             return
 
         sender_alias = _matrix_alias_for_character(sender_controller)
-        line = f"|m{sender_alias} |x>>|g {raw}"
+        line = f"|431{sender_alias} |x>>|g {raw}"
 
         sent_anywhere = False
         for puppet in _iter_network_sessions_for_broadcast():
