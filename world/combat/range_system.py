@@ -362,6 +362,11 @@ def _get_character_weapon_key(character):
     wielded_obj = getattr(character.db, "wielded_obj", None)
     if wielded_obj and getattr(wielded_obj, "location", None) == character:
         return getattr(character.db, "wielded", "fists") or "fists"
+    for cw in (getattr(character.db, "cyberware", None) or []):
+        if type(cw).__name__ == "RetractableClaws" and bool(getattr(cw.db, "claws_deployed", False)) and not bool(
+            getattr(cw.db, "malfunctioning", False)
+        ):
+            return "claws"
     return "fists"
 
 

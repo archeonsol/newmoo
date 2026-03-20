@@ -60,7 +60,7 @@ from .instance import get_instance_for, try_auto_switch_target
 
 ROLL_MIN, ROLL_MAX = 1, 100
 
-MELEE_WEAPON_KEYS = ("fists", "knife", "long_blade", "blunt")
+MELEE_WEAPON_KEYS = ("fists", "claws", "knife", "long_blade", "blunt")
 PARRY_PENALTY = 8
 
 _ATTACK_INDICES_DEFAULT = (1, 2, 3)
@@ -76,6 +76,15 @@ def _allowed_attack_indices(skill_level):
     if skill_level >= SKILL_LEVEL_TIER_1:
         return _ATTACK_INDICES_TIER_1
     return _ATTACK_INDICES_DEFAULT
+
+
+def _has_deployed_claws(character):
+    for cw in (getattr(character.db, "cyberware", None) or []):
+        if type(cw).__name__ == "RetractableClaws" and bool(getattr(cw.db, "claws_deployed", False)) and not bool(
+            getattr(cw.db, "malfunctioning", False)
+        ):
+            return True
+    return False
 
 
 def _weapon_attack_table(weapon_key, weapon_obj, skill_level):
@@ -609,6 +618,8 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
     wielded_obj = attacker.db.wielded_obj
     if wielded_obj and wielded_obj.location == attacker:
         weapon_key = attacker.db.wielded
+    elif _has_deployed_claws(attacker):
+        weapon_key = "claws"
     else:
         weapon_key = "fists"
     range_penalty = get_attack_range_penalty(attacker, defender, weapon_key)
@@ -676,15 +687,7 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
         damage = max(1, damage)
         is_critical = result == "CRITICAL"
 
-        claws_deployed = False
-        if weapon_key == "fists":
-            for cw in (getattr(attacker.db, "cyberware", None) or []):
-                if type(cw).__name__ == "RetractableClaws" and bool(getattr(cw.db, "claws_deployed", False)) and not bool(getattr(cw.db, "malfunctioning", False)):
-                    claws_deployed = True
-                    break
-        damage_type = "slashing" if claws_deployed else get_damage_type(weapon_key, wielded_obj)
-        if claws_deployed:
-            damage += 5
+        damage_type = get_damage_type(weapon_key, wielded_obj)
         if damage_type == "arc":
             arc_vuln = getattr(effective_defender, "get_arc_vulnerability", lambda: 0.0)()
             if arc_vuln > 0:
