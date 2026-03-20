@@ -83,9 +83,76 @@ def _network_tag_for_character(character) -> str:
 
 def _iter_network_physical_characters() -> Iterable[Character]:
     """
-    Yield physical `Character` objects currently eligible for The Network:
+    Yield every physical `Character` currently eligible for The Network:
     their containing room has active Matrix signal coverage.
+
+    Used for `who` listings.  Walks *all* multi-puppet slots per account so
+    that every covered puppet appears as its own entry, regardless of which
+    one the player is currently controlling.
     """
+    from commands.multipuppet_cmds import _multi_puppet_list
+    from evennia.utils.search import search_object
+
+    seen_puppet_ids: set[int] = set()
+    seen_account_ids: set[int] = set()
+
+    for session in evennia.SESSION_HANDLER.get_sessions():
+        if hasattr(session, "logged_in") and not session.logged_in:
+            continue
+
+        puppet = getattr(session, "puppet", None)
+        if not puppet or not isinstance(puppet, Character):
+            continue
+
+        account = getattr(puppet, "account", None) or getattr(session, "account", None)
+
+        if account is not None:
+            account_id = getattr(account, "id", None) or id(account)
+            if account_id in seen_account_ids:
+                continue
+            seen_account_ids.add(account_id)
+
+            # Yield every covered puppet in this account's multi-puppet set.
+            for oid in _multi_puppet_list(account):
+                try:
+                    result = search_object("#%s" % int(oid))
+                    char = result[0] if result else None
+                except (TypeError, ValueError):
+                    char = None
+                if not char or not isinstance(char, Character):
+                    continue
+                char_id = getattr(char, "pk", None) or id(char)
+                if char_id in seen_puppet_ids:
+                    continue
+                seen_puppet_ids.add(char_id)
+                if room_has_network_coverage(get_containing_room(char)):
+                    yield char
+        else:
+            # No account (e.g. NPC): direct coverage check on the session puppet.
+            puppet_id = getattr(puppet, "pk", None) or id(puppet)
+            if puppet_id in seen_puppet_ids:
+                continue
+            seen_puppet_ids.add(puppet_id)
+            if room_has_network_coverage(get_containing_room(puppet)):
+                yield puppet
+
+
+def _iter_network_sessions_for_broadcast() -> Iterable[Character]:
+    """
+    Yield one Character per logged-in player that should receive a Network
+    broadcast.  A player qualifies if *any* of their multi-puppet characters
+    is in a room with active Matrix signal coverage.
+
+    Deduplicates by account so a player with multiple puppets only receives
+    the message once, delivered through their currently-active session puppet.
+    For characters without an account (e.g. NPCs), falls back to a direct
+    coverage check on the session puppet.
+    """
+    from commands.multipuppet_cmds import _multi_puppet_list
+    from evennia.utils.search import search_object
+
+    seen_account_ids: set[int] = set()
+
     for session in evennia.SESSION_HANDLER.get_sessions():
         if hasattr(session, "logged_in") and not session.logged_in:
             continue
@@ -94,15 +161,42 @@ def _iter_network_physical_characters() -> Iterable[Character]:
         if not puppet or not isinstance(puppet, Character) or not hasattr(puppet, "msg"):
             continue
 
-        room = get_containing_room(puppet)
-        if not room_has_network_coverage(room):
-            continue
-        yield puppet
+        account = getattr(puppet, "account", None) or getattr(session, "account", None)
+
+        if account is not None:
+            account_id = getattr(account, "id", None) or id(account)
+            if account_id in seen_account_ids:
+                continue
+            seen_account_ids.add(account_id)
+
+            # Check every puppet in this account's multi-puppet set for coverage.
+            has_coverage = False
+            for oid in _multi_puppet_list(account):
+                try:
+                    result = search_object("#%s" % int(oid))
+                    char = result[0] if result else None
+                except (TypeError, ValueError):
+                    char = None
+                if char and isinstance(char, Character):
+                    if room_has_network_coverage(get_containing_room(char)):
+                        has_coverage = True
+                        break
+
+            if has_coverage:
+                yield puppet
+        else:
+            # No account (e.g. NPC): direct coverage check on the session puppet.
+            if room_has_network_coverage(get_containing_room(puppet)):
+                yield puppet
 
 
 class CmdNetworkWho(ICBaseCommand):
     """
     List characters currently on The Network.
+
+    Usage:
+      who           - list all users on The Network
+      who <filter>  - filter results by alias (e.g. `who ja` matches @jazzy)
     """
 
     key = "who"
@@ -121,18 +215,20 @@ class CmdNetworkWho(ICBaseCommand):
             self.msg("|rYour signal is lost. The Network cannot reach you.|n")
             return
 
+        filter_str = (self.args or "").strip().lower()
+
         # Staged "terminal" output for aesthetics.
         caller.msg("|gReceiving data stream...|n")
-        delay(2, self._who_stage2, caller)
+        delay(2, self._who_stage2, caller, filter_str)
 
-    def _who_stage2(self, caller):
+    def _who_stage2(self, caller, filter_str=""):
         caller = _resolve_meatspace_character(caller)
         if not caller:
             return
         caller.msg("|gResolving data...|n")
-        delay(2, self._who_stage3, caller)
+        delay(2, self._who_stage3, caller, filter_str)
 
-    def _who_stage3(self, caller):
+    def _who_stage3(self, caller, filter_str=""):
         caller = _resolve_meatspace_character(caller)
         if not caller:
             return
@@ -156,22 +252,26 @@ class CmdNetworkWho(ICBaseCommand):
             tag = _network_tag_for_character(controller)
             entries.append((alias, tag))
 
-        # Inject decoys (staff-editable) to emulate a busier global network.
-        decoy_n = random.randint(int(DECOY_COUNT_RANGE[0]), int(DECOY_COUNT_RANGE[1]))
-        entries.extend(
-            generate_decoy_entries(
-                count=decoy_n,
-                id_col_width=ID_COL_WIDTH,
-                tag_col_width=TAG_COL_WIDTH,
-                existing_aliases=[a for a, _t in entries],
+        if not filter_str:
+            decoy_n = random.randint(int(DECOY_COUNT_RANGE[0]), int(DECOY_COUNT_RANGE[1]))
+            entries.extend(
+                generate_decoy_entries(
+                    count=decoy_n,
+                    id_col_width=ID_COL_WIDTH,
+                    tag_col_width=TAG_COL_WIDTH,
+                    existing_aliases=[a for a, _t in entries],
+                )
             )
-        )
+
+        # Apply filter if provided (case-insensitive substring match on alias).
+        if filter_str:
+            entries = [(a, t) for a, t in entries if filter_str in a.lower()]
 
         # --- Visual aesthetic ---
         border = "=" * TABLE_WIDTH
 
         title = "THE NETWORK"
-        subtitle = f"On Network - Active Users [{len(entries)}]"
+        subtitle = f"On Network - Active Users [{len(entries)}]" if not filter_str else f"On Network - Filter: {filter_str} [{len(entries)}]"
 
         # Randomize the order each time.
         random.shuffle(entries)
@@ -236,11 +336,10 @@ class CmdNetworkSend(ICBaseCommand):
             return
 
         sender_alias = _matrix_alias_for_character(sender_controller)
-        line = f"|g[{sender_alias}] >> {raw}|n"
+        line = f"|g{sender_alias}|n |x>>|n {raw}"
 
         sent_anywhere = False
-        for puppet in _iter_network_physical_characters():
-            # If a session has a puppet with msg, we can show it.
+        for puppet in _iter_network_sessions_for_broadcast():
             puppet.msg(line)
             sent_anywhere = True
 
@@ -296,4 +395,3 @@ class CmdNetworkNtag(ICBaseCommand):
 
         caller.db.network_tag = cleaned
         self.msg("|gNetwork tag updated.|n")
-
