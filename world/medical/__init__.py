@@ -22,12 +22,12 @@ BODY_PARTS = [
     "left foot", "right foot", "left hand", "right hand",
     "left thigh", "right thigh", "left arm", "right arm",
     "left shoulder", "right shoulder", "torso", "back", "abdomen",
-    "groin", "neck", "face", "left eye", "right eye", "head",
+    "groin", "neck", "left ear", "right ear", "face", "left eye", "right eye", "head",
 ]
 
 # Display order: head to feet (for describe_bodypart usage and body listing)
 BODY_PARTS_HEAD_TO_FEET = [
-    "head", "face", "left eye", "right eye", "neck",
+    "head", "face", "left eye", "right eye", "left ear", "right ear", "neck",
     "left shoulder", "right shoulder", "torso", "back", "abdomen",
     "left arm", "right arm", "left hand", "right hand",
     "groin", "left thigh", "right thigh", "left foot", "right foot",
@@ -41,6 +41,10 @@ BODY_PART_ALIASES = {
     "larm": "left arm", "rarm": "right arm",
     "lshoulder": "left shoulder", "rshoulder": "right shoulder",
     "leye": "left eye", "reye": "right eye",
+    "lear": "left ear", "rear": "right ear",
+    "earl": "left ear", "earr": "right ear",
+    "l ear": "left ear", "r ear": "right ear",
+    "leftear": "left ear", "rightear": "right ear",
 }
 
 # -----------------------------------------------------------------------------
@@ -51,6 +55,8 @@ BODY_PART_ORGANS = {
     "face": ["eyes"],
     "left eye": ["eyes"],
     "right eye": ["eyes"],
+    "left ear": [],
+    "right ear": [],
     "neck": ["throat", "carotid"],
     "left shoulder": ["collarbone_area"],
     "right shoulder": ["collarbone_area"],
@@ -103,6 +109,8 @@ BODY_PART_BONES = {
     "face": ["jaw", "nose"],
     "left eye": [],
     "right eye": [],
+    "left ear": [],
+    "right ear": [],
     "neck": ["cervical_spine"],
     "left shoulder": ["clavicle", "scapula"],
     "right shoulder": ["clavicle", "scapula"],
@@ -180,6 +188,8 @@ BODY_PART_BLEED = {
     "face": (0.55, "arterial"),    # facial artery, nose
     "left eye": (0.60, "arterial"),
     "right eye": (0.60, "arterial"),
+    "left ear": (0.44, "arterial"),
+    "right ear": (0.44, "arterial"),
     "neck": (0.72, "arterial"),    # carotid/jugular - life-threatening
     "left shoulder": (0.28, "venous"),
     "right shoulder": (0.28, "venous"),
@@ -425,6 +435,22 @@ def apply_trauma(character, body_part, damage, is_critical=False, weapon_key="fi
     compute_effective_bleed_level(character)
     result = {"organ": None, "fracture": None, "bleeding": None}
 
+    def _apply_cyberware_damage(cw, amount):
+        """Apply deterministic durability loss and handle malfunction transitions."""
+        amount = int(amount or 0)
+        if amount <= 0 or bool(getattr(cw.db, "malfunctioning", False)):
+            return
+        chrome_hp = getattr(cw.db, "chrome_hp", None)
+        if chrome_hp is None:
+            chrome_hp = int(getattr(cw, "chrome_max_hp", 100) or 100)
+            cw.db.chrome_hp = chrome_hp
+            cw.db.chrome_max_hp = chrome_hp
+        cw.db.chrome_hp = max(0, int(chrome_hp) - amount)
+        if cw.db.chrome_hp <= 0:
+            cw.db.malfunctioning = True
+            if getattr(cw, "buff_class", None):
+                character.buffs.remove(cw.buff_class.key)
+
     # Chrome/missing parts have no biological tissue — no biological trauma.
     part_state = get_part_state(character, body_part or "torso")
     if part_state == "missing":
@@ -443,7 +469,7 @@ def apply_trauma(character, body_part, damage, is_critical=False, weapon_key="fi
                     chrome_hp = int(getattr(cw, "chrome_max_hp", 100) or 100)
                     cw.db.chrome_hp = chrome_hp
                     cw.db.chrome_max_hp = chrome_hp
-                cw.db.chrome_hp = max(0, int(chrome_hp) - effective_damage)
+                _apply_cyberware_damage(cw, effective_damage)
                 result["chrome_damage"] = (cw, effective_damage, cw.db.chrome_hp)
                 # Memory core instability under heavy damage can trigger flashback episodes.
                 if type(cw).__name__ == "MemoryCore":
@@ -461,12 +487,17 @@ def apply_trauma(character, body_part, damage, is_critical=False, weapon_key="fi
                                 character.msg("|mA vivid memory loop hijacks your thoughts.|n")
                 if cw.db.chrome_hp <= 0:
                     result["chrome_destroyed"] = cw
-                    cw.db.malfunctioning = True
-                    if getattr(cw, "buff_class", None):
-                        character.buffs.remove(cw.buff_class.key)
                     # Cardiopulmonary failure cascades into immediate stamina collapse.
                     if type(cw).__name__ == "CardioPulmonaryBooster":
                         character.db.current_stamina = 0
+        if damage_type == "arc" and effective_damage >= 12:
+            neural_chrome = [
+                cw for cw in (character.db.cyberware or [])
+                if getattr(cw, "damage_model", "none") == "arc_only"
+                and not bool(getattr(cw.db, "malfunctioning", False))
+            ]
+            for cw in neural_chrome:
+                _apply_cyberware_damage(cw, int(effective_damage * 0.25))
         return result
 
     damage_type = get_damage_type(weapon_key, weapon_obj)
@@ -476,6 +507,14 @@ def apply_trauma(character, body_part, damage, is_critical=False, weapon_key="fi
             apply_emp_effect(character, damage)
         except Exception:
             pass
+        if damage >= 12:
+            neural_chrome = [
+                cw for cw in (character.db.cyberware or [])
+                if getattr(cw, "damage_model", "none") == "arc_only"
+                and not bool(getattr(cw.db, "malfunctioning", False))
+            ]
+            for cw in neural_chrome:
+                _apply_cyberware_damage(cw, int(damage * 0.25))
         # Arc-specific neural side effects for certain implants.
         for cw in (character.db.cyberware or []):
             if getattr(cw.db, "malfunctioning", False):
@@ -552,6 +591,17 @@ def apply_trauma(character, body_part, damage, is_critical=False, weapon_key="fi
         else:
             character.db.organ_damage[organ] = new_severity
         result["organ"] = (organ, new_severity)
+        collateral_chrome = []
+        for cw in get_cyberware_for_part(character, body_part or "torso"):
+            if getattr(cw, "damage_model", "none") != "collateral":
+                continue
+            mods = getattr(cw, "body_mods", None) or {}
+            mode_and_text = mods.get(body_part or "torso")
+            if not mode_and_text or mode_and_text[0] != "append":
+                continue
+            collateral_chrome.append(cw)
+        for cw in collateral_chrome:
+            _apply_cyberware_damage(cw, int(damage * 0.3))
 
     # --- Fracture: blunt favoured; blades/guns less likely ---
     base_fracture = 0.04 + damage / 80 + (0.12 if is_critical else 0)

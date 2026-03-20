@@ -25,6 +25,7 @@ from world.armor import (
     get_armor_protection_for_location,
     compute_armor_reduction,
     degrade_armor,
+    degrade_cyberware_armor,
 )
 
 try:
@@ -692,12 +693,14 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
             arc_vuln = getattr(effective_defender, "get_arc_vulnerability", lambda: 0.0)()
             if arc_vuln > 0:
                 damage = int(damage * (1.0 + arc_vuln))
-        total_prot, armor_pieces = get_armor_protection_for_location(effective_defender, body_part, damage_type)
+        total_prot, armor_pieces, cyberware_pieces = get_armor_protection_for_location(effective_defender, body_part, damage_type)
         reduction, absorbed_fully = compute_armor_reduction(total_prot, damage)
         damage = max(0, damage - reduction)
         damage = apply_cover_damage_reduction(attacker, effective_defender, damage, damage_type)
         if armor_pieces and reduction > 0:
             degrade_armor(armor_pieces, damage_type, reduction)
+        if cyberware_pieces and reduction > 0:
+            degrade_cyberware_armor(effective_defender, cyberware_pieces, reduction)
 
         if absorbed_fully and damage <= 0:
             _emit_soak(attacker, defender, effective_defender, body_part, weapon_key, wielded_obj, move_name, hit_shield)

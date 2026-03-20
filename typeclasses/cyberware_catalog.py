@@ -133,12 +133,16 @@ class ChromeEyeRight(CyberwareBase):
 
 class AudioImplant(CyberwareBase):
     buff_class = AudioImplantBuff
+    damage_model = "arc_only"
     surgery_category = "neural"
     surgery_narrative_key = "audio_implant"
     surgery_difficulty = 14
     surgery_blood_loss = "minor"
     chrome_max_hp = 25
-    body_mods = {"head": ("append", "A thin line of chrome traces the curve behind the ear and vanishes into the hairline. The metal is flush with the skin, almost invisible unless the light catches it at the right angle.")}
+    body_mods = {
+        "left ear": ("append", "A thin line of chrome traces the curve behind the left ear and vanishes into the hairline. The metal is flush with the skin, almost invisible unless the light catches it at the right angle."),
+        "right ear": ("append", "A matching chrome trace arcs behind the right ear, sitting almost flush with the skin except where the light catches its seam."),
+    }
 
 
 class OlfactoryBooster(CyberwareBase):
@@ -153,6 +157,7 @@ class OlfactoryBooster(CyberwareBase):
 
 class SubdermalPlating(CyberwareBase):
     buff_class = SubdermalPlatingBuff
+    damage_model = "armor"
     surgery_category = "subdermal"
     surgery_narrative_key = "subdermal_plating"
     surgery_difficulty = 18
@@ -169,6 +174,7 @@ class SubdermalPlating(CyberwareBase):
 
 class DermalWeave(CyberwareBase):
     buff_class = DermalWeaveBuff
+    damage_model = "armor"
     surgery_category = "subdermal"
     surgery_narrative_key = "dermal_weave"
     surgery_difficulty = 14
@@ -194,6 +200,7 @@ class BoneLacing(CyberwareBase):
 
 class SkinWeave(CyberwareBase):
     buff_class = SkinWeaveBuff
+    damage_model = "armor"
     surgery_category = "subdermal"
     surgery_narrative_key = "skin_weave"
     surgery_difficulty = 12
@@ -275,6 +282,7 @@ class SkinWeave(CyberwareBase):
 
 class WiredReflexes(CyberwareBase):
     buff_class = WiredReflexesBuff
+    damage_model = "arc_only"
     surgery_category = "neural"
     surgery_narrative_key = "wired_reflexes"
     surgery_difficulty = 25
@@ -287,15 +295,17 @@ class WiredReflexes(CyberwareBase):
 
 class SynapticAccelerator(CyberwareBase):
     buff_class = SynapticAcceleratorBuff
+    damage_model = "arc_only"
     surgery_category = "neural"
     surgery_narrative_key = "synaptic_accelerator"
     surgery_difficulty = 28
     chrome_max_hp = 30
-    body_mods = {"head": ("append", "A small chrome port is recessed behind the left ear, barely larger than a coin. The skin around it is slightly raised, the scar tissue faded to a pale ridge.")}
+    body_mods = {"left ear": ("append", "A small chrome port is recessed behind the left ear, barely larger than a coin. The skin around it is slightly raised, the scar tissue faded to a pale ridge.")}
 
 
 class PainEditor(CyberwareBase):
     buff_class = PainEditorBuff
+    damage_model = "arc_only"
     surgery_category = "neural"
     surgery_narrative_key = "pain_editor"
     surgery_difficulty = 18
@@ -305,6 +315,7 @@ class PainEditor(CyberwareBase):
 
 class ThreatAssessment(CyberwareBase):
     buff_class = ThreatAssessmentBuff
+    damage_model = "arc_only"
     surgery_category = "neural"
     surgery_narrative_key = "threat_assessment"
     surgery_difficulty = 22
@@ -315,6 +326,7 @@ class ThreatAssessment(CyberwareBase):
 
 class MemoryCore(CyberwareBase):
     buff_class = MemoryCoreBuff
+    damage_model = "arc_only"
     surgery_category = "neural"
     surgery_narrative_key = "memory_core"
     surgery_difficulty = 20
@@ -324,6 +336,7 @@ class MemoryCore(CyberwareBase):
 
 class CardioPulmonaryBooster(CyberwareBase):
     buff_class = CardioPulmonaryBoosterBuff
+    damage_model = "collateral"
     surgery_category = "implant"
     surgery_narrative_key = "cardiopulmonary_booster"
     surgery_difficulty = 22
@@ -334,6 +347,7 @@ class CardioPulmonaryBooster(CyberwareBase):
 
 class AdrenalPump(CyberwareBase):
     buff_class = AdrenalPumpBuff
+    damage_model = "collateral"
     surgery_category = "implant"
     surgery_narrative_key = "adrenal_pump"
     surgery_difficulty = 16
@@ -344,6 +358,7 @@ class AdrenalPump(CyberwareBase):
 
 class ToxinFilter(CyberwareBase):
     buff_class = ToxinFilterBuff
+    damage_model = "collateral"
     surgery_category = "implant"
     surgery_narrative_key = "toxin_filter"
     surgery_difficulty = 15
@@ -353,6 +368,7 @@ class ToxinFilter(CyberwareBase):
 
 class MetabolicRegulator(CyberwareBase):
     buff_class = MetabolicRegulatorBuff
+    damage_model = "collateral"
     surgery_category = "implant"
     surgery_narrative_key = "metabolic_regulator"
     surgery_difficulty = 14
@@ -362,6 +378,7 @@ class MetabolicRegulator(CyberwareBase):
 
 class HemostaticRegulator(CyberwareBase):
     buff_class = HemostaticRegulatorBuff
+    damage_model = "collateral"
     surgery_category = "implant"
     surgery_narrative_key = "hemostatic_regulator"
     surgery_difficulty = 16
@@ -392,6 +409,7 @@ class GripPads(CyberwareBase):
 
 class TargetingReticle(CyberwareBase):
     buff_class = TargetingReticleBuff
+    damage_model = "arc_only"
     surgery_category = "neural"
     surgery_narrative_key = "targeting_reticle"
     surgery_difficulty = 16
@@ -416,6 +434,7 @@ class TargetingReticle(CyberwareBase):
 
 class SubvocalComm(CyberwareBase):
     buff_class = SubvocalCommBuff
+    damage_model = "arc_only"
     surgery_category = "implant"
     surgery_narrative_key = "subvocal_comm"
     surgery_difficulty = 13
@@ -426,6 +445,7 @@ class SubvocalComm(CyberwareBase):
 
 class AdrenalineShunt(CyberwareBase):
     buff_class = AdrenalineShuntBuff
+    damage_model = "collateral"
     surgery_category = "implant"
     surgery_narrative_key = "adrenaline_shunt"
     surgery_difficulty = 14

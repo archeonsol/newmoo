@@ -298,6 +298,14 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         Return dict of body part -> description string (for appearance/look).
         Full pipeline: naked → missing → cyberware → injuries → treatment → clothing.
         """
+        current = dict(getattr(self.db, "body_descriptions", None) or {})
+        merged = False
+        for part in _body_parts():
+            if part not in current:
+                current[part] = ""
+                merged = True
+        if merged:
+            self.db.body_descriptions = current
         from world.appearance import get_effective_body_descriptions
         return get_effective_body_descriptions(self)
 

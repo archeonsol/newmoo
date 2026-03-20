@@ -35,6 +35,7 @@ class CyberwareBase(DefaultObject):
             "abdomen": ("append", "Faint lines of subdermal plating are visible."),
         }
         armor_values = {}          # Optional. {damage_type: protection_score}
+        damage_model = "none"      # Optional durability routing model.
 
     mode "lock"   — fully replaces the character's naked for that body part.
                     The user cannot edit it while installed.
@@ -53,6 +54,12 @@ class CyberwareBase(DefaultObject):
     body_mods = {}
     armor_values = {}  # {damage_type: protection_score} for passive resistance
     vulnerabilities = {}  # {"arc": 0.0, ...}
+    # Deterministic combat durability routing:
+    # - "armor":      loses chrome_hp when it absorbs incoming damage.
+    # - "collateral": loses chrome_hp from organ-trauma collateral on its body part.
+    # - "arc_only":   loses chrome_hp only from high arc spikes.
+    # - "none":       no direct combat chrome_hp routing.
+    damage_model = "none"
     required_implants = []  # class names that must already be installed
     required_implants_any = []  # at least one of these class names must be installed
     conflicts_with = []  # class names that cannot coexist
