@@ -8,9 +8,11 @@ Each layer can be extended independently. The pipeline order:
   3. Untreated injury lines (from db.injuries via get_untreated_injuries_by_part)
   4. Treatment descriptors (bandage / splint / stabilized organ)
   5. Worn clothing (outermost non-see-thru wins, replaces all above)
+
+Skin tone and chrome colors are applied at render time (see world.skin_tones).
 """
 
-from world.body import BODY_PART_GROUPS, is_part_present
+from world.body import BODY_PART_GROUPS, get_part_state, is_part_present
 from world.medical import (
     BODY_PARTS,
     BODY_PART_BONES,
@@ -89,7 +91,27 @@ def _stabilized_organ_desc(part, poss):
     return f"{poss.capitalize()} {part} shows signs of recent surgery."
 
 
-# ── Appearance pipeline ──────────────────────────────────────────────────
+def _treatment_segments(part, character, bandaged, splinted_bones, stabilized_organs, poss):
+    """Return list of treatment descriptor strings for this part."""
+    segs = []
+    if part in bandaged:
+        segs.append(_bandaged_desc(part, poss))
+    part_bones = BODY_PART_BONES.get(part, [])
+    if any(b in splinted_bones for b in part_bones):
+        segs.append(_splinted_desc(part, poss))
+    part_organs = BODY_PART_ORGANS.get(part, [])
+    if any(org in stabilized_organs for org in part_organs):
+        segs.append(_stabilized_organ_desc(part, poss))
+    return segs
+
+
+def _injury_segment(character, part, untreated_by_part):
+    part_injuries = untreated_by_part.get(part) or []
+    if not part_injuries:
+        return ""
+    injury_line = format_body_part_injuries(character, part, part_injuries)
+    return (injury_line or "").strip()
+
 
 def get_effective_body_descriptions(character):
     """
@@ -98,15 +120,20 @@ def get_effective_body_descriptions(character):
     Pipeline per part:
       1. Start with naked text (db.body_descriptions)
       2. If part is missing, keep stump text and skip cyberware/injury/treatment
-      3. Cyberware lock replaces naked; cyberware append adds after
+      3. Cyberware lock replaces naked; append adds after
       4. Untreated injury lines
       5. Treatment descriptors (bandaged/splinted/organ-stabilized)
-      6. Worn clothing overlay (outermost non-see-thru wins)
+      6. Worn clothing overlay (outermost non-see-thru wins) — not skin-toned
     """
     from world.clothing import get_worn_items
     from world.rpg.crafting import substitute_clothing_desc
+    from world.skin_tones import (
+        apply_skin_tone_to_bio_text,
+        cyberware_by_typeclass_path,
+        locking_cyberware_for_part,
+        render_chrome_description,
+    )
 
-    result = {}
     raw_body = getattr(character.db, "body_descriptions", None) or {}
     untreated_by_part = get_untreated_injuries_by_part(character)
     bandaged = getattr(character.db, "bandaged_body_parts", None) or []
@@ -116,43 +143,72 @@ def get_effective_body_descriptions(character):
     locked = getattr(character.db, "locked_descriptions", None) or {}
     appended = getattr(character.db, "appended_descriptions", None) or {}
 
+    result = {}
+
     for part in BODY_PARTS:
-        text = (raw_body.get(part) or "").strip()
         missing = not is_part_present(character, part)
+        base_naked = (raw_body.get(part) or "").strip()
 
-        if not missing:
-            # Layer 2: Cyberware — locked replaces user text entirely; appended adds.
-            if part in locked:
-                text = locked[part]
+        if missing:
+            result[part] = base_naked
+            continue
+
+        injury_seg = _injury_segment(character, part, untreated_by_part)
+        treat_segs = _treatment_segments(part, character, bandaged, splinted_bones, stabilized_organs, poss)
+
+        if part in locked:
+            cw = locking_cyberware_for_part(character, part)
+            chrome_block = render_chrome_description(cw, part) if cw else ""
+            if not chrome_block.strip():
+                lt = (locked.get(part) or "").strip()
+                from world.skin_tones import CHROME_DESC_COLOR
+                if lt:
+                    chrome_block = f"{CHROME_DESC_COLOR}{lt}|n"
+            bio_bits = []
+            if injury_seg:
+                bio_bits.append(injury_seg)
+            bio_bits.extend(treat_segs)
+            bio_joined = " ".join(bio_bits).strip()
+            if bio_joined:
+                bio_colored = apply_skin_tone_to_bio_text(character, bio_joined)
+                result[part] = f"{chrome_block} {bio_colored}".strip() if chrome_block else bio_colored
             else:
-                part_appends = appended.get(part, {})
-                if part_appends:
-                    text = (text + " " + " ".join(part_appends.values())).strip()
+                result[part] = chrome_block
+            continue
 
-            # Layer 3: Untreated injury lines
-            part_injuries = untreated_by_part.get(part) or []
-            if part_injuries:
-                injury_line = format_body_part_injuries(character, part, part_injuries)
-                if injury_line:
-                    text = (text + " " + injury_line).strip()
+        part_appends = appended.get(part, {}) or {}
+        chrome_fragments = []
+        for path in part_appends:
+            cw = cyberware_by_typeclass_path(character, path)
+            if cw:
+                frag = render_chrome_description(cw, part)
+            else:
+                from world.skin_tones import CHROME_DESC_COLOR
+                txt = (part_appends.get(path) or "").strip()
+                frag = f"{CHROME_DESC_COLOR}{txt}|n" if txt else ""
+            if frag:
+                chrome_fragments.append(frag)
 
-            # Layer 4: Treatment descriptors
-            if part in bandaged:
-                text = (text + " " + _bandaged_desc(part, poss)).strip()
-            part_bones = BODY_PART_BONES.get(part, [])
-            if any(b in splinted_bones for b in part_bones):
-                text = (text + " " + _splinted_desc(part, poss)).strip()
-            part_organs = BODY_PART_ORGANS.get(part, [])
-            if any(org in stabilized_organs for org in part_organs):
-                text = (text + " " + _stabilized_organ_desc(part, poss)).strip()
+        bio_bits = [base_naked] if base_naked else []
+        if injury_seg:
+            bio_bits.append(injury_seg)
+        bio_bits.extend(treat_segs)
+        bio_plain = " ".join(bio_bits).strip()
 
-        result[part] = text
+        if chrome_fragments:
+            bio_colored = apply_skin_tone_to_bio_text(character, bio_plain) if bio_plain else ""
+            chrome_joined = " ".join(chrome_fragments)
+            if bio_colored:
+                result[part] = f"{bio_colored} {chrome_joined}".strip()
+            else:
+                result[part] = chrome_joined
+        else:
+            result[part] = apply_skin_tone_to_bio_text(character, bio_plain) if bio_plain else ""
 
-    # Layer 5: Clothing overlay — outermost item wins for each covered part.
+    # Layer 5: Clothing — replace covered parts with uncolored worn description
     worn = get_worn_items(character)
     for item in reversed(worn):
         covered = getattr(item.db, "covered_parts", None) or []
-        # Only use worn_desc; do NOT fall back to db.desc (ground description).
         raw_desc = (getattr(item.db, "worn_desc", None) or "").strip()
         if not raw_desc:
             continue
@@ -160,6 +216,7 @@ def get_effective_body_descriptions(character):
         for part in covered:
             if part in result and not getattr(item.db, "see_thru", False):
                 result[part] = desc
+
     return result
 
 

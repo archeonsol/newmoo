@@ -7,6 +7,7 @@ import time
 from evennia.utils import delay
 
 from world.body import get_cyberware_for_part
+from world.theme_colors import COMBAT_COLORS as CC, MEDICAL_COLORS as MC
 from world.medical import add_injury, rebuild_derived_trauma_views, ORGAN_INFO
 from world.medical.medical_surgery import ORGAN_SURGERY_NARRATIVES
 from world.medical.cybersurgery_narratives import (
@@ -156,20 +157,20 @@ def _apply_complication(state, phase):
         if surgery_injury:
             surgery_injury["bleed_rate"] = float(surgery_injury.get("bleed_rate", 0.0) or 0.0) + random.choice((1.0, 2.0))
             surgery_injury["bleed_treated"] = False
-        caller.msg("|rA vessel tears. Blood fills the field. You clamp and pack. The clock is ticking.|n")
+        caller.msg(f"{MC['critical']}A vessel tears. Blood fills the field. You clamp and pack. The clock is ticking.|n")
     elif kind == "nerve_damage":
         state["neural_debuff"] = True
-        caller.msg("|rThe nerve trunk recoils from the interface. Damage. You work around it but function will be reduced.|n")
+        caller.msg(f"{MC['critical']}The nerve trunk recoils from the interface. Damage. You work around it but function will be reduced.|n")
     elif kind == "rejection_flare":
         if surgery_injury:
             surgery_injury["infection_risk"] = min(1.0, float(surgery_injury.get("infection_risk", 0.0) or 0.0) + random.uniform(0.15, 0.25))
-        caller.msg("|rThe tissue rejects the interface. Inflammation blooms. You administer immunosuppressant and push through.|n")
+        caller.msg(f"{MC['critical']}The tissue rejects the interface. Inflammation blooms. You administer immunosuppressant and push through.|n")
     elif kind == "tool_slip":
         add_injury(caller, 3, body_part="right hand", weapon_key="surgery")
-        caller.msg("|rThe retractor slips. You cut yourself. You clamp your hand, re-glove, and continue.|n")
+        caller.msg(f"{MC['critical']}The retractor slips. You cut yourself. You clamp your hand, re-glove, and continue.|n")
     elif kind == "patient_movement":
         state["next_check_penalty"] += 10
-        caller.msg("|rThey move. The field shifts. You bark at them to stay still. The work is harder now.|n")
+        caller.msg(f"{MC['critical']}They move. The field shifts. You bark at them to stay still. The work is harder now.|n")
     target.db.injuries = injuries
 
 
@@ -231,7 +232,7 @@ def _final_install_outcome(state):
         success_level, _ = _cybersurgery_roll(caller, difficulty=final_difficulty, modifier=0)
 
         if success_level == 0:
-            caller.msg("|rThe interface won't seat. Tissue rejection, poor alignment, or bad luck. The implant comes back out. You close what you can.|n")
+            caller.msg(f"{MC['critical']}The interface won't seat. Tissue rejection, poor alignment, or bad luck. The implant comes back out. You close what you can.|n")
             if injury:
                 injury["treated"] = True
                 injury["treatment_quality"] = 1
@@ -256,7 +257,7 @@ def _final_install_outcome(state):
 
         res = target.install_cyberware(cw, skip_surgery=True)
         if res is not True:
-            caller.msg(f"|rInstall failed after procedure: {res}|n")
+            caller.msg(f"{MC['critical']}Install failed after procedure: {res}|n")
             return
         # Defensive persistence: ensure installed list actually contains this object.
         installed = list(target.db.cyberware or [])
@@ -265,11 +266,11 @@ def _final_install_outcome(state):
             target.db.cyberware = installed
 
         if success_level == 3:
-            caller.msg("|gThe implant seats perfectly. Interface is clean. Response is immediate. This is textbook work.|n")
+            caller.msg(f"{MC['stable']}The implant seats perfectly. Interface is clean. Response is immediate. This is textbook work.|n")
         elif success_level == 2:
-            caller.msg("|gThe implant takes. Interface holds. Function confirmed. Good work.|n")
+            caller.msg(f"{MC['stable']}The implant takes. Interface holds. Function confirmed. Good work.|n")
         else:
-            caller.msg("|yThe implant seats, but the interface is rough. It'll work. It won't be pretty. Watch for rejection.|n")
+            caller.msg(f"{MC['compensated']}The implant seats, but the interface is rough. It'll work. It won't be pretty. Watch for rejection.|n")
 
         if injury:
             injury["treated"] = True
@@ -308,7 +309,7 @@ def _run_install_phase(ids, state, idx):
     if idx < len(narratives):
         caller.msg("|w%s|n" % narratives[idx])
     if (not state["sedated"]) and idx > 0:
-        target.msg("|r%s's hands are inside you. The pain is white noise. You feel something cold click into place.|n" % (caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name))
+        target.msg(f"{MC['critical']}%s's hands are inside you. The pain is white noise. You feel something cold click into place.|n" % (caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name))
     _room_msg(caller, target, table)
     phase = state["phases"][idx]
     base_comp = 0.03 + (0.02 * float(_cwattr(state["cyberware"], "surgery_difficulty", 15) or 15) / 15.0)
@@ -377,7 +378,7 @@ def start_cybersurgery_remove(caller, target, table, cyberware_name):
                 wound = i
                 break
         if lvl == 0:
-            caller.msg("|rYou fail to safely extract the hardware. You close and stabilize what you can.|n")
+            caller.msg(f"{MC['critical']}You fail to safely extract the hardware. You close and stabilize what you can.|n")
             if wound:
                 wound["treated"] = True
                 wound["treatment_quality"] = 1
@@ -386,7 +387,7 @@ def start_cybersurgery_remove(caller, target, table, cyberware_name):
             return
         res = target.remove_cyberware(cw, skip_surgery=True)
         if res is not True:
-            caller.msg(f"|rRemoval failed: {res}|n")
+            caller.msg(f"{MC['critical']}Removal failed: {res}|n")
         else:
             if (_cwattr(cw, "surgery_category", "") or "").lower() == "limb":
                 part = _primary_body_part(cw)
@@ -394,7 +395,7 @@ def start_cybersurgery_remove(caller, target, table, cyberware_name):
                 if part not in missing:
                     missing.append(part)
                 target.db.missing_body_parts = missing
-            caller.msg("|gYou extract the hardware and close successfully.|n")
+            caller.msg(f"{MC['stable']}You extract the hardware and close successfully.|n")
             if wound:
                 wound["treated"] = True
                 wound["treatment_quality"] = 2
@@ -469,14 +470,14 @@ def start_cybersurgery_repair(caller, target, table, cyberware_name):
     def _finish():
         lvl, _ = _cybersurgery_roll(caller, difficulty=diff, modifier=0)
         if lvl == 0:
-            caller.msg("|rRepair fails. The chrome remains unstable.|n")
+            caller.msg(f"{MC['critical']}Repair fails. The chrome remains unstable.|n")
         else:
             mx = int(getattr(cw.db, "chrome_max_hp", 100) or 100)
             cw.db.chrome_hp = mx
             cw.db.malfunctioning = False
             if getattr(cw, "buff_class", None):
                 target.buffs.add(cw.buff_class)
-            caller.msg("|gRepair successful. Systems nominal.|n")
+            caller.msg(f"{MC['stable']}Repair successful. Systems nominal.|n")
         caller.db.surgery_in_progress = False
 
     delay(PHASE_DELTA * 2, _finish)
@@ -493,7 +494,7 @@ def apply_emp_effect(character, damage):
             cw.db.emp_glitch_until = time.time() + random.uniform(30, 60)
             if getattr(cw, "buff_class", None):
                 character.buffs.remove(cw.buff_class.key)
-            character.msg(f"|c{cw.key} glitches. Static. Systems disrupted.|n")
+            character.msg(f"{CC['chrome_damage']}{cw.key} glitches. Static. Systems disrupted.|n")
     delay(65, _reapply_all_cyberware_buffs, character.id)
 
 

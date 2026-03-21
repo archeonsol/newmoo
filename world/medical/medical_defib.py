@@ -4,6 +4,8 @@ also runs the roll and success/fail (no separate timer - so the result always sh
 """
 from evennia.utils import delay
 
+from world.theme_colors import MEDICAL_COLORS as MC
+
 DEFIB_MSG1, DEFIB_MSG2, DEFIB_MSG3 = 3, 6, 9
 
 
@@ -40,7 +42,7 @@ def _defib_msg1(*args):
     target = _get_object_by_id(ids[1])
     if not caller or not target:
         return
-    caller.msg("|wYou place the pads: one below the right collarbone, one on the left side. The unit analyses. |rNo pulse. Charging.|n")
+    caller.msg(f"|wYou place the pads: one below the right collarbone, one on the left side. The unit analyses. {MC['critical']}No pulse. Charging.|n")
     if target != caller and target.location:
         target.location.msg_contents(
             f"{caller.name} presses defibrillator pads to {target.name}'s chest. The machine hums.",
@@ -57,7 +59,7 @@ def _defib_msg2(*args):
     target = _get_object_by_id(ids[1])
     if not caller or not target:
         return
-    caller.msg("|rCLEAR.|n You trigger the first shock. Their body jerks. You check the monitor.")
+    caller.msg(f"{MC['critical']}CLEAR.|n You trigger the first shock. Their body jerks. You check the monitor.")
     if target != caller and target.location:
         target.location.msg_contents(
             f"A sharp crack. {target.name}'s body convulses as {caller.name} delivers the shock.",
@@ -114,20 +116,20 @@ def _defib_msg3_and_finish(*args):
         if success:
             # Safely handle 'msg' even if it is None or empty
             if msg:
-                caller.msg(f"|g{msg}|n")
+                caller.msg(f"{MC['stable']}{msg}|n")
                 
-            caller.msg("|gThe monitor shows a rhythm now. HR present. SpO2 climbing. |wThey have been brought back.|n")
+            caller.msg(f"{MC['stable']}The monitor shows a rhythm now. HR present. SpO2 climbing. |wThey have been brought back.|n")
             
             if target != caller:
-                target.msg("|gYou feel the shocks. Then something pulls you back. You gasp. You are here. You are alive.|n")
+                target.msg(f"{MC['stable']}You feel the shocks. Then something pulls you back. You gasp. You are here. You are alive.|n")
                 if target.location:
                     target.location.msg_contents(
-                        f"|g{target.name} gasps. A pulse. The monitor picks up a rhythm. They have been brought back.|n",
+                        f"{MC['stable']}{target.name} gasps. A pulse. The monitor picks up a rhythm. They have been brought back.|n",
                         exclude=(caller, target),
                     )
         else:
             if msg:
-                caller.msg(f"|r{msg}|n")
+                caller.msg(f"{MC['critical']}{msg}|n")
             if target != caller and target.location:
                 target.location.msg_contents(
                     f"{caller.name} tries once more. Nothing. {target.name} does not move.",
@@ -137,7 +139,7 @@ def _defib_msg3_and_finish(*args):
     except Exception as e:
         import traceback
         err_trace = traceback.format_exc()
-        caller.msg(f"|r[SYSTEM ERROR]|n Resuscitation failed:\n|w{err_trace}|n")
+        caller.msg(f"{MC['critical']}[SYSTEM ERROR]|n Resuscitation failed:\n|w{err_trace}|n")
 
 
 def start_defib_sequence(caller, target, defib):

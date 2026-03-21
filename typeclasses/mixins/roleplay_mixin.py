@@ -40,7 +40,11 @@ def _at_say_whisper_overhear(location, speaker, message, receivers):
             if viewer in exclude or viewer == speaker:
                 continue
             heard = process_language_for_viewer(speaker, message, lang_key, viewer)
-            obj_name = speaker.get_display_name(viewer)
+            from world.rp_features import get_display_name_for_viewer
+            from world.skin_tones import format_ic_character_name
+
+            plain = get_display_name_for_viewer(speaker, viewer)
+            obj_name = format_ic_character_name(speaker, viewer, plain)
             line = '%s whispers something to someone... "%s"' % (obj_name, heard)
             viewer.msg(text=(line, {"type": "whisper"}), from_obj=speaker)
     except Exception as err:
@@ -239,7 +243,11 @@ class RoleplayMixin:
             if viewer == self:
                 continue
             speech = process_language_for_viewer(self, message, lang_key, viewer)
-            obj_name = self.get_display_name(viewer)
+            from world.rp_features import get_display_name_for_viewer
+            from world.skin_tones import format_ic_character_name
+
+            plain = get_display_name_for_viewer(self, viewer)
+            obj_name = format_ic_character_name(self, viewer, plain)
             if voice_phrase and voice_perception_check(viewer, self):
                 line = '%s says in a %s, "*speaking in a %s* %s"' % (obj_name, voice_phrase, voice_phrase, speech)
             else:

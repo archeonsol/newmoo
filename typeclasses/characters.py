@@ -3,6 +3,7 @@ from evennia.utils import logger
 from evennia.utils.utils import compress_whitespace, lazy_property
 
 from world.multipuppet import multi_puppet_relay
+from world.theme_colors import ROOM_COLORS
 from typeclasses.mixins import FurnitureMixin, MedicalMixin, RPGCharacterMixin, RoleplayMixin
 from typeclasses.matrix.mixins.matrix_id import MatrixIdMixin
 
@@ -12,8 +13,8 @@ def _body_parts():
     return BODY_PARTS
 
 
-# When you look at a character: name = orange (match room look), sdesc in parens = white
-LOOK_CHARACTER_NAME_COLOR = "|520"   # warm orange/amber (same as room character list)
+# When you look at a character: name = orange (match room list), sdesc in parens = white
+LOOK_CHARACTER_NAME_COLOR = ROOM_COLORS["character_name"]
 LOOK_SDESC_COLOR = "|w"              # white for (a tall man wearing...)
 
 
@@ -25,10 +26,10 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
     - Stat = The roll weight/floor (Raw power)
     """
 
-    # Look-at-character header: orange name + white sdesc in parentheses (default Evennia uses cyan)
+    # Look-at-character header: name + optional (sdesc) are pre-colored in return_appearance / helpers
     appearance_template = """
 {header}
-""" + LOOK_CHARACTER_NAME_COLOR + """{name}|n""" + LOOK_SDESC_COLOR + """{extra_name_info}|n
+{name}{extra_name_info}
 {desc}
 {exits}
 {characters}
@@ -117,6 +118,33 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         # Cyberware body description overrides — managed by CyberwareBase, not user-editable
         self.db.locked_descriptions = {}   # {part: text} — replaces user naked entirely
         self.db.appended_descriptions = {}  # {part: {typeclass_path: text}} — appended after user naked
+        # Skin tone (xterm256); set once via @skintone or chargen — colors IC name + biological body text
+        self.db.skin_tone = None
+        self.db.skin_tone_code = None
+        self.db.skin_tone_set = False
+
+    def return_appearance(self, looker, **kwargs):
+        """Same as DefaultObject but pass IC-colored name into the template."""
+        if not looker:
+            return ""
+        from world.skin_tones import format_ic_character_name
+
+        plain_name = super().get_display_name(looker, **kwargs)
+        ic_name = format_ic_character_name(self, looker, plain_name)
+        return self.format_appearance(
+            self.appearance_template.format(
+                name=ic_name,
+                extra_name_info=self.get_extra_display_name_info(looker, **kwargs),
+                desc=self.get_display_desc(looker, **kwargs),
+                header=self.get_display_header(looker, **kwargs),
+                footer=self.get_display_footer(looker, **kwargs),
+                exits=self.get_display_exits(looker, **kwargs),
+                characters=self.get_display_characters(looker, **kwargs),
+                things=self.get_display_things(looker, **kwargs),
+            ),
+            looker,
+            **kwargs,
+        )
 
     def at_server_start(self):
         """Re-apply cyberware buffs after a server restart (BuffHandler is non-persistent)."""
@@ -328,6 +356,12 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         Look description order: general "describe me as" line first, then body-part paragraphs.
         """
         general = (getattr(self.db, "general_desc", None) or "This is a character.").strip()
+        try:
+            from world.skin_tones import format_ic_sdesc_fragment
+
+            general = format_ic_sdesc_fragment(self, looker, general)
+        except Exception as err:
+            logger.log_trace("characters.get_display_desc skin tone: %s" % err)
         merged = self.format_body_appearance()
         outfit_line = ""
         try:
@@ -356,10 +390,13 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         # Only show (sdesc) when looker sees our name/recog, not when they only see sdesc
         try:
             from world.rp_features import get_character_sdesc_for_viewer
+            from world.skin_tones import format_ic_sdesc_fragment
+
             sdesc_shown = get_character_sdesc_for_viewer(self, looker)
             name_shown = self.get_display_name(looker, **kwargs)
             if name_shown != sdesc_shown and sdesc_shown:
-                return " (" + sdesc_shown + ")"
+                col = format_ic_sdesc_fragment(self, looker, sdesc_shown)
+                return " (" + col + ")"
         except Exception as err:
             logger.log_trace("characters.get_extra_display_name_info sdesc_for_viewer: %s" % err)
         return ""

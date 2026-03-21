@@ -3,11 +3,12 @@ EvMenu flow for corpse cyberware salvage.
 """
 
 from world.medical.salvage import get_assessment_entries, start_extraction
+from world.theme_colors import COMBAT_COLORS as CC
 
 
 _W = 58
 _BORDER_COLOR = "|x"
-_HEADER_COLOR = "|c"
+_HEADER_COLOR = CC["parry"]
 _LABEL_COLOR = "|w"
 _DIM = "|x"
 _N = "|n"

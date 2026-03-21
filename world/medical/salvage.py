@@ -10,6 +10,7 @@ from evennia.utils.create import create_object
 from evennia.utils.search import search_object
 
 from world.medical import add_injury
+from world.theme_colors import MEDICAL_COLORS as MC
 
 
 SALVAGE_NARRATIVES = {
@@ -379,16 +380,16 @@ def _finish_extraction(caller_id, corpse_id, cyberware_id, scalpel_id, start_roo
 
     if tier == 3:
         cyberware_obj.location = caller
-        caller.msg("|gClean extraction. The chrome is intact, not a scratch. Whoever installed this did good work. You did better taking it out.|n")
+        caller.msg(f"{MC['stable']}Clean extraction. The chrome is intact, not a scratch. Whoever installed this did good work. You did better taking it out.|n")
         return
     if tier == 2:
         cyberware_obj.location = caller
-        caller.msg("|gThe chrome comes free. Intact. A few scratches from the extraction but nothing that affects function. Good enough.|n")
+        caller.msg(f"{MC['stable']}The chrome comes free. Intact. A few scratches from the extraction but nothing that affects function. Good enough.|n")
         return
     if tier == 1:
         _apply_marginal_damage(cyberware_obj)
         cyberware_obj.location = caller
-        caller.msg("|yYou got it out, but not clean. Contacts are bent and the housing is scored. It might still function, but it needs proper repair.|n")
+        caller.msg(f"{MC['compensated']}You got it out, but not clean. Contacts are bent and the housing is scored. It might still function, but it needs proper repair.|n")
         return
 
     try:
@@ -396,16 +397,16 @@ def _finish_extraction(caller_id, corpse_id, cyberware_id, scalpel_id, start_roo
     except Exception:
         pass
     _create_scrap(caller, cyberware_obj)
-    caller.msg("|rThe implant cracks as it comes free. Contacts shatter. The housing buckles. Whatever it was, it is scrap now.|n")
+    caller.msg(f"{MC['critical']}The implant cracks as it comes free. Contacts shatter. The housing buckles. Whatever it was, it is scrap now.|n")
 
     if random.random() < 0.2:
         if random.random() < 0.5:
             hand = random.choice(("left hand", "right hand"))
             add_injury(caller, 5, body_part=hand, weapon_key="surgery")
-            caller.msg("|rThe blade skates and bites your hand. Blood wells between your fingers.|n")
+            caller.msg(f"{MC['critical']}The blade skates and bites your hand. Blood wells between your fingers.|n")
         else:
             if scalpel and getattr(scalpel, "location", None) == caller:
-                caller.msg("|rThe blade catches bone and snaps. You need a new scalpel.|n")
+                caller.msg(f"{MC['critical']}The blade catches bone and snaps. You need a new scalpel.|n")
                 try:
                     scalpel.delete()
                 except Exception:

@@ -773,8 +773,42 @@ def node_apply_build(caller, raw_string, **kwargs):
         f"  |x{h_cat.capitalize()} · {w_cat}|n  →  |w{caller.db.height_cm} cm  /  {caller.db.weight_kg} kg|n"
     )
     text    = _slab("BUILD LOCKED", text_body, status="RITUAL FINALIZATION READY")
-    options = [{"desc": "|rAwaken|n", "goto": "node_finish"}]
+    options = [{"desc": "|rContinue|n", "goto": "node_skin_tone"}]
     return text, options
+
+
+def node_skin_tone(caller, raw_string="", **kwargs):
+    text_body = (
+        "|xThe last thing the Rite remembers is flesh — what color the blood paints under light.|n\n\n"
+        "|xSpeak your skin tone |Ronce|x (see |w@skintone|x for the full palette), "
+        "or type |wskip|x to choose later with |w@skintone|x.|n"
+    )
+    text = _slab("FLESH", text_body, status="SKIN TONE")
+    options = [{"key": "_default", "goto": "node_apply_skin_tone"}]
+    return text, options
+
+
+def node_apply_skin_tone(caller, raw_string, **kwargs):
+    if _is_blocked_menu_escape(raw_string):
+        caller.msg("\n|r[!] You cannot leave during the Rite. Complete character creation.|n\n")
+        return node_skin_tone(caller)
+
+    raw = (raw_string or "").strip().lower()
+    if raw in ("skip", "none", ""):
+        return node_finish(caller)
+
+    from world.skin_tones import resolve_skin_tone_key, set_character_skin_tone
+
+    key = resolve_skin_tone_key(raw_string.strip())
+    if not key:
+        caller.msg("\n|r[!] That tone is not in the list. Use @skintone to see names, or type skip.|n\n")
+        return node_skin_tone(caller)
+    err = set_character_skin_tone(caller, key)
+    if err:
+        caller.msg("\n|r[!] That tone is not available.|n\n")
+        return node_skin_tone(caller)
+    return node_finish(caller)
+
 
 # ─── Finish ───────────────────────────────────────────────────────────────────
 

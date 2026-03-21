@@ -9,6 +9,8 @@ import re
 from evennia.objects.objects import DefaultRoom, DefaultExit
 from evennia.utils.utils import compress_whitespace, iter_to_str
 
+from world.theme_colors import ROOM_COLORS
+
 from .objects import ObjectParent
 from typeclasses.matrix.mixins.matrix_id import MatrixIdMixin
 
@@ -16,11 +18,19 @@ from typeclasses.matrix.mixins.matrix_id import MatrixIdMixin
 # Substring that indicates the stock Evennia welcome desc (replace with our default)
 _DEFAULT_WELCOME_MARKER = "evennia.com"
 
-# Xterm256 colors for room contents (|### = RGB each 0-5; |n resets)
-ROOM_DESC_ROOM_NAME_COLOR = "|050"        # green – room name at top
-ROOM_DESC_CHARACTER_NAME_COLOR = "|520"   # warm orange/amber
-ROOM_DESC_OBJECT_NAME_COLOR = "|035"      # teal/cyan – objects in "You see"
-ROOM_DESC_EXIT_NAME_COLOR = "|050"        # green – exit names and shortcuts
+# Room look palette — see world.theme_colors.ROOM_COLORS
+ROOM_DESC_ROOM_NAME_COLOR = ROOM_COLORS["room_name"]
+ROOM_DESC_CHARACTER_NAME_COLOR = ROOM_COLORS["character_name"]
+ROOM_DESC_OBJECT_NAME_COLOR = ROOM_COLORS["object"]
+ROOM_DESC_EXIT_NAME_COLOR = ROOM_COLORS["exit"]
+
+
+def _ic_room_char_name(char, looker, **kwargs):
+    """Plain display name wrapped with skin tone (or default room name color)."""
+    from world.skin_tones import format_ic_character_name
+
+    plain = char.get_display_name(looker, **kwargs)
+    return format_ic_character_name(char, looker, plain)
 
 
 def _is_vehicle(obj):
@@ -304,9 +314,9 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
             if not holder or not self.filter_visible([char, holder], looker, **kwargs):
                 continue
             grappled_set.add(char)
-            vname = char.get_display_name(looker, **kwargs)
-            hname = holder.get_display_name(looker, **kwargs)
-            grappled_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{vname}|n is locked in the grasp of {ROOM_DESC_CHARACTER_NAME_COLOR}{hname}|n.")
+            vname = _ic_room_char_name(char, looker, **kwargs)
+            hname = _ic_room_char_name(holder, looker, **kwargs)
+            grappled_parts.append(f"{vname} is locked in the grasp of {hname}.")
         char_pose_parts = []
         chars_to_show = list(characters)
         # Include looker if not already shown (helps you see your own @lp).
@@ -389,7 +399,7 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                         pattern_base = r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)"
                         pose = re.sub(pattern_base + r"'s", "your", pose, flags=re.IGNORECASE)
                         pose = re.sub(pattern_base, "you", pose, flags=re.IGNORECASE)
-            name = char.get_display_name(looker, **kwargs)
+            name = _ic_room_char_name(char, looker, **kwargs)
             if char is looker:
                 # Special handling so you see "You are ..." instead of "Name is ..."
                 you_pose = pose
@@ -404,14 +414,14 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
             else:
                 if logged_off:
                     # Name in character color; sleep-place text in bold white (caller controls verb, e.g. "is sleeping here")
-                    char_pose_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{name}|n |b|w{pose}.|n")
+                    char_pose_parts.append(f"{name} |b|w{pose}.|n")
                 elif is_dead:
                     # Dead/flatlined: always "Name is <pose>."
-                    char_pose_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{name}|n is {pose}.")
+                    char_pose_parts.append(f"{name} is {pose}.")
                 else:
                     # For living, present characters, do not force an 'is' – use whatever the player set
                     # with @lp (e.g. 'is leaning against the wall', 'leaning against the wall', 'crouched here').
-                    char_pose_parts.append(f"{ROOM_DESC_CHARACTER_NAME_COLOR}{name}|n {pose}.")
+                    char_pose_parts.append(f"{name} {pose}.")
         char_pose_line = " ".join(char_pose_parts) if char_pose_parts else ""
         if grappled_parts:
             char_pose_line = " ".join(filter(None, [char_pose_line, " ".join(grappled_parts)]))
@@ -459,9 +469,9 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                 if not self.filter_visible([char], looker, **kwargs):
                     continue
                 any_patients = True
-                name = char.get_display_name(looker, **kwargs)
+                name = _ic_room_char_name(char, looker, **kwargs)
                 lines.append(
-                    f"{ROOM_DESC_CHARACTER_NAME_COLOR}{name}|n is lying on {ROOM_DESC_OBJECT_NAME_COLOR}{table_name}|n."
+                    f"{name} is lying on {ROOM_DESC_OBJECT_NAME_COLOR}{table_name}|n."
                 )
             if not any_patients:
                 lines.append(f"The {ROOM_DESC_OBJECT_NAME_COLOR}{table_name}|n is waiting for a patient.")

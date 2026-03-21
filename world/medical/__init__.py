@@ -14,6 +14,7 @@ from world.medical.core import (
     TREATMENT_QUALITY_LABELS,
     ORGAN_MECHANICAL_EFFECTS,
 )
+from world.theme_colors import COMBAT_COLORS as CC, MEDICAL_COLORS as MC
 
 # -----------------------------------------------------------------------------
 # Canonical body part list (severity order: index 0 = glancing, -1 = devastating)
@@ -215,14 +216,14 @@ def _bleeding_gory_message(body_part, vessel_type, new_level, severity_word, vag
         return "", ""
     v = vessel_type or "capillary"
     if v == "arterial":
-        atk = "|rBlood sprays. They won't last.|n" if vague else f"|rBlood sprays from their {body_part}. They won't last.|n"
-        def_ = "|rYou're bleeding bad. Arterial.|n"
+        atk = "" + MC["critical"] + "Blood sprays. They won't last.|n" if vague else f"{MC['critical']}Blood sprays from their {body_part}. They won't last.|n"
+        def_ = "" + MC["critical"] + "You're bleeding bad. Arterial.|n"
     elif v == "venous":
-        atk = "|rThey're bleeding. Steady. Dark.|n" if vague else f"|rDark blood pours from their {body_part}.|n"
-        def_ = "|rYou're bleeding. It won't stop.|n"
+        atk = "" + MC["critical"] + "They're bleeding. Steady. Dark.|n" if vague else f"{MC['critical']}Dark blood pours from their {body_part}.|n"
+        def_ = "" + MC["critical"] + "You're bleeding. It won't stop.|n"
     else:
-        atk = "|rThey're cut. It's bleeding.|n" if vague else f"|rBlood runs from their {body_part}.|n"
-        def_ = "|rYou're bleeding.|n"
+        atk = "" + MC["critical"] + "They're cut. It's bleeding.|n" if vague else f"{MC['critical']}Blood runs from their {body_part}.|n"
+        def_ = "" + MC["critical"] + "You're bleeding.|n"
     return (atk, def_)
 
 
@@ -380,13 +381,13 @@ def _process_one_regen(character):
             if complication_roll < 0.45:
                 injury["bleed_treated"] = False
                 injury["bleed_rate"] = max(0.8, float(injury.get("bleed_rate", 0.0) or 0.0) + 0.7)
-                character.msg("|yA treated wound reopens under strain. Seek care again.|n")
+                character.msg("" + MC["compensated"] + "A treated wound reopens under strain. Seek care again.|n")
             elif complication_roll < 0.8:
                 injury["infection_risk"] = min(1.0, float(injury.get("infection_risk", 0.0) or 0.0) + 0.12)
-                character.msg("|yA postoperative complication forms under the dressing. You need follow-up care.|n")
+                character.msg("" + MC["compensated"] + "A postoperative complication forms under the dressing. You need follow-up care.|n")
             else:
                 injury["hp_occupied"] = min(float(injury.get("hp_occupied", 0.0) or 0.0) + 1.0, 999.0)
-                character.msg("|yA hematoma forms and recovery slows. You should be re-evaluated.|n")
+                character.msg("" + MC["compensated"] + "A hematoma forms and recovery slows. You should be re-evaluated.|n")
     if healed_total > 0:
         character.db.current_hp = min(max_hp, current + int(round(healed_total)))
 
@@ -482,9 +483,9 @@ def apply_trauma(character, body_part, damage, is_critical=False, weapon_key="fi
                                 lose_idx = random.randint(0, len(memories) - 1)
                                 lost = memories.pop(lose_idx)
                                 character.db.memories = memories
-                                character.msg(f"|mA violent memory loop wipes a stored memory: {lost}|n")
+                                character.msg(f"{MC['infection']}A violent memory loop wipes a stored memory: {lost}|n")
                             else:
-                                character.msg("|mA vivid memory loop hijacks your thoughts.|n")
+                                character.msg("" + MC["infection"] + "A vivid memory loop hijacks your thoughts.|n")
                 if cw.db.chrome_hp <= 0:
                     result["chrome_destroyed"] = cw
                     # Cardiopulmonary failure cascades into immediate stamina collapse.
@@ -711,52 +712,52 @@ def get_brutal_hit_flavor(weapon_key, body_part, trauma_result, defender_name, a
             lines_atk.append(prof_lines[0])
             lines_def.append(prof_lines[1])
         elif damage_type == "slashing":
-            lines_atk.append(f"|rYou opened something vital at their {loc}.|n")
-            lines_def.append(f"|rSomething inside your {loc} tore.|n")
+            lines_atk.append(f"{MC['critical']}You opened something vital at their {loc}.|n")
+            lines_def.append(f"{MC['critical']}Something inside your {loc} tore.|n")
         elif damage_type == "penetrating":
-            lines_atk.append(f"|rThe round did real damage inside their {loc}.|n")
-            lines_def.append(f"|rSomething inside your {loc} is wrong.|n")
+            lines_atk.append(f"{MC['critical']}The round did real damage inside their {loc}.|n")
+            lines_def.append(f"{MC['critical']}Something inside your {loc} is wrong.|n")
         elif damage_type == "burn":
-            lines_atk.append(f"|rThe heat sears deep into their {loc}.|n")
-            lines_def.append(f"|rSomething inside your {loc} is burning.|n")
+            lines_atk.append(f"{MC['critical']}The heat sears deep into their {loc}.|n")
+            lines_def.append(f"{MC['critical']}Something inside your {loc} is burning.|n")
         elif damage_type == "freeze":
-            lines_atk.append(f"|rThe cold bites into the core of their {loc}.|n")
-            lines_def.append(f"|rA killing cold settles deep in your {loc}.|n")
+            lines_atk.append(f"{MC['critical']}The cold bites into the core of their {loc}.|n")
+            lines_def.append(f"{MC['critical']}A killing cold settles deep in your {loc}.|n")
         elif damage_type == "arc":
-            lines_atk.append(f"|rThe current rips through nerves and organs in their {loc}.|n")
-            lines_def.append(f"|rSomething vital in your {loc} spasms and goes numb.|n")
+            lines_atk.append(f"{MC['critical']}The current rips through nerves and organs in their {loc}.|n")
+            lines_def.append(f"{MC['critical']}Something vital in your {loc} spasms and goes numb.|n")
         elif damage_type == "void":
-            lines_atk.append(f"|rSomething inside their {loc} just stops being there.|n")
-            lines_def.append(f"|rSomething in your {loc} comes apart in ways it shouldn't.|n")
+            lines_atk.append(f"{MC['critical']}Something inside their {loc} just stops being there.|n")
+            lines_def.append(f"{MC['critical']}Something in your {loc} comes apart in ways it shouldn't.|n")
         else:
-            lines_atk.append(f"|rThat blow to their {loc} went deep. Something gave.|n")
-            lines_def.append(f"|rSomething broke in your {loc}. Not bone.|n")
+            lines_atk.append(f"{MC['critical']}That blow to their {loc} went deep. Something gave.|n")
+            lines_def.append(f"{MC['critical']}Something broke in your {loc}. Not bone.|n")
     if fracture:
         prof_lines = _profile_line("fracture")
         if prof_lines:
             lines_atk.append(prof_lines[0])
             lines_def.append(prof_lines[1])
         elif damage_type == "slashing":
-            lines_atk.append(f"|ySteel on bone at their {loc}. You felt it.|n")
-            lines_def.append(f"|yThe blade hit bone in your {loc}.|n")
+            lines_atk.append(f"{MC['compensated']}Steel on bone at their {loc}. You felt it.|n")
+            lines_def.append(f"{MC['compensated']}The blade hit bone in your {loc}.|n")
         elif damage_type == "impact":
-            lines_atk.append(f"|yYou hear the crack in their {loc}. Something broke.|n")
-            lines_def.append(f"|ySomething broke in your {loc}. You heard it.|n")
+            lines_atk.append(f"{MC['compensated']}You hear the crack in their {loc}. Something broke.|n")
+            lines_def.append(f"{MC['compensated']}Something broke in your {loc}. You heard it.|n")
         elif damage_type == "burn":
-            lines_atk.append(f"|yHeat warps bone at their {loc}.|n")
-            lines_def.append(f"|yBone in your {loc} feels soft and wrong.|n")
+            lines_atk.append(f"{MC['compensated']}Heat warps bone at their {loc}.|n")
+            lines_def.append(f"{MC['compensated']}Bone in your {loc} feels soft and wrong.|n")
         elif damage_type == "freeze":
-            lines_atk.append(f"|yFrozen bone at their {loc} splinters under the force.|n")
-            lines_def.append(f"|ySomething brittle in your {loc} gives way.|n")
+            lines_atk.append(f"{MC['compensated']}Frozen bone at their {loc} splinters under the force.|n")
+            lines_def.append(f"{MC['compensated']}Something brittle in your {loc} gives way.|n")
         elif damage_type == "arc":
-            lines_atk.append(f"|yThe jolt snaps something in their {loc}.|n")
-            lines_def.append(f"|yYour {loc} locks and something inside it cracks.|n")
+            lines_atk.append(f"{MC['compensated']}The jolt snaps something in their {loc}.|n")
+            lines_def.append(f"{MC['compensated']}Your {loc} locks and something inside it cracks.|n")
         elif damage_type == "void":
-            lines_atk.append(f"|yThe structure of bone at their {loc} just unknits.|n")
-            lines_def.append(f"|yYour {loc} feels hollow, like something is missing.|n")
+            lines_atk.append(f"{MC['compensated']}The structure of bone at their {loc} just unknits.|n")
+            lines_def.append(f"{MC['compensated']}Your {loc} feels hollow, like something is missing.|n")
         else:
-            lines_atk.append(f"|yBone at their {loc}. You felt it give.|n")
-            lines_def.append(f"|ySomething broke in your {loc}.|n")
+            lines_atk.append(f"{MC['compensated']}Bone at their {loc}. You felt it give.|n")
+            lines_def.append(f"{MC['compensated']}Something broke in your {loc}.|n")
     if bleeding:
         triple = bleeding
         if len(triple) >= 3 and triple[1]:
@@ -766,18 +767,18 @@ def get_brutal_hit_flavor(weapon_key, body_part, trauma_result, defender_name, a
     if trauma_result.get("chrome_damage"):
         cw, dmg, remaining = trauma_result["chrome_damage"]
         if damage_type == "arc":
-            lines_atk.append(f"|cSparks explode from their {loc}. The chrome screams.|n")
-            lines_def.append(f"|cElectricity arcs through your chrome {loc}. Systems flicker.|n")
+            lines_atk.append(f"{CC['chrome_damage']}Sparks explode from their {loc}. The chrome screams.|n")
+            lines_def.append(f"{CC['chrome_damage']}Electricity arcs through your chrome {loc}. Systems flicker.|n")
         elif damage_type == "void":
-            lines_atk.append(f"|cThe chrome at their {loc} warps and buckles. Something fundamental shifts.|n")
-            lines_def.append(f"|cYour chrome {loc} feels wrong. Like it's forgetting what shape it should be.|n")
+            lines_atk.append(f"{CC['chrome_damage']}The chrome at their {loc} warps and buckles. Something fundamental shifts.|n")
+            lines_def.append(f"{CC['chrome_damage']}Your chrome {loc} feels wrong. Like it's forgetting what shape it should be.|n")
         else:
-            lines_atk.append(f"|cMetal dents at their {loc}. The chrome took the hit.|n")
-            lines_def.append(f"|cImpact rattles through your chrome {loc}. Damage, but it holds.|n")
+            lines_atk.append(f"{CC['chrome_damage']}Metal dents at their {loc}. The chrome took the hit.|n")
+            lines_def.append(f"{CC['chrome_damage']}Impact rattles through your chrome {loc}. Damage, but it holds.|n")
     if trauma_result.get("chrome_destroyed"):
         cw = trauma_result["chrome_destroyed"]
-        lines_atk.append(f"|R{cw.key} at their {loc} shorts out. The chrome is dead.|n")
-        lines_def.append(f"|R{cw.key} in your {loc} goes dark. Malfunction. The chrome is dead.|n")
+        lines_atk.append(f"{CC['chrome_destroy']}{cw.key} at their {loc} shorts out. The chrome is dead.|n")
+        lines_def.append(f"{CC['chrome_destroy']}{cw.key} in your {loc} goes dark. Malfunction. The chrome is dead.|n")
     return " ".join(lines_atk), " ".join(lines_def)
 
 

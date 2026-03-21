@@ -12,6 +12,7 @@ from world.combat.cover import (
     get_cover_status_text,
     is_pinned_by_suppression,
 )
+from world.theme_colors import COMBAT_COLORS as CC
 
 RANGE_CLINCH = -1
 RANGE_VERY_CLOSE = 0
@@ -342,10 +343,10 @@ def get_weapon_optimal_ranges(weapon_key):
 def get_range_status_text(weapon_key, current_range):
     pen = get_weapon_range_penalty(weapon_key, current_range)
     if pen is None:
-        return "|rblocked|n"
+        return CC["miss"] + "blocked|n"
     if pen == 0:
         return "|goptimal|n"
-    return "|yawkward|n"
+    return CC["dodge"] + "awkward|n"
 
 
 def _footwork_roll(character, modifier=0):
@@ -375,7 +376,7 @@ def attempt_advance(mover, opponent):
         return False, 0, "You cannot do that.", "", None
     current = get_combat_range(mover, opponent)
     if is_pinned_by_suppression(mover):
-        return False, current, "|rYou're pinned by suppressing fire. You can't move.|n", "", None
+        return False, current, CC["miss"] + "You're pinned by suppressing fire. You can't move.|n", "", None
     if current <= RANGE_VERY_CLOSE:
         return False, current, "You can't close any further without committing to a grapple.", "", None
     try:
@@ -395,12 +396,12 @@ def attempt_advance(mover, opponent):
     if mover_val > opp_val:
         set_combat_range(mover, opponent, target_range)
         if target_range <= RANGE_CLINCH and character_in_cover(mover):
-            force_leave_cover(mover, reason_msg="|yYou leave cover as you close to clinch range.|n")
+            force_leave_cover(mover, reason_msg=CC["dodge"] + "You leave cover as you close to clinch range.|n")
 
         def msg_room(viewer):
             return f"{_display_name(mover, viewer)} closes distance on {_display_name(opponent, viewer)}. They're at {range_label} range now."
 
-        return True, target_range, f"|gYou push forward to {range_label} range.|n", f"|y{{mover}} closes on you. {range_label.capitalize()} range.|n", msg_room
+        return True, target_range, f"|gYou push forward to {range_label} range.|n", f"{CC['dodge']}{{mover}} closes on you. {range_label.capitalize()} range.|n", msg_room
 
     def msg_room(viewer):
         return f"{_display_name(mover, viewer)} tries to close on {_display_name(opponent, viewer)} but {_display_name(opponent, viewer)} keeps the distance."
@@ -413,7 +414,7 @@ def attempt_retreat(mover, opponent):
         return False, 0, "You cannot do that.", "", None
     current = get_combat_range(mover, opponent)
     if is_pinned_by_suppression(mover):
-        return False, current, "|rYou're pinned by suppressing fire. You can't move.|n", "", None
+        return False, current, CC["miss"] + "You're pinned by suppressing fire. You can't move.|n", "", None
     if current >= RANGE_MAX:
         return False, current, "You're already as far as you can get without fleeing.", "", None
     try:
@@ -436,12 +437,12 @@ def attempt_retreat(mover, opponent):
         def msg_room(viewer):
             return f"{_display_name(mover, viewer)} backs away from {_display_name(opponent, viewer)}. They're at {range_label} range now."
 
-        return True, target_range, f"|gYou pull back to {range_label} range.|n", f"|y{{mover}} pulls away from you. {range_label.capitalize()} range.|n", msg_room
+        return True, target_range, f"|gYou pull back to {range_label} range.|n", f"{CC['dodge']}{{mover}} pulls away from you. {range_label.capitalize()} range.|n", msg_room
 
     def msg_room(viewer):
         return f"{_display_name(mover, viewer)} tries to back away but {_display_name(opponent, viewer)} stays on them."
 
-    return False, current, f"|rYou try to pull back but they stay on you. Still at {current_label} range.|n", f"|g{{mover}} tries to break away. You stay on them.|n", msg_room
+    return False, current, f"{CC['miss']}You try to pull back but they stay on you. Still at {current_label} range.|n", f"|g{{mover}} tries to break away. You stay on them.|n", msg_room
 
 
 def validate_grapple_range(grappler, target):

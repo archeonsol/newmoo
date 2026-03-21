@@ -5,6 +5,12 @@ Split out from world.medical.__init__ to keep core module maintainable.
 import random
 import time
 
+from world.theme_colors import MEDICAL_COLORS as MC
+
+_MI = MC["infection"]
+_CR = MC["critical"]
+_AR = MC["arrest"]
+
 INFECTION_CATALOG = {
     "surface_cellulitis": {"label": "Surface cellulitis", "base_severity": 1},
     "stitch_abscess": {"label": "Stitch abscess", "base_severity": 1},
@@ -27,54 +33,54 @@ INFECTION_STAGE_LABELS = {
 
 INFECTION_DISEASE_MESSAGES = {
     "surface_cellulitis": {
-        "onset": ["|mRed streaks creep out from the cut. The skin is hot and tender.|n"],
-        "worsen": ["|mThe redness spreads in a map under your skin. It burns to the touch.|n"],
-        "critical": ["|rYour whole limb throbs and shakes. The infection has gone systemic.|n"],
+        "onset": [f"{_MI}Red streaks creep out from the cut. The skin is hot and tender.|n"],
+        "worsen": [f"{_MI}The redness spreads in a map under your skin. It burns to the touch.|n"],
+        "critical": [f"{_CR}Your whole limb throbs and shakes. The infection has gone systemic.|n"],
     },
     "stitch_abscess": {
-        "onset": ["|mPressure builds around the sutures. The wound edge looks angry and swollen.|n"],
-        "worsen": ["|mA pocket of heat and fluid forms under the stitches. The closure is failing.|n"],
-        "critical": ["|rThe wound is tense, foul, and close to bursting. You feel fever taking hold.|n"],
+        "onset": [f"{_MI}Pressure builds around the sutures. The wound edge looks angry and swollen.|n"],
+        "worsen": [f"{_MI}A pocket of heat and fluid forms under the stitches. The closure is failing.|n"],
+        "critical": [f"{_CR}The wound is tense, foul, and close to bursting. You feel fever taking hold.|n"],
     },
     "anaerobic_wound_rot": {
-        "onset": ["|mA sweet-rotten smell rises from deep tissue. This is not superficial.|n"],
-        "worsen": ["|rThe tissue around the wound darkens and crackles under pressure.|n"],
-        "critical": ["|RRot runs ahead of pain. This can kill you fast without debridement.|n"],
+        "onset": [f"{_MI}A sweet-rotten smell rises from deep tissue. This is not superficial.|n"],
+        "worsen": [f"{_CR}The tissue around the wound darkens and crackles under pressure.|n"],
+        "critical": [f"{_AR}Rot runs ahead of pain. This can kill you fast without debridement.|n"],
     },
     "bone_deep_osteitis": {
-        "onset": ["|mA deep ache drills into the bone. Movement sends lightning through it.|n"],
-        "worsen": ["|mThe pain turns constant and heavy, like the bone itself is burning.|n"],
-        "critical": ["|rYou feel weak and feverish. The infection is chewing through marrow.|n"],
+        "onset": [f"{_MI}A deep ache drills into the bone. Movement sends lightning through it.|n"],
+        "worsen": [f"{_MI}The pain turns constant and heavy, like the bone itself is burning.|n"],
+        "critical": [f"{_CR}You feel weak and feverish. The infection is chewing through marrow.|n"],
     },
     "pleural_empyema": {
-        "onset": ["|mYour chest feels wet and tight. Breathing becomes shallow and sharp.|n"],
-        "worsen": ["|rEach breath rasps; pressure builds behind the ribs.|n"],
-        "critical": ["|RYou can barely draw air. The pleural infection is becoming fatal.|n"],
+        "onset": [f"{_MI}Your chest feels wet and tight. Breathing becomes shallow and sharp.|n"],
+        "worsen": [f"{_CR}Each breath rasps; pressure builds behind the ribs.|n"],
+        "critical": [f"{_AR}You can barely draw air. The pleural infection is becoming fatal.|n"],
     },
     "sewer_fever": {
-        "onset": ["|mChills hit you in waves. Your gut knots and your head swims.|n"],
-        "worsen": ["|mYour temperature spikes and your thoughts slow. Sewer fever is spreading.|n"],
-        "critical": ["|rYou shake uncontrollably, drenched in sweat. Organ failure is close.|n"],
+        "onset": [f"{_MI}Chills hit you in waves. Your gut knots and your head swims.|n"],
+        "worsen": [f"{_MI}Your temperature spikes and your thoughts slow. Sewer fever is spreading.|n"],
+        "critical": [f"{_CR}You shake uncontrollably, drenched in sweat. Organ failure is close.|n"],
     },
     "chrome_interface_necrosis": {
-        "onset": ["|mPain needles through the chrome-meat seam. The interface is inflamed.|n"],
-        "worsen": ["|rThe implant margin blackens and leaks; rejection is turning necrotic.|n"],
-        "critical": ["|RThe interface is breaking down rapidly. You need surgical revision now.|n"],
+        "onset": [f"{_MI}Pain needles through the chrome-meat seam. The interface is inflamed.|n"],
+        "worsen": [f"{_CR}The implant margin blackens and leaks; rejection is turning necrotic.|n"],
+        "critical": [f"{_AR}The interface is breaking down rapidly. You need surgical revision now.|n"],
     },
     "bloodfire_sepsis": {
-        "onset": ["|mHeat floods your veins. Your pulse hammers out of rhythm.|n"],
-        "worsen": ["|rYou drift between chills and burning fever. Sepsis is advancing.|n"],
-        "critical": ["|RYour vision tunnels and your pressure crashes. Bloodfire sepsis is terminal without immediate care.|n"],
+        "onset": [f"{_MI}Heat floods your veins. Your pulse hammers out of rhythm.|n"],
+        "worsen": [f"{_CR}You drift between chills and burning fever. Sepsis is advancing.|n"],
+        "critical": [f"{_AR}Your vision tunnels and your pressure crashes. Bloodfire sepsis is terminal without immediate care.|n"],
     },
     "chrome_rejection_syndrome": {
-        "onset": ["|mThe tissue around the implant is hot and swollen. The body is fighting the chrome.|n"],
-        "worsen": ["|rInflammation spreads from the interface. The implant site weeps fluid. Rejection is escalating.|n"],
-        "critical": ["|RThe body is winning against the chrome. The implant is being pushed out. Without intervention, it will fail.|n"],
+        "onset": [f"{_MI}The tissue around the implant is hot and swollen. The body is fighting the chrome.|n"],
+        "worsen": [f"{_CR}Inflammation spreads from the interface. The implant site weeps fluid. Rejection is escalating.|n"],
+        "critical": [f"{_AR}The body is winning against the chrome. The implant is being pushed out. Without intervention, it will fail.|n"],
     },
     "neural_rejection_cascade": {
-        "onset": ["|mA static ache blooms along neural interface lines. Signal quality drops.|n"],
-        "worsen": ["|rNeural backlash spikes through the implant. Motor control stutters and pain sharpens.|n"],
-        "critical": ["|RNeural rejection cascade is catastrophic. The interface is failing in real time.|n"],
+        "onset": [f"{_MI}A static ache blooms along neural interface lines. Signal quality drops.|n"],
+        "worsen": [f"{_CR}Neural backlash spikes through the implant. Motor control stutters and pain sharpens.|n"],
+        "critical": [f"{_AR}Neural rejection cascade is catastrophic. The interface is failing in real time.|n"],
     },
 }
 
@@ -261,7 +267,7 @@ def apply_infection_tick(character):
                 last_rem = float(injury.get("last_infection_reminder", 0.0) or 0.0)
                 if (now - last_rem) >= 1800:
                     injury["last_infection_reminder"] = now
-                    character.msg("|mYou feel infection worsening. Find proper medical care soon.|n")
+                    character.msg(f"{_MI}You feel infection worsening. Find proper medical care soon.|n")
             elif prog < 0.05 and random.random() < 0.3:
                 injury["infection_stage"] = max(1, stage - 1)
             if injury.get("infection_stage", 0) <= 0:
