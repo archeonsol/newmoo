@@ -155,7 +155,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdSpawnCreature, CmdCreatureSet, CmdDespawn, CmdNpc, CmdMakeNpc, CmdNpcSet, CmdSpawnPerfume, CmdBadSmellRoom,
             CmdGoto, CmdGotoRoom, CmdSummon, CmdSetVoid, CmdVoid, CmdRelease, CmdBoot, CmdFind, CmdAnnounce, CmdRestore, CmdDebugKill,
             CmdSpawnSeat, CmdSpawnBed, CmdSpawnPod, CmdSpawnDiveRig, CmdSpawnCamera, CmdSpawnTelevision,
-            CmdEmoteDebug, CmdDamageVehicle, CmdMusic
+            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling
         )
         from commands.rpg.faction_cmds import CmdFaction
         from commands.sheet_cmds import CmdStats
@@ -350,6 +350,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdCreatureSet())
         self.add(CmdMusic())
         self.add(CmdCyberware())
+        self.add(CmdProfiling())
         self.add(CmdFaction())
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
