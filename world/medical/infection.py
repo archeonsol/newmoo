@@ -93,6 +93,9 @@ INFECTION_STAGE_PENALTIES = {
 INFECTION_RISK_THRESHOLD = 0.55
 INFECTION_STAGE_ADVANCE_SECS = 1800
 
+# Must match world.medical.medical_treatment.IMMUNE_MEDIATED_INFECTIONS (avoid import cycle).
+_IMMUNE_MEDIATED = frozenset({"chrome_rejection_syndrome", "neural_rejection_cascade"})
+
 
 def _infection_message(infection_key, phase):
     pool = (INFECTION_DISEASE_MESSAGES.get(infection_key) or {}).get(phase) or []
@@ -197,7 +200,10 @@ def apply_infection_tick(character):
             age_hours = (now - float(injury.get("created_at", now) or now)) / 3600.0
             age_decay = max(0.0, 1.0 - (age_hours / 48.0))
             effective_risk = rejection_base * age_decay
-            if random.random() < (effective_risk * 0.1):
+            imm_until_r = float(injury.get("immunosuppressant_until", 0.0) or 0.0)
+            imm_pot_r = float(injury.get("immunosuppressant_potency", 0.0) or 0.0)
+            rejection_dampen = min(0.82, imm_pot_r * 2.6) if imm_until_r > now else 0.0
+            if random.random() < (effective_risk * 0.1 * (1.0 - rejection_dampen)):
                 if not injury.get("infection_type"):
                     injury["infection_type"] = "chrome_rejection_syndrome"
                     injury["infection_stage"] = max(1, int(injury.get("infection_stage", 0) or 0))
@@ -226,6 +232,26 @@ def apply_infection_tick(character):
                 pass
         injury["infection_risk"] = min(1.0, float(injury.get("infection_risk", 0.0) or 0.0) + max(0.0, risk_gain))
         stage = int(injury.get("infection_stage", 0) or 0)
+        if stage <= 0:
+            abx_until0 = float(injury.get("antibiotic_until", 0.0) or 0.0)
+            abx_pot0 = float(injury.get("antibiotic_potency", 0.0) or 0.0)
+            if abx_until0 > now and abx_pot0 > 0.0:
+                injury["infection_risk"] = max(0.0, float(injury.get("infection_risk", 0.0) or 0.0) - abx_pot0 * 0.55)
+            imm_until0 = float(injury.get("immunosuppressant_until", 0.0) or 0.0)
+            imm_pot0 = float(injury.get("immunosuppressant_potency", 0.0) or 0.0)
+            if imm_until0 > now and imm_pot0 > 0.0:
+                injury["infection_risk"] = max(0.0, float(injury.get("infection_risk", 0.0) or 0.0) - imm_pot0 * 0.35)
+                if injury.get("cyberware_dbref") and injury.get("type") == "surgery":
+                    rr0 = float(injury.get("rejection_risk", 0.05) or 0.05)
+                    injury["rejection_risk"] = max(0.0, rr0 - imm_pot0 * 0.025)
+            if abx_until0 and abx_until0 <= now:
+                injury["antibiotic_until"] = 0.0
+                injury["antibiotic_potency"] = 0.0
+                injury["antibiotic_profile"] = None
+            if imm_until0 and imm_until0 <= now:
+                injury["immunosuppressant_until"] = 0.0
+                injury["immunosuppressant_potency"] = 0.0
+                injury["immunosuppressant_profile"] = None
         if stage <= 0 and injury["infection_risk"] >= INFECTION_RISK_THRESHOLD:
             injury["infection_type"] = injury.get("infection_type") or _pick_infection_type(injury)
             injury["infection_stage"] = 1
@@ -234,9 +260,29 @@ def apply_infection_tick(character):
             if msg and hasattr(character, "msg"):
                 character.msg(msg)
         elif stage > 0:
+            itype = injury.get("infection_type") or ""
+            imm_until = float(injury.get("immunosuppressant_until", 0.0) or 0.0)
+            imm_potency = float(injury.get("immunosuppressant_potency", 0.0) or 0.0)
+            if itype in _IMMUNE_MEDIATED and imm_until > now and imm_potency > 0.0:
+                injury["infection_risk"] = max(0.0, float(injury.get("infection_risk", 0.0) or 0.0) - imm_potency)
+                cure_roll = 0.2 + (0.65 * imm_potency) + (0.04 * quality) + (0.06 if cleaned_recently else 0.0)
+                if random.random() < min(0.85, cure_roll):
+                    injury["infection_stage"] = max(0, stage - 1)
+                    stage = int(injury.get("infection_stage", 0) or 0)
+                if stage <= 0:
+                    injury["infection_type"] = None
+                    injury["infection_since"] = 0.0
+                    injury["immunosuppressant_until"] = 0.0
+                    injury["immunosuppressant_potency"] = 0.0
+                    injury["immunosuppressant_profile"] = None
+                    continue
+            elif itype in _IMMUNE_MEDIATED and imm_until and imm_until <= now:
+                injury["immunosuppressant_until"] = 0.0
+                injury["immunosuppressant_potency"] = 0.0
+                injury["immunosuppressant_profile"] = None
             abx_until = float(injury.get("antibiotic_until", 0.0) or 0.0)
             abx_potency = float(injury.get("antibiotic_potency", 0.0) or 0.0)
-            if abx_until > now and abx_potency > 0.0:
+            if itype not in _IMMUNE_MEDIATED and abx_until > now and abx_potency > 0.0:
                 # Timed antibiotic effect: each infection tick during an active course
                 # pushes risk and stage down before natural progression resolves.
                 injury["infection_risk"] = max(0.0, float(injury.get("infection_risk", 0.0) or 0.0) - abx_potency)
@@ -255,6 +301,7 @@ def apply_infection_tick(character):
                 injury["antibiotic_until"] = 0.0
                 injury["antibiotic_potency"] = 0.0
                 injury["antibiotic_profile"] = None
+            stage = int(injury.get("infection_stage", 0) or 0)
             prog = 0.10 + (0.08 * env_mod) - (0.07 * quality) - (0.08 if cleaned_recently else 0.0)
             if prog > 0.03 and random.random() < min(0.55, prog):
                 injury["infection_stage"] = min(4, stage + 1)

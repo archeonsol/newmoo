@@ -374,7 +374,11 @@ class CmdApply(Command):
                 if action_id == "organ" and target_info == bodypart_key:
                     choice = (action_id, target_info)
                     break
-                if action_id in ("clean", "infection") and target_info == bodypart.replace(" ", "_"):
+                if (
+                    action_id in ("clean", "infection")
+                    and target_info == bodypart.replace(" ", "_")
+                    and _t == tool_type
+                ):
                     choice = (action_id, target_info)
                     break
                 if action_id == "bleeding" and not bodypart_key:

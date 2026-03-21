@@ -1031,6 +1031,9 @@ class CmdSpawnMedical(Command):
             ("typeclasses.medical_tools.HemostaticAgent", "hemostatic agent"),
             ("typeclasses.medical_tools.Tourniquet", "tourniquet"),
             ("typeclasses.medical_tools.Defibrillator", "defibrillator"),
+            ("typeclasses.med_pills.TacrolimusBottle", "tacrolimus"),
+            ("typeclasses.med_pills.MycophenolateBottle", "mycophenolate"),
+            ("typeclasses.med_pills.CoAmoxiclavBottle", "co-amoxiclav"),
             ("typeclasses.items.Item", "scalpel"),
         ]:
             try:

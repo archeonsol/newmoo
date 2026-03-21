@@ -63,14 +63,18 @@ TOOL_SPLINT = "splint"
 TOOL_HEMOSTATIC = "hemostatic"
 TOOL_SURGICAL_KIT = "surgical_kit"
 TOOL_TOURNIQUET = "tourniquet"
-TOOL_ANTIBIOTICS = "antibiotics"
+
+# Immune-mediated implant syndromes: not treatable with medkit/suture debridement or routine antibiotics.
+IMMUNE_MEDIATED_INFECTIONS = frozenset({"chrome_rejection_syndrome", "neural_rejection_cascade"})
 
 # What each tool can do
 TOOL_CAN_STOP_BLEEDING = (TOOL_BANDAGES, TOOL_MEDKIT, TOOL_SUTURE_KIT, TOOL_HEMOSTATIC, TOOL_SURGICAL_KIT, TOOL_TOURNIQUET)
 TOOL_CAN_SPLINT = (TOOL_SPLINT, TOOL_MEDKIT, TOOL_SURGICAL_KIT)
 TOOL_CAN_STABILIZE_ORGAN = (TOOL_MEDKIT, TOOL_SURGICAL_KIT)
 TOOL_CAN_CLEAN_WOUND = (TOOL_MEDKIT, TOOL_SURGICAL_KIT)
-TOOL_CAN_TREAT_INFECTION = (TOOL_ANTIBIOTICS, TOOL_MEDKIT, TOOL_SURGICAL_KIT)
+# Antibiotics / immunosuppressants are oral pills (typeclasses.med_pills), not apply-to tools.
+TOOL_CAN_TREAT_INFECTION = (TOOL_MEDKIT, TOOL_SURGICAL_KIT)
+PROPHYLAXIS_RISK_FLOOR = 0.02
 TOOL_IS_SCANNER = (TOOL_SCANNER,)
 
 # Bleeding: bandage only effective on minor/moderate (1-2); severe/critical need hemostatic or suture/surgical
@@ -596,11 +600,123 @@ def attempt_clean_wound(operator, target, body_part, tool_type=None, tool_obj=No
     return True, "You irrigate and debride the wound. Tissue looks cleaner and safer for closure."
 
 
+def attempt_pill_dose(taker, target, pill_obj, body_part=None):
+    """
+    Patient swallows one systemic dose. Dose is always consumed when valid (uses, kind).
+    Applies serum-level effects to eligible injuries when any; wrong-spectrum treat uses low potency.
+    No rolls and no feedback strings—only the swallow line is sent by the caller.
+    body_part is ignored (legacy).
+    """
+    from world.medical.pill_dosing import record_character_dose
+
+    _ensure_medical_db(target)
+    if taker != target:
+        return False, ""
+    kind = getattr(pill_obj.db, "pill_kind", None)
+    if kind not in ("antibiotic", "immunosuppressant"):
+        return False, ""
+    uses = getattr(pill_obj.db, "uses_remaining", None)
+    if uses is not None and int(uses) <= 0:
+        return False, ""
+
+    if kind == "antibiotic":
+        profile = getattr(pill_obj.db, "antibiotic_profile", None) or "generic"
+        targets = set(getattr(pill_obj.db, "antibiotic_targets", None) or [])
+    else:
+        profile = getattr(pill_obj.db, "immunosuppressant_profile", None) or "generic"
+        targets = set(getattr(pill_obj.db, "immunosuppressant_targets", None) or [])
+
+    wounds = [i for i in (target.db.injuries or []) if (i.get("hp_occupied", 0) or 0) > 0]
+
+    eligible = []
+    for w in wounds:
+        stage = int(w.get("infection_stage", 0) or 0)
+        ikey = str(w.get("infection_type") or "")
+        risk = float(w.get("infection_risk", 0.0) or 0.0)
+        is_cyber_surg = bool(w.get("cyberware_dbref")) and w.get("type") == "surgery"
+
+        if kind == "antibiotic":
+            if stage > 0:
+                if ikey in IMMUNE_MEDIATED_INFECTIONS:
+                    continue
+                if ikey in ("chrome_interface_necrosis", "bloodfire_sepsis") and stage >= 3:
+                    continue
+                eligible.append((w, "treat"))
+            elif risk >= PROPHYLAXIS_RISK_FLOOR:
+                eligible.append((w, "prophylaxis"))
+        else:
+            if stage > 0:
+                if ikey not in IMMUNE_MEDIATED_INFECTIONS:
+                    continue
+                eligible.append((w, "treat"))
+            elif risk >= PROPHYLAXIS_RISK_FLOOR or is_cyber_surg:
+                eligible.append((w, "prophylaxis"))
+
+    now = time.time()
+    treat_duration = 4500
+
+    for w, mode in eligible:
+        if mode == "treat":
+            ikey = str(w.get("infection_type") or "")
+            if kind == "antibiotic":
+                if not targets:
+                    potency = 0.12
+                elif ikey in targets:
+                    potency = 0.28
+                else:
+                    potency = 0.08
+                w["cleaned_at"] = now
+                _set_injury_treatment_quality(w, 2)
+                au = float(w.get("antibiotic_until", 0.0) or 0.0)
+                w["antibiotic_until"] = max(au, now + treat_duration)
+                w["antibiotic_potency"] = max(float(w.get("antibiotic_potency", 0.0) or 0.0), potency)
+                w["antibiotic_profile"] = profile
+            else:
+                if not targets:
+                    potency = 0.14
+                elif ikey in targets:
+                    potency = 0.28
+                else:
+                    potency = 0.08
+                w["cleaned_at"] = now
+                _set_injury_treatment_quality(w, 2)
+                iu = float(w.get("immunosuppressant_until", 0.0) or 0.0)
+                w["immunosuppressant_until"] = max(iu, now + treat_duration)
+                w["immunosuppressant_potency"] = max(float(w.get("immunosuppressant_potency", 0.0) or 0.0), potency)
+                w["immunosuppressant_profile"] = profile
+        else:
+            if kind == "antibiotic":
+                potency = 0.11
+                abx_dur = 4200
+                au = float(w.get("antibiotic_until", 0.0) or 0.0)
+                w["antibiotic_until"] = max(au, now + abx_dur)
+                w["antibiotic_potency"] = max(float(w.get("antibiotic_potency", 0.0) or 0.0), potency)
+                w["antibiotic_profile"] = profile
+                _set_injury_treatment_quality(w, 1)
+            else:
+                potency = 0.12
+                im_dur = 4500
+                iu = float(w.get("immunosuppressant_until", 0.0) or 0.0)
+                w["immunosuppressant_until"] = max(iu, now + im_dur)
+                w["immunosuppressant_potency"] = max(float(w.get("immunosuppressant_potency", 0.0) or 0.0), potency)
+                w["immunosuppressant_profile"] = profile
+                _set_injury_treatment_quality(w, 1)
+                if bool(w.get("cyberware_dbref")) and w.get("type") == "surgery":
+                    rr = float(w.get("rejection_risk", 0.05) or 0.05)
+                    w["rejection_risk"] = max(0.0, rr - 0.03)
+
+    record_character_dose(target, profile, now)
+    if uses is not None:
+        pill_obj.db.uses_remaining = max(0, int(uses) - 1)
+
+    return True, ""
+
+
 def attempt_treat_infection(operator, target, body_part, tool_type=None, tool_obj=None):
-    """Reduce infection stage/risk on a specific body part."""
+    """Reduce infection stage/risk on a specific body part (field dressings / debridement only)."""
     _ensure_medical_db(target)
     if tool_type not in TOOL_CAN_TREAT_INFECTION:
-        return False, "You need antibiotics, medkit, or surgical kit to treat infection."
+        return False, "You need a medkit or surgical kit to treat infection in the field."
     wounds = [
         i for i in (target.db.injuries or [])
         if (i.get("body_part") or "").strip().lower() == (body_part or "").strip().lower()
@@ -609,44 +725,27 @@ def attempt_treat_infection(operator, target, body_part, tool_type=None, tool_ob
     if not wounds:
         return False, "No active infection there."
     wound = sorted(wounds, key=lambda i: int(i.get("infection_stage", 0) or 0), reverse=True)[0]
-    severe_type = (wound.get("infection_type") in ("chrome_interface_necrosis", "bloodfire_sepsis"))
+    infection_key = wound.get("infection_type") or ""
+
+    if infection_key in IMMUNE_MEDIATED_INFECTIONS:
+        return (
+            False,
+            "Immune-mediated implant rejection does not respond to field dressings or debridement. "
+            "Take prescribed immunosuppressant pills on schedule.",
+        )
+
+    severe_type = wound.get("infection_type") in ("chrome_interface_necrosis", "bloodfire_sepsis")
     if severe_type and int(wound.get("infection_stage", 0) or 0) >= 3 and tool_type != TOOL_SURGICAL_KIT:
         return False, "Advanced systemic/interface infection needs surgical debridement on an operating table."
-    infection_key = wound.get("infection_type") or ""
-    antibiotic_targets = set((getattr(getattr(tool_obj, "db", None), "antibiotic_targets", None) or []))
-    profile = getattr(getattr(tool_obj, "db", None), "antibiotic_profile", None) if tool_obj else None
-    if tool_type == TOOL_ANTIBIOTICS:
-        if not antibiotic_targets:
-            mod = 10
-            potency = 0.12
-            suffix = " (generic antibiotics only partially match this infection)"
-        elif infection_key in antibiotic_targets:
-            mod = 18
-            potency = 0.28
-            suffix = ""
-        else:
-            mod = 6
-            potency = 0.08
-            suffix = " (this antibiotic is the wrong spectrum)"
-    else:
-        mod = 10 if tool_type == TOOL_SURGICAL_KIT else 5
-        potency = 0.14
-        suffix = ""
+    mod = 10 if tool_type == TOOL_SURGICAL_KIT else 5
+    potency = 0.14
+    suffix = ""
     success_level, _ = _medicine_roll(operator, difficulty=12 + (4 * int(wound.get("infection_stage", 1) or 1)), modifier=mod)
     if success_level == 0:
         wound["infection_risk"] = min(1.0, float(wound.get("infection_risk", 0.0) or 0.0) + 0.08)
         return False, "The infection does not respond. Fever risk increases."
     wound["cleaned_at"] = time.time()
-    _set_injury_treatment_quality(wound, 2 if tool_type in (TOOL_ANTIBIOTICS, TOOL_SURGICAL_KIT) else 1)
-    if tool_type == TOOL_ANTIBIOTICS:
-        # Antibiotics now work as a timed course rather than an instant cure.
-        now = time.time()
-        duration = 5400 if success_level >= 3 else (3600 if success_level >= 2 else 2400)
-        active_until = float(wound.get("antibiotic_until", 0.0) or 0.0)
-        wound["antibiotic_until"] = max(active_until, now + duration)
-        wound["antibiotic_potency"] = max(float(wound.get("antibiotic_potency", 0.0) or 0.0), potency)
-        wound["antibiotic_profile"] = profile or "generic"
-        return True, "Antibiotic course started; response will build over time." + suffix
+    _set_injury_treatment_quality(wound, 2 if tool_type == TOOL_SURGICAL_KIT else 1)
 
     stage = int(wound.get("infection_stage", 0) or 0)
     wound["infection_stage"] = max(0, stage - (2 if success_level >= 3 else 1))
@@ -713,7 +812,7 @@ def get_treatment_options(operator, target, tools_by_type):
                 options.append(("clean", f"Clean wound ({part})", t, part))
                 break
 
-    # Infection treatment options.
+    # Infection: field care only (medkit / surgical). Antibiotics & immunosuppressants are oral pills.
     infected_parts = sorted({
         (i.get("body_part") or "").strip().lower()
         for i in injuries
@@ -722,7 +821,16 @@ def get_treatment_options(operator, target, tools_by_type):
     for part in infected_parts:
         if not part:
             continue
-        for t in TOOL_CAN_TREAT_INFECTION:
+        candidates = [
+            i for i in injuries
+            if (i.get("body_part") or "").strip().lower() == part
+            and int(i.get("infection_stage", 0) or 0) > 0
+        ]
+        worst = max(candidates, key=lambda i: int(i.get("infection_stage", 0) or 0))
+        itype = worst.get("infection_type") or ""
+        if itype in IMMUNE_MEDIATED_INFECTIONS:
+            continue
+        for t in (TOOL_MEDKIT, TOOL_SURGICAL_KIT):
             if tools_by_type.get(t):
                 options.append(("infection", f"Treat infection ({part})", t, part))
                 break

@@ -105,12 +105,36 @@ def _normalize_sdesc_for_match(name):
     return s
 
 
+def _parse_disambig_number(search_string):
+    """
+    Parse optional N- prefix or -N suffix (e.g. 1-average, person-2) for duplicate sdescs.
+    Returns (num or None, phrase_without_number).
+    """
+    if not search_string:
+        return None, search_string
+    phrase = search_string.strip()
+    if not phrase:
+        return None, phrase
+    m = re.match(r"^(\d+)[-\s]+(.+)$", phrase, re.IGNORECASE)
+    if m:
+        return int(m.group(1)), m.group(2).strip()
+    # Suffix: ...-N where N is digits only (rightmost hyphen segment)
+    if "-" in phrase:
+        left, right = phrase.rsplit("-", 1)
+        right = right.strip()
+        if right.isdigit():
+            left = left.strip()
+            if left:
+                return int(right), left
+    return None, phrase
+
+
 def find_targets_in_text(text, character_list, emitter):
     """
     Find character targets mentioned in emote text. Matches by key (name), by full sdesc,
     or by any word in the sdesc (e.g. "grin at average" matches "an average naked person").
-    When multiple characters share the same sdesc/word, use 1-average, 2-average etc.;
-    if no number is given, default to the first in room order.
+    When multiple characters share the same sdesc/word, use 1-average or average-1
+    (prefix or suffix); if no number is given, default to the first in room order.
     Returns list of (matched_string, char) for pronoun resolution and viewer replacement.
     """
     from world.rp_features import get_display_name_for_viewer
@@ -182,16 +206,23 @@ def find_targets_in_text(text, character_list, emitter):
     for phrase_or_word, char, num in match_specs:
         esc = re.escape(phrase_or_word)
         if num is not None:
-            pattern = r"(?<!\w)(%d-\s*(?:the\s+|a\s+|an\s+)?%s)(?!\w)" % (num, esc)
+            patterns = [
+                r"(?<!\w)(%d-\s*(?:the\s+|a\s+|an\s+)?%s)(?!\w)" % (num, esc),
+                r"(?<!\w)((?:the\s+|a\s+|an\s+)?%s)-\s*%d(?!\w)" % (esc, num),
+            ]
         else:
-            pattern = r"(?<!\w)(?:the\s+|a\s+|an\s+)?(%s)(?!\w)" % esc
-        for m in re.finditer(pattern, text, _RE_FLAGS):
-            start, end = m.start(), m.end()
-            if _overlaps(start, end):
-                continue
-            seen_positions.add((start, end))
-            matched = m.group(0)
-            targets.append((matched, char))
+            # Do not match a bare word/phrase if it is followed by -1, -2 (suffix disambiguation).
+            patterns = [
+                r"(?<!\w)(?:the\s+|a\s+|an\s+)?(%s)(?!\w)(?!-\d)" % esc,
+            ]
+        for pattern in patterns:
+            for m in re.finditer(pattern, text, _RE_FLAGS):
+                start, end = m.start(), m.end()
+                if _overlaps(start, end):
+                    continue
+                seen_positions.add((start, end))
+                matched = m.group(0)
+                targets.append((matched, char))
     # NOTE: We intentionally do NOT match by the character's internal key/name here.
     # Targeting should only work via sdesc/recog-visible names, not builder object keys.
     def pos_key(t):
@@ -203,7 +234,7 @@ def find_targets_in_text(text, character_list, emitter):
 
 def resolve_sdesc_to_characters(emitter, character_list, search_string):
     """
-    Resolve a search string like "tall man" or "1-tall man" to a list of matching characters.
+    Resolve a search string like "tall man", "1-tall man", or "tall man-2" to matching characters.
     Used by recog command and by look/search. Returns empty list if no match, [char] or [c1, c2, ...] if match.
     """
     from world.rp_features import get_display_name_for_viewer
@@ -212,14 +243,7 @@ def resolve_sdesc_to_characters(emitter, character_list, search_string):
     search_string = search_string.strip()
     if not search_string:
         return []
-    # Parse optional "N-" prefix
-    num = None
-    phrase = search_string
-    import re
-    m = re.match(r"^(\d+)[-\s]+(.+)$", search_string, re.IGNORECASE)
-    if m:
-        num = int(m.group(1))
-        phrase = m.group(2).strip()
+    num, phrase = _parse_disambig_number(search_string)
     phrase_norm = _normalize_sdesc_for_match(phrase)
     if not phrase_norm:
         return []

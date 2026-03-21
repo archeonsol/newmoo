@@ -1,6 +1,6 @@
 """
-Global use command — dispatches to cyberware station, perfume, medical tools,
-networked devices (Matrix hardware), or generic at_use.
+Global use command — dispatches to cyberware station, perfume, pill bottles,
+medical tools, networked devices (Matrix hardware), or generic at_use.
 
 Former `operate` / `op` behavior is merged here: use <device> opens the device menu.
 """
@@ -39,6 +39,8 @@ class CmdUse(Command):
       wield scanner
       use scanner on Bob   — bioscanner readout
 
+      use tacrolimus   — take a systemic dose (wield the bottle first)
+
       use hub   or   use handset   — open networked device menu (same as former |woperate|n)
     """
     key = "use"
@@ -65,6 +67,30 @@ class CmdUse(Command):
 
         parts = args.split(None, 2)
         obj_name = parts[0]
+        obj = _resolve_use_object(caller, obj_name)
+        if not obj:
+            return
+
+        try:
+            from typeclasses.med_pills import PillBottle, announce_pill_taken
+        except ImportError:
+            PillBottle = None
+            announce_pill_taken = None
+
+        if PillBottle and isinstance(obj, PillBottle):
+            if not _obj_in_hands(caller, obj):
+                return
+            if getattr(obj.db, "uses_remaining", 1) is not None and (obj.db.uses_remaining or 0) <= 0:
+                return
+            extra = args[len(obj_name) :].strip()
+            if extra.lower().startswith("on "):
+                extra = extra[3:].strip()
+            body_part = extra or None
+            success, _out_msg = obj.take_dose(caller, caller, body_part)
+            if success and announce_pill_taken:
+                announce_pill_taken(caller, obj.get_drug_display_name(caller))
+            return
+
         target = caller
         if len(parts) >= 3 and parts[1].lower() == "on":
             target = _resolve_medical_target(caller, parts[2], location=caller.location)
@@ -73,10 +99,6 @@ class CmdUse(Command):
             if not hasattr(target, "db"):
                 caller.msg("You cannot use that on them.")
                 return
-
-        obj = _resolve_use_object(caller, obj_name)
-        if not obj:
-            return
 
         # 1. Cyberware Customization Station
         try:

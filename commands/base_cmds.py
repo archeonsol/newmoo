@@ -143,7 +143,7 @@ class CmdLook(DefaultCmdLook):
                             matches = resolve_sdesc_to_characters(caller, char_objs, target_spec)
                             if matches:
                                 if len(matches) > 1:
-                                    caller.msg("Multiple people in the photo match that. Be more specific (use 1-<sdesc>, 2-<sdesc>, etc).")
+                                    caller.msg("Multiple people in the photo match that. Be more specific (use 1-<sdesc> or <sdesc>-1, etc).")
                                     return
                                 target = matches[0]
                         except Exception:

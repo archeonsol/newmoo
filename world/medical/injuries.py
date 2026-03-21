@@ -57,6 +57,12 @@ def ensure_injury_schema(injury):
     injury.setdefault("antibiotic_until", 0.0)
     injury.setdefault("antibiotic_potency", 0.0)
     injury.setdefault("antibiotic_profile", None)
+    injury.setdefault("immunosuppressant_until", 0.0)
+    injury.setdefault("immunosuppressant_potency", 0.0)
+    injury.setdefault("immunosuppressant_profile", None)
+    injury.setdefault("pill_last_dose", {})
+    if not isinstance(injury.get("pill_last_dose"), dict):
+        injury["pill_last_dose"] = {}
     injury["hp_occupied"] = max(0, int(injury.get("hp_occupied", 0) or 0))
     injury["severity"] = max(1, min(4, int(injury.get("severity", 1) or 1)))
     injury["bleed_rate"] = max(0.0, float(injury.get("bleed_rate", 0.0) or 0.0))

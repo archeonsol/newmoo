@@ -1,6 +1,7 @@
 """
 Medical tools and devices: scanners, bandages, medkits, suture kits, splints, defibrillator, etc.
-Use with the medical menu or 'use <tool> on <target>' for scan/treat. Defib: defib <target> or use defibrillator on <target>.
+Antibiotics and immunosuppressants are pill bottles (typeclasses.med_pills), not MedicalTools.
+Use the medical menu or 'use <tool> on <target>' for scan/treat. Defib: defib <target> or use defibrillator on <target>.
 """
 import random
 import time
@@ -18,7 +19,6 @@ from world.medical.medical_treatment import (
     TOOL_HEMOSTATIC,
     TOOL_SURGICAL_KIT,
     TOOL_TOURNIQUET,
-    TOOL_ANTIBIOTICS,
 )
 
 
@@ -152,123 +152,6 @@ class SurgicalKit(MedicalTool):
         super().at_object_creation()
         self.db.medical_tool_type = TOOL_SURGICAL_KIT
         self.db.uses_remaining = 5
-
-
-class CoAmoxiclav(MedicalTool):
-    """Co-amoxiclav (amoxicillin/clavulanate): broad skin/soft tissue coverage."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "co-amoxiclav"
-        self.db.antibiotic_profile = "co_amoxiclav"
-        self.db.antibiotic_targets = [
-            "surface_cellulitis",
-            "stitch_abscess",
-            "sewer_fever",
-        ]
-        self.db.uses_remaining = 4
-
-
-class Cephalexin(MedicalTool):
-    """Cephalexin: first-line skin/soft tissue oral cephalosporin."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "cephalexin"
-        self.db.antibiotic_profile = "cephalexin"
-        self.db.antibiotic_targets = [
-            "surface_cellulitis",
-            "stitch_abscess",
-        ]
-        self.db.uses_remaining = 5
-
-
-class Doxycycline(MedicalTool):
-    """Doxycycline: atypical/respiratory and mixed soft tissue support."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "doxycycline"
-        self.db.antibiotic_profile = "doxycycline"
-        self.db.antibiotic_targets = [
-            "sewer_fever",
-            "pleural_empyema",
-        ]
-        self.db.uses_remaining = 4
-
-
-class Metronidazole(MedicalTool):
-    """Metronidazole: anaerobic coverage for deep foul/necrotic wounds."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "metronidazole"
-        self.db.antibiotic_profile = "metronidazole"
-        self.db.antibiotic_targets = [
-            "anaerobic_wound_rot",
-        ]
-        self.db.uses_remaining = 4
-
-
-class Clindamycin(MedicalTool):
-    """Clindamycin: tissue/bone anaerobic and skin-adjacent coverage."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "clindamycin"
-        self.db.antibiotic_profile = "clindamycin"
-        self.db.antibiotic_targets = [
-            "anaerobic_wound_rot",
-            "bone_deep_osteitis",
-        ]
-        self.db.uses_remaining = 3
-
-
-class PiperacillinTazobactam(MedicalTool):
-    """Piperacillin/tazobactam: broad severe polymicrobial rescue coverage."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "piperacillin/tazobactam"
-        self.db.antibiotic_profile = "pip_tazo"
-        self.db.antibiotic_targets = [
-            "anaerobic_wound_rot",
-            "bone_deep_osteitis",
-            "pleural_empyema",
-            "sewer_fever",
-            "bloodfire_sepsis",
-        ]
-        self.db.uses_remaining = 2
-
-
-class Vancomycin(MedicalTool):
-    """Vancomycin: high-tier rescue for severe bloodstream/device infections."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "vancomycin"
-        self.db.antibiotic_profile = "vancomycin"
-        self.db.antibiotic_targets = [
-            "bloodfire_sepsis",
-            "chrome_interface_necrosis",
-        ]
-        self.db.uses_remaining = 2
-
-
-# Backward-compatible aliases for older prototypes/scripts.
-class Antibiotics(CoAmoxiclav):
-    """Compatibility alias -> co-amoxiclav."""
-    pass
-
-
-class AntiAnaerobeKit(Metronidazole):
-    """Compatibility alias -> metronidazole."""
-    pass
-
-
-class InterfacePhageCocktail(Vancomycin):
-    """Compatibility alias -> vancomycin."""
-    pass
 
 
 class ORStation(MedicalTool):
@@ -405,7 +288,7 @@ def get_medical_tools_from_inventory(character):
     """
     from world.medical.medical_treatment import (
         TOOL_SCANNER, TOOL_BANDAGES, TOOL_MEDKIT, TOOL_SUTURE_KIT,
-        TOOL_SPLINT, TOOL_HEMOSTATIC, TOOL_TOURNIQUET, TOOL_SURGICAL_KIT, TOOL_ANTIBIOTICS,
+        TOOL_SPLINT, TOOL_HEMOSTATIC, TOOL_TOURNIQUET, TOOL_SURGICAL_KIT,
     )
     result = {}
     if not character:

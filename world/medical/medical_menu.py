@@ -192,7 +192,6 @@ def _action_label(action_id, display_name, tool_type):
         "hemostatic": "hemostatic",
         "surgical_kit": "instruments",
         "tourniquet": "tourniquet",
-        "antibiotics": "antibiotics",
         "splint": "splint",
         "scanner": "scanner",
     }
