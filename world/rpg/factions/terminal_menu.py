@@ -5,6 +5,7 @@ EvMenu for faction registry terminals. IC terminal aesthetic; staff bypass.
 import time
 from datetime import datetime
 
+from evennia.utils.ansi import strip_ansi
 from evennia.utils.search import search_object
 
 from world.rpg.factions import get_faction, is_faction_member
@@ -54,17 +55,6 @@ def _terminal_fdata(terminal):
     return get_faction(key) if key else None
 
 
-def _caller_online_status(character):
-    if not character:
-        return "offline"
-    try:
-        if character.sessions.count():
-            return "ONLINE"
-    except Exception:
-        pass
-    return "offline"
-
-
 def _format_joined_ago(character, faction_key):
     joined = (character.db.faction_joined or {}).get(faction_key)
     if not joined:
@@ -88,9 +78,7 @@ def _pay_status_line(caller, fdata):
 def _get_terminal(caller, kwargs):
     t = kwargs.get("terminal")
     if not t:
-        t = getattr(getattr(caller, "ndb", None), "_evmenu", None)
-        if t:
-            t = getattr(t, "terminal", None)
+        t = getattr(getattr(caller, "ndb", None), "_faction_terminal", None)
     return t
 
 
@@ -98,6 +86,20 @@ def start_faction_terminal(caller, terminal):
     """Open the registry EvMenu for this terminal."""
     from evennia.utils.evmenu import EvMenu
 
+    for attr in (
+        "_faction_terminal",
+        "_faction_enlist_line",
+        "_faction_promote_line",
+        "_faction_demote_line",
+        "_faction_discharge_line",
+        "_faction_setrank_name_line",
+        "_faction_setrank_rank_line",
+        "_faction_setrank_target",
+    ):
+        try:
+            delattr(caller.ndb, attr)
+        except Exception:
+            pass
     try:
         caller.ndb._faction_terminal = terminal
     except Exception:
@@ -135,7 +137,6 @@ def node_terminal_main(caller, raw_string, **kwargs):
             text += "  |rACCESS DENIED.|n\n"
             text += f"  {_DIM}You are not a member of {fdata['name']}.{_N}\n"
         text += f"\n{_line(fdata)}\n"
-        text += "  q — Disconnect\n"
         options = [{"key": "q", "desc": "Disconnect", "goto": "node_terminal_exit"}]
         return text, options
 
@@ -164,23 +165,20 @@ def node_terminal_main(caller, raw_string, **kwargs):
         n += 1
 
     add_opt("Collect pay", "node_collect_pay")
-    if perm >= 1 or staff:
+    if staff:
         add_opt("View roster", "node_view_roster", roster_page=0)
     add_opt("View own record", "node_own_record")
 
-    if perm >= 2 or staff:
+    if perm >= 3 or staff:
         add_opt("Enlist new member", "node_enlist")
-    if perm >= 2 or staff:
+    if perm >= 3 or staff:
         add_opt("Promote member", "node_promote_pick")
-    if perm >= 2 or staff:
+    if perm >= 3 or staff:
         add_opt("Demote member", "node_demote_pick")
-    if perm >= 2 or staff:
+    if perm >= 3 or staff:
         add_opt("Discharge member", "node_discharge_pick")
     if perm >= 3 or staff:
-        add_opt("Set rank (leader)", "node_setrank_pick")
-
-    text += "  " + "\n  ".join([f"{i}. {o['desc']}" for i, o in enumerate(options, start=1)])
-    text += f"\n\n  q — Disconnect\n"
+        add_opt("Set rank (leader)", "node_setrank_pick_name")
 
     options.append({"key": "q", "desc": "Disconnect", "goto": "node_terminal_exit"})
 
@@ -214,16 +212,14 @@ def node_view_roster(caller, raw_string, **kwargs):
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 1 and not _is_staff(caller):
-        caller.msg("|rAccess denied. Insufficient clearance.|n")
+    if not _is_staff(caller):
+        caller.msg("|rAccess denied. Staff only.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
-    roster = get_faction_roster(fdata["key"])
+    roster = get_faction_roster(fdata["key"], limit=50)
     total = len(roster)
     start = page * ROSTER_PAGE_SIZE
     chunk = roster[start : start + ROSTER_PAGE_SIZE]
-    online_n = sum(1 for c, _ in roster if _caller_online_status(c) == "ONLINE")
 
     lines = [
         f"{_faction_line(fdata, '-')}",
@@ -233,15 +229,14 @@ def node_view_roster(caller, raw_string, **kwargs):
     for char, rnk in chunk:
         rname = get_rank_name(fdata["ranks"], rnk)
         joined = _format_joined_ago(char, fdata["key"])
-        on = _caller_online_status(char)
         lines.append(
-            f"  {str(char.key)[:22].ljust(22)} [{rnk}] {rname[:16].ljust(16)} {joined:>5}  {on}"
+            f"  {str(char.key)[:22].ljust(22)} [{rnk}] {rname[:16].ljust(16)} {joined:>5}"
         )
     lines.append(f"{_faction_line(fdata, '-')}")
-    lines.append(f"  {total} member(s). {online_n} online. (page {page + 1})")
+    lines.append(f"  {total} member(s). (page {page + 1})")
 
     text = "\n".join(lines) + "\n"
-    options = [{"key": "q", "desc": "Back", "goto": (node_terminal_main, {"terminal": terminal})}]
+    options = [{"key": "q", "desc": "Back", "goto": ("node_terminal_main", {"terminal": terminal})}]
     if start > 0:
         options.insert(
             0,
@@ -249,7 +244,7 @@ def node_view_roster(caller, raw_string, **kwargs):
                 "key": "p",
                 "desc": "Previous page",
                 "goto": (
-                    node_view_roster,
+                    "node_view_roster",
                     {"terminal": terminal, "roster_page": page - 1},
                 ),
             },
@@ -261,7 +256,7 @@ def node_view_roster(caller, raw_string, **kwargs):
                 "key": "n",
                 "desc": "Next page",
                 "goto": (
-                    node_view_roster,
+                    "node_view_roster",
                     {"terminal": terminal, "roster_page": page + 1},
                 ),
             },
@@ -303,27 +298,78 @@ def node_own_record(caller, raw_string, **kwargs):
         lines.append(f"  — {ev}: {details[:60]}")
 
     text = "\n".join(lines) + f"\n\n{_line(fdata)}\n  q — Back\n"
-    options = [{"key": "q", "desc": "Back", "goto": (node_terminal_main, {"terminal": terminal})}]
+    options = [{"key": "q", "desc": "Back", "goto": ("node_terminal_main", {"terminal": terminal})}]
     return text, options
 
 
 def _resolve_target_name(caller, name, terminal, remote_ok):
     """Resolve a character by key/name in room, or dbref if remote_ok (staff)."""
-    name = (name or "").strip()
+    name = strip_ansi(name or "").strip()
     if not name:
         return None
+
+    try:
+        from typeclasses.characters import Character
+    except ImportError:
+        Character = None
+
+    if name.lower() in ("me", "self") and Character and isinstance(caller, Character):
+        return caller
+
     if name.startswith("#"):
         if not remote_ok:
             return None
         o = search_object(name)
-        return o[0] if o else None
-    room = caller.location
-    if not room:
+        target = o[0] if o else None
+    else:
+        room = caller.location
+        if not room:
+            return None
+        results = caller.search(
+            name,
+            location=room,
+            quiet=True,
+            use_locks=False,
+        )
+        if not results:
+            target = _scan_room_for_character_name(room, name)
+        else:
+            target = results[0] if isinstance(results, (list, tuple)) else results
+
+    if not target or not hasattr(target, "tags") or not hasattr(target, "db"):
         return None
-    results = caller.search(name, location=room, quiet=True)
-    if not results:
+    if Character and isinstance(target, Character):
+        return target
+    try:
+        from typeclasses.npc import NPC
+
+        if isinstance(target, NPC):
+            return target
+    except ImportError:
+        pass
+    return None
+
+
+def _scan_room_for_character_name(room, name):
+    """Case-insensitive key/alias match; avoids search-lock false negatives."""
+    try:
+        from typeclasses.characters import Character
+    except ImportError:
         return None
-    return results[0] if isinstance(results, (list, tuple)) else results
+
+    want = name.strip().lower()
+    for obj in room.contents:
+        if not isinstance(obj, Character):
+            continue
+        if getattr(obj, "key", "").strip().lower() == want:
+            return obj
+        try:
+            for al in obj.aliases.all():
+                if str(al).strip().lower() == want:
+                    return obj
+        except Exception:
+            pass
+    return None
 
 
 def node_enlist(caller, raw_string, **kwargs):
@@ -333,15 +379,36 @@ def node_enlist(caller, raw_string, **kwargs):
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
     perm = get_member_permission(caller, fdata["key"])
-    if perm < 2 and not _is_staff(caller):
+    if perm < 3 and not _is_staff(caller):
         caller.msg("|rAccess denied. Insufficient clearance.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
     wait_key = "_faction_enlist_line"
-    if getattr(caller.ndb, wait_key, None) != 1:
-        setattr(caller.ndb, wait_key, 1)
+    if not getattr(caller.ndb, wait_key, False):
+        setattr(caller.ndb, wait_key, True)
         text = "Enter name of character to enlist (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Cancel", "goto": ("node_enlist_cancel", {"terminal": terminal})}]
+        options = [
+            {"key": "_default", "goto": ("node_enlist", {"terminal": terminal})},
+            {"key": "q", "desc": "Cancel", "goto": ("node_enlist_cancel", {"terminal": terminal})},
+        ]
+        return text, options
+
+    line = (raw_string or "").strip()
+    if line.lower() in ("q", "quit", "cancel", ""):
+        try:
+            delattr(caller.ndb, wait_key)
+        except Exception:
+            pass
+        return node_terminal_main(caller, "", terminal=terminal)
+
+    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
+    if not target:
+        caller.msg("|rNo match. Try again or type |wq|n to cancel.|n")
+        text = "Enter name of character to enlist (or |wq|n to cancel):\n"
+        options = [
+            {"key": "_default", "goto": ("node_enlist", {"terminal": terminal})},
+            {"key": "q", "desc": "Cancel", "goto": ("node_enlist_cancel", {"terminal": terminal})},
+        ]
         return text, options
 
     try:
@@ -349,20 +416,8 @@ def node_enlist(caller, raw_string, **kwargs):
     except Exception:
         pass
 
-    line = (raw_string or "").strip()
-    if line.lower() in ("q", "quit", "cancel"):
-        return node_terminal_main(caller, "", terminal=terminal)
-
-    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
-    if not target:
-        caller.msg("No match. Enter a name of someone present, or #dbref (staff).")
-        setattr(caller.ndb, wait_key, 1)
-        text = "Enter name of character to enlist (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Cancel", "goto": ("node_enlist_cancel", {"terminal": terminal})}]
-        return text, options
-
     if not hasattr(target, "tags"):
-        caller.msg("Invalid target.")
+        caller.msg("|rInvalid target.|n")
         return node_terminal_main(caller, "", terminal=terminal)
 
     return node_enlist_confirm(
@@ -412,8 +467,8 @@ def node_enlist_confirm(caller, raw_string, **kwargs):
         f"  y — Confirm\n  n — Cancel\n"
     )
     options = [
-        {"key": ("y", "yes", "1"), "desc": "Confirm", "goto": (node_enlist_confirm, kwargs)},
-        {"key": ("n", "no", "2"), "desc": "Cancel", "goto": (node_terminal_main, {"terminal": terminal})},
+        {"key": ("y", "yes", "1"), "desc": "Confirm", "goto": ("node_enlist_confirm", kwargs)},
+        {"key": ("n", "no", "2"), "desc": "Cancel", "goto": ("node_terminal_main", {"terminal": terminal})},
     ]
     return text, options
 
@@ -423,12 +478,10 @@ def _can_promote_to(caller, fdata, target, new_rank):
     staff = _is_staff(caller)
     if staff:
         return True, None
-    op_rank = get_member_rank(caller, fdata["key"])
     perm = get_member_permission(caller, fdata["key"])
-    if perm >= 3:
-        return True, None
-    if perm < 2:
-        return False, "Insufficient clearance."
+    if perm < 3:
+        return False, "Insufficient clearance. Leadership only."
+    op_rank = get_member_rank(caller, fdata["key"])
     if new_rank >= op_rank:
         return False, "You cannot promote anyone to your rank or above."
     return True, None
@@ -439,12 +492,10 @@ def _can_affect_rank(caller, fdata, target_rank, discharge=False):
     staff = _is_staff(caller)
     if staff:
         return True, None
-    op_rank = get_member_rank(caller, fdata["key"])
     perm = get_member_permission(caller, fdata["key"])
-    if perm >= 3:
-        return True, None
-    if perm < 2:
-        return False, "Insufficient clearance."
+    if perm < 3:
+        return False, "Insufficient clearance. Leadership only."
+    op_rank = get_member_rank(caller, fdata["key"])
     if target_rank >= op_rank:
         return False, "Target's rank is not below yours."
     return True, None
@@ -456,33 +507,42 @@ def node_promote_pick(caller, raw_string, **kwargs):
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
     perm = get_member_permission(caller, fdata["key"])
-    if perm < 2 and not _is_staff(caller):
+    if perm < 3 and not _is_staff(caller):
         caller.msg("|rAccess denied.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
     wait_key = "_faction_promote_line"
-    if getattr(caller.ndb, wait_key, None) != 1:
-        setattr(caller.ndb, wait_key, 1)
+    if not getattr(caller.ndb, wait_key, False):
+        setattr(caller.ndb, wait_key, True)
         text = "Name of member to promote (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Back", "goto": ("node_promote_cancel", {"terminal": terminal})}]
+        options = [
+            {"key": "_default", "goto": ("node_promote_pick", {"terminal": terminal})},
+            {"key": "q", "desc": "Back", "goto": ("node_promote_cancel", {"terminal": terminal})},
+        ]
+        return text, options
+
+    line = (raw_string or "").strip()
+    if line.lower() in ("q", "quit", "cancel", ""):
+        try:
+            delattr(caller.ndb, wait_key)
+        except Exception:
+            pass
+        return node_terminal_main(caller, "", terminal=terminal)
+
+    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
+    if not target:
+        caller.msg("|rNo match. Try again or type |wq|n to cancel.|n")
+        text = "Name of member to promote (or |wq|n to cancel):\n"
+        options = [
+            {"key": "_default", "goto": ("node_promote_pick", {"terminal": terminal})},
+            {"key": "q", "desc": "Back", "goto": ("node_promote_cancel", {"terminal": terminal})},
+        ]
         return text, options
 
     try:
         delattr(caller.ndb, wait_key)
     except Exception:
         pass
-
-    line = (raw_string or "").strip()
-    if line.lower() in ("q", "quit", "cancel"):
-        return node_terminal_main(caller, "", terminal=terminal)
-
-    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
-    if not target:
-        caller.msg("No match.")
-        setattr(caller.ndb, wait_key, 1)
-        text = "Name of member to promote (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Back", "goto": ("node_promote_cancel", {"terminal": terminal})}]
-        return text, options
 
     if target == caller:
         caller.msg("You cannot promote yourself.")
@@ -530,7 +590,12 @@ def node_promote_confirm(caller, raw_string, **kwargs):
     if raw_string and raw_string.strip().lower() in ("y", "yes", "1"):
         if not target or not fdata:
             return node_terminal_main(caller, raw_string, terminal=terminal)
-        ok, msg = promote(target, fdata["key"], promoted_by=caller.key)
+        ok, msg = promote(
+            target,
+            fdata["key"],
+            promoted_by=caller.key,
+            operator=caller,
+        )
         caller.msg(msg if ok else f"|r{msg}|n")
         if ok and target != caller:
             target.msg(f"|yYour rank in {fdata['name']} has changed.|n")
@@ -548,8 +613,8 @@ def node_promote_confirm(caller, raw_string, **kwargs):
         f"  y / n\n"
     )
     options = [
-        {"key": ("y", "yes"), "desc": "Confirm", "goto": (node_promote_confirm, kwargs)},
-        {"key": ("n", "no", "q"), "desc": "Cancel", "goto": (node_terminal_main, {"terminal": terminal})},
+        {"key": ("y", "yes"), "desc": "Confirm", "goto": ("node_promote_confirm", kwargs)},
+        {"key": ("n", "no", "q"), "desc": "Cancel", "goto": ("node_terminal_main", {"terminal": terminal})},
     ]
     return text, options
 
@@ -560,33 +625,42 @@ def node_demote_pick(caller, raw_string, **kwargs):
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
     perm = get_member_permission(caller, fdata["key"])
-    if perm < 2 and not _is_staff(caller):
+    if perm < 3 and not _is_staff(caller):
         caller.msg("|rAccess denied.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
     wait_key = "_faction_demote_line"
-    if getattr(caller.ndb, wait_key, None) != 1:
-        setattr(caller.ndb, wait_key, 1)
+    if not getattr(caller.ndb, wait_key, False):
+        setattr(caller.ndb, wait_key, True)
         text = "Name of member to demote (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Back", "goto": ("node_demote_cancel", {"terminal": terminal})}]
+        options = [
+            {"key": "_default", "goto": ("node_demote_pick", {"terminal": terminal})},
+            {"key": "q", "desc": "Back", "goto": ("node_demote_cancel", {"terminal": terminal})},
+        ]
+        return text, options
+
+    line = (raw_string or "").strip()
+    if line.lower() in ("q", "quit", "cancel", ""):
+        try:
+            delattr(caller.ndb, wait_key)
+        except Exception:
+            pass
+        return node_terminal_main(caller, "", terminal=terminal)
+
+    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
+    if not target:
+        caller.msg("|rNo match. Try again or type |wq|n to cancel.|n")
+        text = "Name of member to demote (or |wq|n to cancel):\n"
+        options = [
+            {"key": "_default", "goto": ("node_demote_pick", {"terminal": terminal})},
+            {"key": "q", "desc": "Back", "goto": ("node_demote_cancel", {"terminal": terminal})},
+        ]
         return text, options
 
     try:
         delattr(caller.ndb, wait_key)
     except Exception:
         pass
-
-    line = (raw_string or "").strip()
-    if line.lower() in ("q", "quit", "cancel"):
-        return node_terminal_main(caller, "", terminal=terminal)
-
-    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
-    if not target:
-        caller.msg("No match.")
-        setattr(caller.ndb, wait_key, 1)
-        text = "Name of member to demote (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Back", "goto": ("node_demote_cancel", {"terminal": terminal})}]
-        return text, options
 
     if target == caller:
         caller.msg("You cannot demote yourself.")
@@ -621,7 +695,12 @@ def node_demote_confirm(caller, raw_string, **kwargs):
     if raw_string and raw_string.strip().lower() in ("y", "yes", "1"):
         if not target or not fdata:
             return node_terminal_main(caller, raw_string, terminal=terminal)
-        ok, msg = demote(target, fdata["key"], demoted_by=caller.key)
+        ok, msg = demote(
+            target,
+            fdata["key"],
+            demoted_by=caller.key,
+            operator=caller,
+        )
         caller.msg(msg if ok else f"|r{msg}|n")
         if ok and target != caller:
             target.msg(f"|yYour rank in {fdata['name']} has changed.|n")
@@ -636,8 +715,8 @@ def node_demote_confirm(caller, raw_string, **kwargs):
     cur = get_member_rank(target, fdata["key"])
     text = f"Demote |w{target.key}|n from rank {cur} by one step?\n  y / n\n"
     options = [
-        {"key": ("y", "yes"), "desc": "Confirm", "goto": (node_demote_confirm, kwargs)},
-        {"key": ("n", "no", "q"), "desc": "Cancel", "goto": (node_terminal_main, {"terminal": terminal})},
+        {"key": ("y", "yes"), "desc": "Confirm", "goto": ("node_demote_confirm", kwargs)},
+        {"key": ("n", "no", "q"), "desc": "Cancel", "goto": ("node_terminal_main", {"terminal": terminal})},
     ]
     return text, options
 
@@ -648,33 +727,42 @@ def node_discharge_pick(caller, raw_string, **kwargs):
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
     perm = get_member_permission(caller, fdata["key"])
-    if perm < 2 and not _is_staff(caller):
+    if perm < 3 and not _is_staff(caller):
         caller.msg("|rAccess denied.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
     wait_key = "_faction_discharge_line"
-    if getattr(caller.ndb, wait_key, None) != 1:
-        setattr(caller.ndb, wait_key, 1)
+    if not getattr(caller.ndb, wait_key, False):
+        setattr(caller.ndb, wait_key, True)
         text = "Name of member to discharge (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Back", "goto": ("node_discharge_cancel", {"terminal": terminal})}]
+        options = [
+            {"key": "_default", "goto": ("node_discharge_pick", {"terminal": terminal})},
+            {"key": "q", "desc": "Back", "goto": ("node_discharge_cancel", {"terminal": terminal})},
+        ]
+        return text, options
+
+    line = (raw_string or "").strip()
+    if line.lower() in ("q", "quit", "cancel", ""):
+        try:
+            delattr(caller.ndb, wait_key)
+        except Exception:
+            pass
+        return node_terminal_main(caller, "", terminal=terminal)
+
+    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
+    if not target:
+        caller.msg("|rNo match. Try again or type |wq|n to cancel.|n")
+        text = "Name of member to discharge (or |wq|n to cancel):\n"
+        options = [
+            {"key": "_default", "goto": ("node_discharge_pick", {"terminal": terminal})},
+            {"key": "q", "desc": "Back", "goto": ("node_discharge_cancel", {"terminal": terminal})},
+        ]
         return text, options
 
     try:
         delattr(caller.ndb, wait_key)
     except Exception:
         pass
-
-    line = (raw_string or "").strip()
-    if line.lower() in ("q", "quit", "cancel"):
-        return node_terminal_main(caller, "", terminal=terminal)
-
-    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
-    if not target:
-        caller.msg("No match.")
-        setattr(caller.ndb, wait_key, 1)
-        text = "Name of member to discharge (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Back", "goto": ("node_discharge_cancel", {"terminal": terminal})}]
-        return text, options
 
     if target == caller:
         caller.msg("You cannot discharge yourself from this terminal.")
@@ -726,13 +814,13 @@ def node_discharge_confirm(caller, raw_string, **kwargs):
         f"  y / n\n"
     )
     options = [
-        {"key": ("y", "yes"), "desc": "Confirm", "goto": (node_discharge_confirm, kwargs)},
-        {"key": ("n", "no", "q"), "desc": "Cancel", "goto": (node_terminal_main, {"terminal": terminal})},
+        {"key": ("y", "yes"), "desc": "Confirm", "goto": ("node_discharge_confirm", kwargs)},
+        {"key": ("n", "no", "q"), "desc": "Cancel", "goto": ("node_terminal_main", {"terminal": terminal})},
     ]
     return text, options
 
 
-def node_setrank_pick(caller, raw_string, **kwargs):
+def node_setrank_pick_name(caller, raw_string, **kwargs):
     terminal = kwargs.get("terminal") or _get_terminal(caller, kwargs)
     fdata = _terminal_fdata(terminal)
     if not fdata:
@@ -742,72 +830,111 @@ def node_setrank_pick(caller, raw_string, **kwargs):
         caller.msg("|rAccess denied. Leader clearance required.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
-    tgt = getattr(caller.ndb, "_faction_setrank_target", None)
-    if tgt is None:
-        wait_key = "_faction_setrank_name_line"
-        if getattr(caller.ndb, wait_key, None) != 1:
-            setattr(caller.ndb, wait_key, 1)
-            text = "Name of member (or |wq|n to cancel):\n"
-            options = [{"key": "q", "desc": "Back", "goto": ("node_setrank_cancel", {"terminal": terminal})}]
-            return text, options
+    wait_key = "_faction_setrank_name_line"
+    if not getattr(caller.ndb, wait_key, False):
+        setattr(caller.ndb, wait_key, True)
+        text = "Name of member (or |wq|n to cancel):\n"
+        options = [
+            {"key": "_default", "goto": ("node_setrank_pick_name", {"terminal": terminal})},
+            {"key": "q", "desc": "Back", "goto": ("node_setrank_cancel", {"terminal": terminal})},
+        ]
+        return text, options
+
+    line = (raw_string or "").strip()
+    if line.lower() in ("q", "quit", "cancel", ""):
         try:
             delattr(caller.ndb, wait_key)
         except Exception:
             pass
-        line = (raw_string or "").strip()
-        if line.lower() in ("q", "quit", "cancel"):
-            return node_terminal_main(caller, "", terminal=terminal)
-        target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
-        if not target:
-            caller.msg("No match.")
-            setattr(caller.ndb, wait_key, 1)
-            text = "Name of member (or |wq|n to cancel):\n"
-            options = [{"key": "q", "desc": "Back", "goto": ("node_setrank_cancel", {"terminal": terminal})}]
-            return text, options
-        if not is_faction_member(target, fdata["key"]):
-            caller.msg("Not a member.")
-            return node_terminal_main(caller, "", terminal=terminal)
-        caller.ndb._faction_setrank_target = target
-        setattr(caller.ndb, "_faction_setrank_rank_line", 1)
-        text = "Enter new rank number (or |wq|n to cancel):\n"
-        options = [{"key": "q", "desc": "Back", "goto": ("node_setrank_cancel", {"terminal": terminal})}]
+        return node_terminal_main(caller, "", terminal=terminal)
+
+    target = _resolve_target_name(caller, line, terminal, remote_ok=_is_staff(caller))
+    if not target:
+        caller.msg("|rNo match. Try again or type |wq|n to cancel.|n")
+        text = "Name of member (or |wq|n to cancel):\n"
+        options = [
+            {"key": "_default", "goto": ("node_setrank_pick_name", {"terminal": terminal})},
+            {"key": "q", "desc": "Back", "goto": ("node_setrank_cancel", {"terminal": terminal})},
+        ]
         return text, options
 
-    wait_rank = "_faction_setrank_rank_line"
-    if getattr(caller.ndb, wait_rank, None) == 1:
+    if not is_faction_member(target, fdata["key"]):
+        caller.msg("|rNot a member.|n")
         try:
-            delattr(caller.ndb, wait_rank)
+            delattr(caller.ndb, wait_key)
         except Exception:
             pass
-        line = (raw_string or "").strip()
-        if line.lower() in ("q", "quit", "cancel"):
-            try:
-                delattr(caller.ndb, "_faction_setrank_target")
-            except Exception:
-                pass
-            return node_terminal_main(caller, "", terminal=terminal)
-        try:
-            new_r = int(line)
-        except ValueError:
-            caller.msg("Enter a number.")
-            setattr(caller.ndb, wait_rank, 1)
-            text = "Enter new rank number (or |wq|n to cancel):\n"
-            options = [{"key": "q", "desc": "Back", "goto": ("node_setrank_cancel", {"terminal": terminal})}]
-            return text, options
-        target = tgt
-        try:
-            delattr(caller.ndb, "_faction_setrank_target")
-        except Exception:
-            pass
-        return node_setrank_confirm(
-            caller,
-            "",
-            terminal=terminal,
-            setrank_target=target,
-            setrank_new=new_r,
-        )
+        return node_terminal_main(caller, "", terminal=terminal)
 
-    return node_terminal_main(caller, raw_string, terminal=terminal)
+    try:
+        delattr(caller.ndb, wait_key)
+    except Exception:
+        pass
+
+    return node_setrank_pick_rank(
+        caller,
+        "",
+        terminal=terminal,
+        setrank_target=target,
+    )
+
+
+def node_setrank_pick_rank(caller, raw_string, **kwargs):
+    terminal = kwargs.get("terminal") or _get_terminal(caller, kwargs)
+    fdata = _terminal_fdata(terminal)
+    target = kwargs.get("setrank_target")
+
+    if not fdata or not target:
+        return node_terminal_main(caller, raw_string, terminal=terminal)
+
+    perm = get_member_permission(caller, fdata["key"])
+    if perm < 3 and not _is_staff(caller):
+        caller.msg("|rAccess denied. Leader clearance required.|n")
+        return node_terminal_main(caller, raw_string, terminal=terminal)
+
+    wait_key = "_faction_setrank_rank_line"
+    if not getattr(caller.ndb, wait_key, False):
+        setattr(caller.ndb, wait_key, True)
+        text = "Enter new rank number (or |wq|n to cancel):\n"
+        rank_kw = {"terminal": terminal, "setrank_target": target}
+        options = [
+            {"key": "_default", "goto": ("node_setrank_pick_rank", rank_kw)},
+            {"key": "q", "desc": "Back", "goto": ("node_setrank_cancel", {"terminal": terminal})},
+        ]
+        return text, options
+
+    line = (raw_string or "").strip()
+    if line.lower() in ("q", "quit", "cancel", ""):
+        try:
+            delattr(caller.ndb, wait_key)
+        except Exception:
+            pass
+        return node_terminal_main(caller, "", terminal=terminal)
+
+    rank_kw = {"terminal": terminal, "setrank_target": target}
+    try:
+        new_r = int(line)
+    except ValueError:
+        caller.msg("|rEnter a number.|n")
+        text = "Enter new rank number (or |wq|n to cancel):\n"
+        options = [
+            {"key": "_default", "goto": ("node_setrank_pick_rank", rank_kw)},
+            {"key": "q", "desc": "Back", "goto": ("node_setrank_cancel", {"terminal": terminal})},
+        ]
+        return text, options
+
+    try:
+        delattr(caller.ndb, wait_key)
+    except Exception:
+        pass
+
+    return node_setrank_confirm(
+        caller,
+        "",
+        terminal=terminal,
+        setrank_target=target,
+        setrank_new=new_r,
+    )
 
 
 def node_setrank_cancel(caller, raw_string, **kwargs):
@@ -847,7 +974,7 @@ def node_setrank_confirm(caller, raw_string, **kwargs):
     cur = get_member_rank(target, fdata["key"])
     text = f"Set |w{target.key}|n from rank {cur} to {new_r}? y/n\n"
     options = [
-        {"key": ("y", "yes"), "desc": "Confirm", "goto": (node_setrank_confirm, kwargs)},
-        {"key": ("n", "no", "q"), "desc": "Cancel", "goto": (node_terminal_main, {"terminal": terminal})},
+        {"key": ("y", "yes"), "desc": "Confirm", "goto": ("node_setrank_confirm", kwargs)},
+        {"key": ("n", "no", "q"), "desc": "Cancel", "goto": ("node_terminal_main", {"terminal": terminal})},
     ]
     return text, options

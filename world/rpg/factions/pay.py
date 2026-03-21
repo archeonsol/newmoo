@@ -8,7 +8,7 @@ should use the same field for a single wallet balance.
 
 import time
 
-from world.rpg.factions.membership import get_member_rank
+from world.rpg.factions.membership import _log_faction_event, get_member_rank
 
 PAY_COOLDOWN_SECONDS = 7 * 24 * 60 * 60  # 7 days
 
@@ -74,5 +74,12 @@ def collect_pay(character, faction_key):
     pay_times = character.db.faction_pay_collected or {}
     pay_times[fdata["key"]] = time.time()
     character.db.faction_pay_collected = pay_times
+
+    _log_faction_event(
+        character,
+        fdata["key"],
+        "pay_collected",
+        f"{amount} credits",
+    )
 
     return True, f"Collected {amount} from {fdata['name']}.", amount

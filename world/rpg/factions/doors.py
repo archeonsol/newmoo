@@ -1,7 +1,12 @@
 """
 Door pairing, bioscan checks, and auto-close for faction-secured exits.
 Used by typeclasses.exits.Exit and commands.door_cmds.
+
+Keys: has_key() expects carried objects to use Evennia tags with category "key"
+(the tag key string is the key id, e.g. obj.tags.add("imp_hq_master", category="key")).
 """
+
+import time
 
 from evennia.utils import delay
 from evennia.utils.search import search_object
@@ -12,6 +17,15 @@ from world.rpg.factions.membership import get_member_rank
 
 def _resolve_door_pair_exit(exit_obj):
     """Return the paired exit object from exit.db.door_pair (dbref int or #id)."""
+    ndb = getattr(exit_obj, "ndb", None)
+    if ndb is not None:
+        cached = getattr(ndb, "_door_pair_obj", None)
+        if cached is not None:
+            try:
+                if getattr(cached, "id", None):
+                    return cached
+            except Exception:
+                pass
     ref = getattr(getattr(exit_obj, "db", None), "door_pair", None)
     if ref is None:
         return None
@@ -26,7 +40,10 @@ def _resolve_door_pair_exit(exit_obj):
         except ValueError:
             return None
     res = search_object(f"#{rid}")
-    return res[0] if res else None
+    pair = res[0] if res else None
+    if pair is not None and ndb is not None:
+        ndb._door_pair_obj = pair
+    return pair
 
 
 def sync_door_pair(exit_obj, open_state):
@@ -34,6 +51,11 @@ def sync_door_pair(exit_obj, open_state):
     pair = _resolve_door_pair_exit(exit_obj)
     if pair and getattr(pair.db, "door", None):
         pair.db.door_open = bool(open_state)
+        pair_loc = pair.location
+        if pair_loc and hasattr(pair_loc, "msg_contents"):
+            door_name = getattr(pair.db, "door_name", None) or "door"
+            state = "opens" if open_state else "closes"
+            pair_loc.msg_contents(f"The {door_name} {state} from the other side.")
 
 
 def auto_close_door(exit_id):
@@ -85,12 +107,34 @@ def staff_bypass(character):
     return False
 
 
+def _log_bioscan_attempt(character, exit_obj, passed=False):
+    """Store bioscan attempts on the exit for security review (capped)."""
+    log = exit_obj.db.bioscan_log or []
+    log.append(
+        {
+            "character_id": getattr(character, "id", None),
+            "character_name": getattr(character, "key", "?"),
+            "time": time.time(),
+            "passed": passed,
+        }
+    )
+    if len(log) > 30:
+        log = log[-30:]
+    exit_obj.db.bioscan_log = log
+
+
 def run_bioscan(character, exit_obj):
     """
     Run bioscan verification. Returns (passed: bool, message: str).
     """
     if staff_bypass(character):
         return True, "Staff override accepted."
+
+    now = time.time()
+    last = getattr(character.ndb, "_last_bioscan", 0) or 0
+    if now - last < 3:
+        return False, "Scanner cycling. Wait."
+    character.ndb._last_bioscan = now
 
     scan_type = getattr(exit_obj.db, "bioscan_type", None) or "faction"
 
@@ -100,6 +144,7 @@ def run_bioscan(character, exit_obj):
             return False, "Bioscan misconfigured. No faction set."
         if is_faction_member(character, faction_key):
             return True, "Faction membership confirmed."
+        _log_bioscan_attempt(character, exit_obj, passed=False)
         return False, "Faction membership not detected."
 
     if scan_type == "rank":
@@ -111,7 +156,9 @@ def run_bioscan(character, exit_obj):
         if rank >= min_rank:
             return True, "Rank clearance confirmed."
         if rank > 0:
+            _log_bioscan_attempt(character, exit_obj, passed=False)
             return False, "Insufficient rank clearance."
+        _log_bioscan_attempt(character, exit_obj, passed=False)
         return False, "Faction membership not detected."
 
     if scan_type == "whitelist":
@@ -120,9 +167,12 @@ def run_bioscan(character, exit_obj):
         dbref = getattr(character, "dbref", None)
         if cid in whitelist or dbref in whitelist:
             return True, "Identity confirmed."
+        _log_bioscan_attempt(character, exit_obj, passed=False)
         return False, "Identity not on access list."
 
     if scan_type == "custom":
+        _log_bioscan_attempt(character, exit_obj, passed=False)
         return False, "Custom bioscan not implemented."
 
+    _log_bioscan_attempt(character, exit_obj, passed=False)
     return False, "Unknown bioscan type."

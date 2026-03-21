@@ -18,20 +18,10 @@ import time
 from world.rpg.factions import get_faction, get_character_factions
 from world.rpg.factions.ranks import get_rank_info, get_max_rank, get_rank_name, get_rank_permission
 
-_ROSTER_TYPECLASSES = frozenset(
-    (
-        "typeclasses.characters.Character",
-        "typeclasses.npc.NPC",
-    )
-)
-
 
 def _is_roster_eligible(obj):
     """True if object should appear on faction roster (living character types only)."""
-    if not obj:
-        return False
-    path = getattr(obj, "typeclass_path", None) or ""
-    if path not in _ROSTER_TYPECLASSES:
+    if not obj or not hasattr(obj, "db"):
         return False
     try:
         from typeclasses.corpse import Corpse
@@ -40,7 +30,21 @@ def _is_roster_eligible(obj):
             return False
     except ImportError:
         pass
-    return True
+    try:
+        from typeclasses.characters import Character
+
+        if isinstance(obj, Character):
+            return True
+    except ImportError:
+        pass
+    try:
+        from typeclasses.npc import NPC
+
+        if isinstance(obj, NPC):
+            return True
+    except ImportError:
+        pass
+    return False
 
 
 def enlist(character, faction_key, rank=None, enlisted_by=None):
@@ -116,8 +120,11 @@ def discharge(character, faction_key, discharged_by=None, reason="discharged"):
     return True, f"Discharged from {fdata['name']}. Reason: {reason}."
 
 
-def promote(character, faction_key, promoted_by=None):
-    """Increase a character's rank by 1 in the given faction. Returns (success, message)."""
+def promote(character, faction_key, promoted_by=None, operator=None):
+    """Increase a character's rank by 1 in the given faction. Returns (success, message).
+
+    If operator is set, enforces leadership permission (3+) and rank rules; staff (perm 99) bypass rank limits.
+    """
     fdata = get_faction(faction_key)
     if not fdata:
         return False, f"Unknown faction: {faction_key}"
@@ -126,8 +133,18 @@ def promote(character, faction_key, promoted_by=None):
         return False, f"Not a member of {fdata['name']}."
 
     ranks = character.db.faction_ranks or {}
-    current = ranks.get(fdata["key"], 1)
+    current = ranks.get(fdata["key"], fdata.get("default_rank", 1))
     new_rank = current + 1
+
+    if operator is not None:
+        op_perm = get_member_permission(operator, faction_key)
+        if op_perm < 3:
+            return False, "Only faction leadership can promote members."
+        if op_perm != 99:
+            op_rank = get_member_rank(operator, faction_key)
+            if new_rank >= op_rank:
+                return False, "Cannot promote someone to your rank or above."
+
     max_r = get_max_rank(fdata["ranks"])
 
     if new_rank > max_r:
@@ -150,8 +167,11 @@ def promote(character, faction_key, promoted_by=None):
     return True, f"Promoted to {rank_info['name']} in {fdata['name']}."
 
 
-def demote(character, faction_key, demoted_by=None):
-    """Decrease a character's rank by 1. Cannot go below rank 1. Returns (success, message)."""
+def demote(character, faction_key, demoted_by=None, operator=None):
+    """Decrease a character's rank by 1. Cannot go below rank 1. Returns (success, message).
+
+    If operator is set, enforces leadership permission (3+) and rank rules; staff (perm 99) bypass rank limits.
+    """
     fdata = get_faction(faction_key)
     if not fdata:
         return False, f"Unknown faction: {faction_key}"
@@ -160,11 +180,20 @@ def demote(character, faction_key, demoted_by=None):
         return False, f"Not a member of {fdata['name']}."
 
     ranks = character.db.faction_ranks or {}
-    current = ranks.get(fdata["key"], 1)
+    current = ranks.get(fdata["key"], fdata.get("default_rank", 1))
     new_rank = current - 1
 
     if new_rank < 1:
         return False, "Already at minimum rank."
+
+    if operator is not None:
+        op_perm = get_member_permission(operator, faction_key)
+        if op_perm < 3:
+            return False, "Only faction leadership can demote members."
+        if op_perm != 99:
+            op_rank = get_member_rank(operator, faction_key)
+            if current >= op_rank:
+                return False, "Cannot demote someone at or above your rank."
 
     rank_info = get_rank_info(fdata["ranks"], new_rank)
     ranks[fdata["key"]] = new_rank
@@ -241,10 +270,11 @@ def get_member_permission(character, faction_key):
     return get_rank_permission(fdata["ranks"], rank)
 
 
-def get_faction_roster(faction_key):
+def get_faction_roster(faction_key, limit=None):
     """
     Return a list of (character, rank_number) tuples, sorted by rank descending.
     Queries the database — call once per session when opening roster, not every tick.
+    If limit is an int, return at most that many entries after sorting.
     """
     from evennia.utils.search import search_tag
 
@@ -264,6 +294,8 @@ def get_faction_roster(faction_key):
         result.append((char, rank))
 
     result.sort(key=lambda x: x[1], reverse=True)
+    if limit is not None:
+        return result[: int(limit)]
     return result
 
 
@@ -275,6 +307,10 @@ FACTION_CONFLICTS = frozenset(
         frozenset({"SINK", "IMP"}),
         frozenset({"RACK", "IMP"}),
         frozenset({"PIT", "IMP"}),
+        frozenset({"BURN", "INQ"}),
+        frozenset({"SINK", "INQ"}),
+        frozenset({"RACK", "INQ"}),
+        frozenset({"PIT", "INQ"}),
     }
 )
 

@@ -71,8 +71,8 @@ class CmdFaction(Command):
             if not fd:
                 self.caller.msg("Unknown faction.")
                 return
-            roster = get_faction_roster(key)
-            lines = [f"{c.key} — rank {r} ({get_rank_name(fd['ranks'], r)})" for c, r in roster[:80]]
+            roster = get_faction_roster(key, limit=80)
+            lines = [f"{c.key} — rank {r} ({get_rank_name(fd['ranks'], r)})" for c, r in roster]
             self.caller.msg("\n".join(lines) if lines else "No members.")
             return
 
@@ -151,9 +151,9 @@ class CmdFaction(Command):
         elif sub == "discharge":
             ok, msg = discharge(target, fd["key"], discharged_by=self.caller.key)
         elif sub == "promote":
-            ok, msg = promote(target, fd["key"], promoted_by=self.caller.key)
+            ok, msg = promote(target, fd["key"], promoted_by=self.caller.key, operator=self.caller)
         elif sub == "demote":
-            ok, msg = demote(target, fd["key"], demoted_by=self.caller.key)
+            ok, msg = demote(target, fd["key"], demoted_by=self.caller.key, operator=self.caller)
         elif sub == "setrank":
             if rank_num is None:
                 self.caller.msg("Usage: @faction setrank <char> = <faction_key> <rank#>")

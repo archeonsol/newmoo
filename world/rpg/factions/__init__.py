@@ -168,6 +168,8 @@ FACTIONS = {
     },
 }
 
+_TAG_TO_FACTION = {fdata["tag"].lower(): fdata for fdata in FACTIONS.values()}
+
 
 def get_faction(key):
     """Look up a faction by abbreviation key (case-insensitive). Returns dict or None."""
@@ -176,10 +178,9 @@ def get_faction(key):
 
 def get_faction_by_tag(tag):
     """Look up a faction by its Evennia tag string. Returns dict or None."""
-    for fdata in FACTIONS.values():
-        if fdata["tag"] == tag:
-            return fdata
-    return None
+    if not tag:
+        return None
+    return _TAG_TO_FACTION.get(str(tag).strip().lower())
 
 
 def get_all_faction_keys():
@@ -194,9 +195,13 @@ def get_character_factions(character):
     """
     if not character or not hasattr(character, "tags"):
         return []
+    pairs = character.tags.all(return_key_and_category=True) or []
     factions = []
-    for fdata in FACTIONS.values():
-        if character.tags.has(fdata["tag"], category=fdata["tag_category"]):
+    for tag_key, cat in pairs:
+        if (cat or "").lower() != "faction":
+            continue
+        fdata = _TAG_TO_FACTION.get(str(tag_key).strip().lower())
+        if fdata:
             factions.append(fdata)
     return factions
 

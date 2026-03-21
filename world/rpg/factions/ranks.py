@@ -2,11 +2,13 @@
 Rank tables per faction type. Each rank has a number (1 = lowest),
 a display name, a permission level, and a weekly pay amount.
 
-Permission levels determine what actions are available at the terminal:
+Permission levels on rank rows are used for flavor and future systems.
+At the registry terminal today:
     0 = member (view own info, collect pay)
-    1 = officer (view roster)
-    2 = commander (enlist, promote up to own rank - 1, discharge below own rank)
-    3 = leader (full control, promote to any rank, set pay, discharge anyone)
+    1 = officer (reserved for future use)
+    2 = commander (reserved for future use; not used for enlist/promote/demote/discharge)
+    3 = leadership — enlist, promote, demote, discharge, and set rank require this level
+        (or staff) at the terminal.
 
 Staff/Builders bypass permission levels entirely — they can do everything
 at any terminal regardless of faction membership.
@@ -51,6 +53,12 @@ RANK_TABLES = {
 def get_rank_table(table_key):
     """Return the rank table dict for a faction type."""
     return RANK_TABLES.get(table_key, {})
+
+
+def get_ranks_at_permission(table_key, min_permission):
+    """Return list of (rank_number, info) tuples at or above min_permission, sorted by rank."""
+    table = get_rank_table(table_key)
+    return [(num, info) for num, info in sorted(table.items()) if info.get("permission", 0) >= min_permission]
 
 
 def get_rank_info(table_key, rank_number):
