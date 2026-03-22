@@ -3,7 +3,7 @@ Staff commands: givexp, charsheet, setstat, setskill, create, typeclasses,
 spawn (item/armor/vehicle/medical/or/seat/bed/pod/camera/tv/creature),
 creatureset, despawn, npc, makenpc, npcset, @goto, @gotoroom, @summon,
 @setvoid, @void, release (@release), boot, @find, announce, restore,
-debugkill, emotedebug, damagevehicle. CmdPending imported from roleplay_cmds.
+debugkill, emotedebug, damagevehicle, @climate. CmdPending imported from roleplay_cmds.
 """
 
 from datetime import datetime
@@ -783,7 +783,10 @@ class CmdSpawnItem(Command):
       spawnitem list <category> <subtag>  - list keys that have both tags (e.g. spawnitem list combat weapon)
       spawnitem list drug                 - alchemy drugs (also: drugs, alchemy drug, …)
       spawnitem list alchemy              - stations, chemicals, drugs, recipes, etc.
+      spawnitem list vehicle              - vehicles (ground / motorcycle / aerial)
+      spawnitem list vehicle ground       - enclosed ground vehicles only
       spawnitem <prototype_key>           - spawn into your inventory (e.g. spawnitem bolt_of_silk)
+      spawnitem <vehicle_key>             - spawns vehicle in your current room (not inventory)
 
     For typeclass-only items use |wtypeclasses|n and |wcreate <typeclass> = <key>|n.
     """
@@ -891,10 +894,28 @@ class CmdSpawnItem(Command):
         if not objs:
             caller.msg("|rNo object spawned (prototype key may be wrong).|n")
             return
+        try:
+            from typeclasses.vehicles import Vehicle
+        except ImportError:
+            Vehicle = None
+        names = []
+        any_vehicle = False
         for obj in objs:
-            obj.location = caller
-        names = [o.get_display_name(caller) for o in objs]
-        caller.msg("|gSpawned into your inventory:|n %s" % ", ".join(names))
+            if Vehicle and isinstance(obj, Vehicle):
+                any_vehicle = True
+                loc = caller.location
+                if not loc:
+                    caller.msg("|rYou must be in a room to spawn a vehicle.|n")
+                    obj.delete()
+                    return
+                obj.location = loc
+            else:
+                obj.location = caller
+            names.append(obj.get_display_name(caller))
+        if any_vehicle:
+            caller.msg("|gSpawned in your current room:|n %s" % ", ".join(names))
+        else:
+            caller.msg("|gSpawned into your inventory:|n %s" % ", ".join(names))
 
 
 class CmdSpawnArmor(Command):
@@ -961,7 +982,7 @@ class CmdSpawnArmor(Command):
 class CmdSpawnVehicle(Command):
     """
     Create a test vehicle in the current room. (Admin/Builder only.)
-    Usage: spawnvehicle [name]
+    Usage: spawnvehicle [prototype_key|name]  — e.g. spawnvehicle rattler, spawnvehicle test sedan
     """
     key = "spawnvehicle"
     aliases = ["spawn vehicle", "testvehicle"]
@@ -970,15 +991,51 @@ class CmdSpawnVehicle(Command):
 
     def func(self):
         caller = self.caller
-        name = self.args.strip() or "test sedan"
+        arg = self.args.strip()
         loc = caller.location
         if not loc:
             caller.msg("You need to be in a room to spawn a vehicle.")
             return
         from evennia.utils.create import create_object
         try:
+            from typeclasses.vehicles import _room_allows_vehicle_tags
+            from world.prototypes.vehicle_prototypes import ALL_VEHICLE_PROTOTYPES
+        except Exception:
+            ALL_VEHICLE_PROTOTYPES = {}
+            _room_allows_vehicle_tags = lambda r: True
+
+        if not _room_allows_vehicle_tags(loc):
+            caller.msg(
+                "|yThis room has no drivable-surface tag with category |wvehicle_access|n "
+                "(|wstreet|n / |wtunnel|n / |waerial|n). "
+                "Example: |w@tag here = street:vehicle_access|n|n"
+            )
+
+        proto = ALL_VEHICLE_PROTOTYPES.get(arg.lower()) if arg else None
+        if proto:
+            try:
+                vehicle = create_object(
+                    proto["typeclass"],
+                    key=proto["key"],
+                    location=loc,
+                )
+                for attr_name, val in proto.get("attrs", []):
+                    setattr(vehicle.db, attr_name, val)
+                caller.msg(
+                    f"|gCreated|n |w{vehicle.key}|n (|w{proto['prototype_key']}|n). "
+                    f"|wenter|n / |wmount|n, |wstart|n, |wdrive|n or |wfly|n."
+                )
+            except Exception as e:
+                caller.msg(f"|rCould not create vehicle: {e}|n")
+            return
+
+        name = arg or "test sedan"
+        try:
             vehicle = create_object("typeclasses.vehicles.Vehicle", key=name, location=loc)
-            caller.msg(f"|gCreated vehicle|n |w{vehicle.key}|n here. Use |wenter {vehicle.key}|n to get in, then |wstart|n and |wdrive <direction>|n.")
+            caller.msg(
+                f"|gCreated vehicle|n |w{vehicle.key}|n here. Use |wenter {vehicle.key}|n to get in, "
+                f"then |wstart|n and |wdrive <direction>|n. Prototypes: |w{', '.join(sorted(ALL_VEHICLE_PROTOTYPES.keys()))}|n."
+            )
         except Exception as e:
             caller.msg(f"|rCould not create vehicle: {e}|n")
 
@@ -2420,6 +2477,137 @@ class CmdProfiling(Command):
                 caller.msg(str(t))
 
         caller.msg(rule)
+
+
+class CmdClimate(Command):
+    """
+    View or set global weather and time-of-day (street room ambient prose).
+
+    Usage:
+      @climate
+      @climate weather <rain|sun|fog|snow>
+      @climate time <dusk|night|morning|afternoon|evening>   (manual; turns off UTC auto)
+      @climate time auto|utc   — narrative time follows real UTC (persistent)
+      @climate time manual    — freeze at current UTC phase; edit with @climate time <phase>
+      @climate override <district> <weather> <time> = <plain text>
+      @climate clearoverride <district> <weather> <time>
+
+    Districts: slums, guild, bourgeois, elite
+    """
+    key = "@climate"
+    aliases = ["climate"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        from world import global_climate as gc
+
+        raw = (self.args or "").strip()
+        if not raw:
+            from datetime import datetime, timezone
+
+            w = gc.get_global_weather()
+            t = gc.get_global_time_of_day()
+            auto = gc.get_time_auto_utc()
+            now = datetime.now(timezone.utc)
+            auto_str = "|gON|n (UTC)" if auto else "|rOFF|n (manual)"
+            self.caller.msg(
+                f"Global climate: |wweather|n={w}  |wtime|n={t}  |wUTC auto|n={auto_str}\n"
+                f"  Now UTC: {now.strftime('%Y-%m-%d %H:%M:%S')} → phase |w{gc.utc_time_phase(now)}|n\n"
+                f"Use |w@climate weather <...>|n or |w@climate time <...>|n or |w@climate time auto|n / |wmanual|n"
+            )
+            return
+
+        parts = raw.split()
+        sub = parts[0].lower()
+
+        if sub == "weather" and len(parts) >= 2:
+            val = parts[1].lower()
+            try:
+                ok = gc.set_global_weather(val)
+            except Exception as err:
+                self.caller.msg(str(err))
+                return
+            if not ok:
+                self.caller.msg("Global climate script is missing (server not initialized?).")
+                return
+            self.caller.msg(f"Global weather set to |w{gc.get_global_weather()}|n.")
+            return
+
+        if sub == "time" and len(parts) >= 2:
+            val = parts[1].lower()
+            if val in ("auto", "utc"):
+                ok = gc.set_time_auto_utc(True)
+                if not ok:
+                    self.caller.msg("Global climate script is missing (server not initialized?).")
+                    return
+                self.caller.msg(
+                    f"UTC auto time |gON|n. Current phase: |w{gc.get_global_time_of_day()}|n."
+                )
+                return
+            if val == "manual":
+                ok = gc.set_time_auto_utc(False)
+                if not ok:
+                    self.caller.msg("Global climate script is missing (server not initialized?).")
+                    return
+                self.caller.msg(
+                    f"UTC auto |rOFF|n; time frozen at |w{gc.get_global_time_of_day()}|n "
+                    f"(change with |w@climate time <phase>|n)."
+                )
+                return
+            try:
+                ok = gc.set_global_time_of_day(val)
+            except Exception as err:
+                self.caller.msg(str(err))
+                return
+            if not ok:
+                self.caller.msg("Global climate script is missing (server not initialized?).")
+                return
+            self.caller.msg(
+                f"Global time-of-day set to |w{gc.get_global_time_of_day()}|n (UTC auto |roff|n)."
+            )
+            return
+
+        if sub == "clearoverride" and len(parts) >= 4:
+            district, weather, tod = parts[1], parts[2], parts[3]
+            try:
+                gc.clear_line_override(district, weather, tod)
+            except Exception as err:
+                self.caller.msg(str(err))
+                return
+            self.caller.msg("Override cleared for that cell.")
+            return
+
+        if sub == "override":
+            rest = raw[len("override") :].strip()
+            if "=" not in rest:
+                self.caller.msg(
+                    'Usage: @climate override <district> <weather> <time> = <text>'
+                )
+                return
+            left, _, right = rest.partition("=")
+            left_toks = left.strip().split()
+            if len(left_toks) < 3:
+                self.caller.msg(
+                    'Usage: @climate override <district> <weather> <time> = <text>'
+                )
+                return
+            district, weather, tod = left_toks[0], left_toks[1], left_toks[2]
+            text = right.strip()
+            try:
+                key = gc.set_line_override(district, weather, tod, text)
+            except Exception as err:
+                self.caller.msg(str(err))
+                return
+            self.caller.msg(f"Stored override |w{key}|n ({len(text)} chars).")
+            return
+
+        self.caller.msg(
+            "Usage: @climate | @climate weather <rain|sun|fog|snow> | "
+            "@climate time <phase> | @climate time auto|utc | @climate time manual | "
+            "@climate override <district> <weather> <time> = <text> | "
+            "@climate clearoverride <district> <weather> <time>"
+        )
 
 
 class CmdMusic(Command):

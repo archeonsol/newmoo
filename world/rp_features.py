@@ -180,6 +180,19 @@ def get_display_name_for_viewer(character, viewer, **kwargs):
     return get_character_sdesc_for_viewer(character, viewer)
 
 
+def format_exit_move_line_for_viewer(action_after_name, character, viewer):
+    """
+    Build one movement line: recog/sdesc display + space + action (no leading name in action_after_name).
+
+    action_after_name: e.g. "crawls into the tunnels to the west." — lowercase verb phrase after the name.
+    """
+    if not character or not (action_after_name or "").strip():
+        return None
+    display = get_move_display_for_viewer(character, viewer)
+    text = str(action_after_name).strip()
+    return f"{display} {text}"
+
+
 def get_move_display_for_viewer(character, viewer):
     """
     Movement-line display: always show sdesc; if viewer has recog for this character
@@ -233,3 +246,29 @@ def get_move_display_for_viewer(character, viewer):
         return format_ic_move_line(character, viewer, out)
     except Exception:
         return out
+
+
+def msg_room_with_character_display(room, character, build, *, exclude=None):
+    """
+    Send one IC line per viewer in `room`. `build(viewer, display)` returns the message;
+    `display` is from get_move_display_for_viewer(character, viewer), or "Someone" if character is None.
+    """
+    if not room:
+        return
+    ex_set = {x for x in (exclude or []) if x}
+    try:
+        viewers = list(room.contents_get(content_type="character"))
+    except Exception:
+        viewers = [c for c in getattr(room, "contents", None) or [] if c]
+    for viewer in viewers:
+        if viewer in ex_set:
+            continue
+        if not hasattr(viewer, "msg"):
+            continue
+        if character is None:
+            display = "Someone"
+        else:
+            display = get_move_display_for_viewer(character, viewer)
+            if not display:
+                display = "Someone"
+        viewer.msg(build(viewer, display))

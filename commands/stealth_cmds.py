@@ -18,12 +18,22 @@ try:
         CRAWL_DELAY_EXHAUSTED,
         CRAWL_DELAY_LEG_TRAUMA,
         _staggered_walk_callback,
+        normalize_move_direction,
+        set_stagger_walk_pending,
+        stagger_walk_direction_conflict,
+        clear_stagger_walk_pending,
+        is_staggered_walk_pending,
     )
 except ImportError:
     WALK_DELAY = 3.5
     CRAWL_DELAY_EXHAUSTED = 8.5
     CRAWL_DELAY_LEG_TRAUMA = 16.0
     _staggered_walk_callback = None
+    normalize_move_direction = None
+    set_stagger_walk_pending = None
+    stagger_walk_direction_conflict = None
+    clear_stagger_walk_pending = None
+    is_staggered_walk_pending = lambda _c: False
 
 
 def _resolve_character(oid):
@@ -125,6 +135,9 @@ class CmdHide(Command):
         if getattr(caller.db, "grappled_by", None):
             caller.msg("You can't hide while restrained.")
             return
+        if getattr(caller.db, "mounted_on", None):
+            caller.msg("You can't hide while on a motorcycle.")
+            return
         if getattr(caller.ndb, "hide_pending", False):
             caller.msg("You're already trying to hide.")
             return
@@ -221,6 +234,15 @@ class CmdSneak(Command):
             return
 
         direction = direction_str or (target_exit.key or "away").strip()
+        new_norm = normalize_move_direction(direction) if normalize_move_direction else None
+        if is_staggered_walk_pending and is_staggered_walk_pending(caller):
+            caller.msg("You are already moving. Wait for this step to finish before you sneak.")
+            return
+        if stagger_walk_direction_conflict:
+            conflict = stagger_walk_direction_conflict(caller, new_norm)
+            if conflict:
+                caller.msg(conflict)
+                return
 
         try:
             from world.rpg.stamina import is_exhausted, spend_stamina, STAMINA_COST_WALK, STAMINA_COST_CRAWL
@@ -294,6 +316,8 @@ class CmdSneak(Command):
 
         caller.ndb._stealth_move_sneak = True
 
+        if set_stagger_walk_pending:
+            set_stagger_walk_pending(caller, new_norm, direction)
         cb = _staggered_walk_callback
         if cb:
             delay(delay_secs, cb, caller.id, destination.id)
@@ -303,20 +327,24 @@ class CmdSneak(Command):
                 o, d = caller, destination
                 if not o or not d:
                     return
-                db = getattr(o, "db", None)
-                if db is not None and getattr(db, "cancel_walking", False):
-                    try:
-                        del db.cancel_walking
-                    except Exception:
-                        db.cancel_walking = False
-                    try:
-                        if hasattr(o.ndb, "_stealth_move_sneak"):
-                            del o.ndb._stealth_move_sneak
-                    except Exception:
-                        pass
-                    return
-                sneak = bool(getattr(o.ndb, "_stealth_move_sneak", False))
-                o.move_to(d, quiet=sneak)
+                try:
+                    db = getattr(o, "db", None)
+                    if db is not None and getattr(db, "cancel_walking", False):
+                        try:
+                            del db.cancel_walking
+                        except Exception:
+                            db.cancel_walking = False
+                        try:
+                            if hasattr(o.ndb, "_stealth_move_sneak"):
+                                del o.ndb._stealth_move_sneak
+                        except Exception:
+                            pass
+                        return
+                    sneak = bool(getattr(o.ndb, "_stealth_move_sneak", False))
+                    o.move_to(d, quiet=sneak)
+                finally:
+                    if clear_stagger_walk_pending:
+                        clear_stagger_walk_pending(o)
 
             delay(delay_secs, _fallback_sneak)
 

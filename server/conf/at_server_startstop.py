@@ -55,6 +55,15 @@ def at_server_start():
             persistent=True,
         )
 
+    from world.global_climate import GLOBAL_CLIMATE_KEY
+
+    if not ScriptDB.objects.filter(db_key=GLOBAL_CLIMATE_KEY).first():
+        create_script(
+            "typeclasses.scripts.GlobalClimateScript",
+            key=GLOBAL_CLIMATE_KEY,
+            persistent=True,
+        )
+
     # Matrix scripts
     if not ScriptDB.objects.filter(db_key="matrix_cleanup").first():
         create_script(

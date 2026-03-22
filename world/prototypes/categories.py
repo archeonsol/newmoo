@@ -10,7 +10,8 @@ LIST_CATEGORY_HELP = (
     "|wCategories|n (use |wspawnitem list <category>|n or |wspawnitem list <cat> <subtag>|n): "
     "|wcombat|n, |wweapon|n, |warmor|n, |wsurvival|n, |wfood|n, |wdrink|n, |walcohol|n, "
     "|wmedical|n, |wtailoring|n, |wperformance|n, |wconsumable|n, "
-    "|walchemy|n, |wdrug|n, |wchemical|n, |wstation|n, |wrecipe|n, |wcontainer|n, |wcyberware|n"
+    "|walchemy|n, |wdrug|n, |wchemical|n, |wstation|n, |wrecipe|n, |wcontainer|n, |wcyberware|n, "
+    "|wvehicle|n (|wground|n, |wmotorcycle|n, |waerial|n)"
 )
 
 # User input (lowercase) -> canonical prototype_tag for filtering
@@ -20,6 +21,11 @@ SPAWNITEM_TAG_ALIASES = {
     "stations": "station",
     "recipes": "recipe",
     "containers": "container",
+    "vehicles": "vehicle",
+    "bikes": "motorcycle",
+    "bike": "motorcycle",
+    "av": "aerial",
+    "avs": "aerial",
 }
 
 # Valid filter tokens (lowercase). Used for friendlier errors; unknown tags still filter to empty.
@@ -43,6 +49,10 @@ KNOWN_LIST_TAGS = frozenset(
         "recipe",
         "container",
         "cyberware",
+        "vehicle",
+        "ground",
+        "motorcycle",
+        "aerial",
         *SPAWNITEM_TAG_ALIASES.keys(),
     }
 )

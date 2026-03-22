@@ -7,7 +7,9 @@ Look output: room name (colored), desc, "You see a X, a Y and a Z.", character p
 
 import re
 from evennia.objects.objects import DefaultRoom, DefaultExit
+from evennia.utils import delay
 from evennia.utils.utils import compress_whitespace, iter_to_str
+from evennia.contrib.grid.xyzgrid.xyzroom import XYZRoom
 
 from world.theme_colors import ROOM_COLORS
 
@@ -22,7 +24,9 @@ _DEFAULT_WELCOME_MARKER = "evennia.com"
 ROOM_DESC_ROOM_NAME_COLOR = ROOM_COLORS["room_name"]
 ROOM_DESC_CHARACTER_NAME_COLOR = ROOM_COLORS["character_name"]
 ROOM_DESC_OBJECT_NAME_COLOR = ROOM_COLORS["object"]
-ROOM_DESC_EXIT_NAME_COLOR = ROOM_COLORS["exit"]
+ROOM_DESC_BODY_COLOR = ROOM_COLORS["room_desc_body"]
+ROOM_DESC_EXIT_PROSE_COLOR = ROOM_COLORS["exit_prose"]
+ROOM_DESC_EXIT_NAME_DIM_COLOR = ROOM_COLORS["exit_name_dim"]
 
 
 def _ic_room_char_name(char, looker, **kwargs):
@@ -31,6 +35,43 @@ def _ic_room_char_name(char, looker, **kwargs):
 
     plain = char.get_display_name(looker, **kwargs)
     return format_ic_character_name(char, looker, plain)
+
+
+def _is_motorcycle_vehicle(obj):
+    """True if obj is a motorcycle (open bike)."""
+    try:
+        from typeclasses.vehicles import Motorcycle
+
+        return isinstance(obj, Motorcycle) or getattr(obj.db, "vehicle_type", None) == "motorcycle"
+    except ImportError:
+        return getattr(getattr(obj, "db", None), "vehicle_type", None) == "motorcycle"
+
+
+def _article_word(name):
+    """Return 'a' or 'an' for the given noun (no leading article)."""
+    n = (name or "").strip()
+    if not n:
+        return "a"
+    return "an" if n[0].lower() in "aeiou" else "a"
+
+
+def _bike_phrase_for_riding(bike):
+    """Noun phrase for 'riding on …' (e.g. 'a ratbike')."""
+    raw = getattr(bike.db, "vehicle_name", None) or getattr(bike, "key", None) or "bike"
+    raw = (raw or "").strip()
+    low = raw.lower()
+    if low.startswith("a ") or low.startswith("an "):
+        return raw
+    return f"{_article_word(raw)} {raw}"
+
+
+def _riding_on_motorcycle_sentence(rider, bike, looker, **kwargs):
+    """Colored line: 'Name is riding on a ratbike' or 'You are riding on a ratbike'."""
+    bike_colored = f"{ROOM_DESC_OBJECT_NAME_COLOR}{_bike_phrase_for_riding(bike)}|n"
+    if rider is looker:
+        return f"You are riding on {bike_colored}"
+    rname = _ic_room_char_name(rider, looker, **kwargs)
+    return f"{rname} is riding on {bike_colored}"
 
 
 def _is_vehicle(obj):
@@ -83,6 +124,14 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
     Rooms are like any Object, except their location is None
     (which is default). Look output: room name (colored), desc, "You see a X, a Y.",
     character/vehicle/corpse poses, then "There are exits to the north (n), ...".
+
+    Builder fields (optional):
+      db.room_display_mode — "street" for narrative exits + global climate line, else interior (default).
+      db.room_look_state — bracket suffix on the title, e.g. CROWDED → " [CROWDED]".
+      db.narrative_exit_prose — optional legacy: used only when no exit has db.exit_narrative set.
+      Prefer db.exit_narrative on each Exit for street exit lines (see typeclasses.exits.Exit).
+      db.ambient_messages — optional list of one-line ambient strings (one random per look).
+        Street: appended after weather on the same line as the desc (separate sentence). Interior: block below desc.
     """
 
     # In-character, non-descript default when room has no custom desc
@@ -115,47 +164,289 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
 
     def filter_visible(self, obj_list, looker, **kwargs):
         """Hide unspotted sneaking characters from look; staff see everyone."""
-        result = super().filter_visible(obj_list, looker, **kwargs)
-        if not result or not looker:
-            return result
+        from evennia.utils.utils import inherits_from, make_iter
+
+        if not looker:
+            return super().filter_visible(obj_list, looker, **kwargs)
+
+        # Evennia's base filter_visible drops the looker (obj != looker). When callers pass
+        # [looker] — e.g. motorcycle rider visibility — super() returns [] and riding/@lp break.
+        # Filter everyone else first, then splice the looker back in original order.
+        seq = list(make_iter(obj_list))
+        looker_in_seq = any(o is looker for o in seq)
+        others = [o for o in seq if o is not looker]
+        result = super().filter_visible(others, looker, **kwargs)
+        result = list(result if result is not None else [])
+
         try:
-            from evennia.utils.utils import inherits_from
             from world.rpg import stealth
 
             if stealth._is_staff(looker):
-                return result
+                stealth_out = result
+            else:
+                stealth_out = []
+                for obj in result:
+                    try:
+                        if inherits_from(obj, "evennia.objects.objects.DefaultCharacter"):
+                            if stealth.is_hidden(obj) and not stealth.has_spotted(looker, obj):
+                                continue
+                    except Exception:
+                        pass
+                    stealth_out.append(obj)
         except Exception:
-            return result
+            stealth_out = result
+
+        if not looker_in_seq:
+            return stealth_out
+
+        try:
+            if not inherits_from(looker, "evennia.objects.objects.DefaultCharacter"):
+                return stealth_out
+        except Exception:
+            return stealth_out
 
         out = []
-        for obj in result:
-            try:
-                if inherits_from(obj, "evennia.objects.objects.DefaultCharacter"):
-                    if stealth.is_hidden(obj) and not stealth.has_spotted(looker, obj):
-                        continue
-            except Exception:
-                pass
-            out.append(obj)
+        si = 0
+        for o in seq:
+            if o is looker:
+                out.append(looker)
+            else:
+                if si < len(stealth_out) and o is stealth_out[si]:
+                    out.append(o)
+                    si += 1
         return out
+
+    def _is_street_mode(self):
+        """True when this room uses street layout (narrative exits, global climate line, etc.)."""
+        return getattr(self.db, "room_display_mode", None) == "street"
+
+    def get_extra_display_name_info(self, looker=None, **kwargs):
+        """Bracket suffix for the room title, e.g. ' [CROWDED]' or ' [bedroom]' (builder: db.room_look_state)."""
+        state = getattr(self.db, "room_look_state", None)
+        if not state:
+            return ""
+        st = str(state).strip()
+        if not st:
+            return ""
+        return f" [{st.upper()}]"
+
+    def _raw_display_desc_text(self, looker, **kwargs):
+        """Plain-text room description (no color), before street/climate wrapping."""
+        desc = self.db.desc or ""
+        if not desc:
+            return self.default_description
+        if _DEFAULT_WELCOME_MARKER.lower() in desc.lower():
+            return self.default_description
+        return desc
+
+    @staticmethod
+    def _ensure_sentence_end(text: str) -> str:
+        t = (text or "").strip()
+        if not t:
+            return ""
+        if t[-1] not in ".!?":
+            return t + "."
+        return t
+
+    def _pick_ambient_message_plain(self):
+        """Single random line from db.ambient_messages, plain text (no color)."""
+        msgs = getattr(self.db, "ambient_messages", None) or []
+        if not msgs:
+            return ""
+        import random
+
+        line = random.choice(list(msgs))
+        return (line or "").strip()
+
+    def _format_street_desc_body(self, raw, looker, **kwargs):
+        """
+        Street rooms: static desc (grey), then global weather/time (white), then optional
+        ambient (grey) — all appended on the same line as separate sentences.
+        """
+        from world.global_climate import get_ambient_weather_line_for_room
+
+        body = f"{ROOM_DESC_BODY_COLOR}{raw}|n"
+        wx = get_ambient_weather_line_for_room(self).strip()
+        if wx:
+            wx = self._ensure_sentence_end(wx)
+            body += " " + f"|w{wx}|n"
+        am = self._pick_ambient_message_plain()
+        if am:
+            am = self._ensure_sentence_end(am)
+            body += " " + f"{ROOM_DESC_BODY_COLOR}{am}|n"
+        return body
+
+    def get_display_ambient(self, looker, **kwargs):
+        """One ambient line from db.ambient_messages (random pick), grey prose. Used in street and interior."""
+        msgs = getattr(self.db, "ambient_messages", None) or []
+        if not msgs:
+            return ""
+        import random
+
+        line = random.choice(list(msgs))
+        line = (line or "").strip()
+        if not line:
+            return ""
+        return f"{ROOM_DESC_BODY_COLOR}{line}|n"
+
+    def _street_narrative_segment(self, prose, short):
+        """Grey custom prose + bold white (alias); no trailing period (joiner adds punctuation)."""
+        prose = (prose or "").strip().rstrip(".!?")
+        if not prose:
+            return ""
+        return f"{ROOM_DESC_BODY_COLOR}{prose}|n |w({short})|n"
+
+    def _join_narrative_exit_segments(self, parts):
+        """
+        Join multiple exit_narrative segments: earlier clauses end with a period;
+        the last two are joined with ' and ' (one period at the very end).
+
+        e.g. three segments -> 'A (e). B (n) and C (w).'
+        """
+        if not parts:
+            return ""
+        if len(parts) == 1:
+            return parts[0] + "."
+        if len(parts) == 2:
+            return parts[0] + " and " + parts[1] + "."
+        return ". ".join(parts[:-2]) + ". " + parts[-2] + " and " + parts[-1] + "."
+
+    def _mechanical_exit_bits(self, name_short_pairs):
+        bits = []
+        for name, short in name_short_pairs:
+            bits.append(f"{ROOM_DESC_EXIT_NAME_DIM_COLOR}{name}|n |w({short})|n")
+        return bits
+
+    def _mechanical_exit_line_from_bits(self, bits):
+        if not bits:
+            return ""
+        stem = f"{ROOM_DESC_EXIT_PROSE_COLOR}There are exits to the "
+        if len(bits) == 1:
+            line = stem + bits[0] + "."
+        elif len(bits) == 2:
+            line = stem + bits[0] + " and " + bits[1] + "."
+        else:
+            line = stem + ", ".join(bits[:-1]) + " and " + bits[-1] + "."
+        return re.sub(r"  +", " ", line)
+
+    def _visible_exit_rows(self, looker, **kwargs):
+        """
+        Visible exits as (exit, name, short, exit_narrative) sorted/deduped.
+        exit_narrative is stripped str or '' if unset/empty.
+        """
+        exits = self.filter_visible(self.contents_get(content_type="exit"), looker, **kwargs)
+        if not exits:
+            return []
+        exit_order = kwargs.get("exit_order")
+        if exit_order:
+            sort_index = {str(n).strip().lower(): i for i, n in enumerate(exit_order)}
+            exits = sorted(exits, key=lambda e: sort_index.get((e.key or "").strip().lower(), 999))
+        else:
+            exits = sorted(exits, key=lambda e: (e.key or "").lower())
+        seen = set()
+        rows = []
+        for exi in exits:
+            name = (exi.key or "out").strip()
+            raw_aliases = getattr(exi, "aliases", None)
+            if hasattr(raw_aliases, "all"):
+                aliases = list(raw_aliases.all())
+            else:
+                aliases = raw_aliases if isinstance(raw_aliases, (list, tuple)) else []
+            short = (aliases[0].strip() if aliases else name[0].lower()) if aliases else name[0].lower()
+            key = (name.lower(), short.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            narr = getattr(exi.db, "exit_narrative", None)
+            narr = str(narr).strip() if narr is not None and str(narr).strip() else ""
+            rows.append((exi, name, short, narr))
+        return rows
+
+    def get_display_street_exit_line(self, looker, **kwargs):
+        """
+        Street bottom line: exit db.exit_narrative clauses first (grey + |w(alias)|n), then
+        a mechanical tail for exits without prose. If no exit has prose, use room
+        narrative_exit_prose if set, else default mechanical line for all exits.
+        """
+        rows = self._visible_exit_rows(looker, **kwargs)
+        if not rows:
+            return ""
+        with_narr = [(name, short, narr) for _, name, short, narr in rows if narr]
+        without = [(name, short) for _, name, short, narr in rows if not narr]
+
+        if not with_narr:
+            legacy = getattr(self.db, "narrative_exit_prose", None)
+            if legacy and str(legacy).strip():
+                return f"{ROOM_DESC_BODY_COLOR}{str(legacy).strip()}|n"
+            bits = self._mechanical_exit_bits([(n, s) for _, n, s, _ in rows])
+            return self._mechanical_exit_line_from_bits(bits)
+
+        inner = []
+        for _, short, narr in with_narr:
+            seg = self._street_narrative_segment(narr, short)
+            if seg:
+                inner.append(seg)
+        narr_line = self._join_narrative_exit_segments(inner)
+        out = []
+        if narr_line:
+            out.append(narr_line)
+        if without:
+            bits = self._mechanical_exit_bits(without)
+            mech = self._mechanical_exit_line_from_bits(bits)
+            if mech:
+                out.append(mech)
+        return " ".join(out)
+
+    def get_display_narrative_exits(self, looker, **kwargs):
+        """Alias for street exit line (exit-level narrative + mechanical tail)."""
+        return self.get_display_street_exit_line(looker, **kwargs)
 
     def return_appearance(self, looker, **kwargs):
         """
         Override to explicitly call all display methods including furniture.
+        Street mode: header, desc (with inline weather + optional ambient sentences), things,
+        furniture, characters, footer, then narrative exit prose at the bottom.
+        Interior mode: header, optional ambient block (no climate), then the rest.
         """
         header = self.get_display_header(looker, **kwargs)
         desc = self.get_display_desc(looker, **kwargs)
         things = self.get_display_things(looker, **kwargs)
         furniture = self.get_display_furniture(looker, **kwargs)
         characters = self.get_display_characters(looker, **kwargs)
-        exits = self.get_display_exits(looker, **kwargs)
         footer = self.get_display_footer(looker, **kwargs)
+        if self._is_street_mode():
+            ambient = ""
+        else:
+            ambient = self.get_display_ambient(looker, **kwargs)
 
+        if self._is_street_mode():
+            narrative = self.get_display_narrative_exits(looker, **kwargs)
+            head = "\n".join([p for p in (header, desc) if p])
+            parts = [head]
+            if things:
+                parts.append(things)
+            if furniture:
+                parts.append(furniture)
+            tail = "\n".join([p for p in (characters, footer) if p])
+            if tail:
+                parts.append(tail)
+            # Narrative exit prose last — same role as mechanical exits on interior rooms
+            if narrative:
+                parts.append(narrative)
+            appearance = "\n\n".join([p for p in parts if p])
+            return self.format_appearance(appearance, looker, **kwargs)
+
+        exits = self.get_display_exits(looker, **kwargs)
         # Format with intentional paragraph breaks:
-        # - Always: header + desc (no blank line between), blank line, things
+        # - Always: header + desc (no blank line between), optional ambient, blank line, things
         # - If furniture exists: blank line before and after furniture
         # - Characters and exits remain tightly grouped (no blank line between them)
         head = "\n".join([p for p in (header, desc) if p])
-        parts = [head, things]
+        parts = [head]
+        if ambient:
+            parts.append(ambient)
+        if things:
+            parts.append(things)
 
         if furniture:
             parts.append(furniture)
@@ -184,12 +475,10 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
 
     def get_display_desc(self, looker, **kwargs):
         """Use our default if the room still has the stock Evennia welcome text."""
-        desc = self.db.desc or ""
-        if not desc:
-            return self.default_description
-        if _DEFAULT_WELCOME_MARKER.lower() in desc.lower():
-            return self.default_description
-        return desc
+        raw = self._raw_display_desc_text(looker, **kwargs)
+        if self._is_street_mode():
+            return self._format_street_desc_body(raw, looker, **kwargs)
+        return raw
 
     def _name_for_you_see(self, name):
         """Strip leading 'A ' / 'a ' so we can add our own article without 'a A foo'."""
@@ -237,6 +526,16 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                 see_items.append((f"{article} {ROOM_DESC_OBJECT_NAME_COLOR}{short}|n").strip())
                 continue
             if _is_vehicle(obj):
+                if _is_motorcycle_vehicle(obj):
+                    rider = getattr(obj.db, "rider", None)
+                    if rider and (
+                        rider is looker
+                        or self.filter_visible([rider], looker, **kwargs)
+                    ):
+                        see_items.append(
+                            _riding_on_motorcycle_sentence(rider, obj, looker, **kwargs)
+                        )
+                        continue
                 pose = "idling here." if getattr(obj, "engine_running", False) else "parked here."
                 vehicle_poses.append((obj, pose))
                 continue
@@ -301,6 +600,10 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
             pass
         # Corpses are objects, not character poses; show them in "You see" line only
         characters = [c for c in characters if not _is_corpse(c)]
+        mounted_set = {c for c in characters if getattr(c.db, "mounted_on", None)}
+        # Looker may be omitted from `characters` (typeclass filter); still suppress "standing here".
+        if looker and getattr(looker.db, "mounted_on", None):
+            mounted_set.add(looker)
         try:
             from world.death import is_flatlined
         except ImportError:
@@ -347,7 +650,13 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
         # Include looker if not already shown (helps you see your own @lp).
         # Some callers (like Photograph capture) want a third-person snapshot and will set include_looker=False.
         if include_looker:
-            looker_shown = looker in on_table or looker in sitting_set or looker in lying_set or looker in grappled_set
+            looker_shown = (
+                looker in on_table
+                or looker in sitting_set
+                or looker in lying_set
+                or looker in grappled_set
+                or looker in mounted_set
+            )
             if not looker_shown and looker not in chars_to_show:
                 chars_to_show.append(looker)
         for char in chars_to_show:
@@ -358,11 +667,20 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                 or char in sitting_set
                 or char in lying_set
                 or char in grappled_set
+                or char in mounted_set
                 or getattr(char.db, "sitting_on", None)
                 or getattr(char.db, "lying_on", None)
                 or getattr(char.db, "lying_on_table", None)
             ):
                 continue
+            try:
+                if hasattr(self, "get_vehicle_interior_seat_line"):
+                    seat_line = self.get_vehicle_interior_seat_line(char, looker, **kwargs)
+                    if seat_line:
+                        char_pose_parts.append(seat_line)
+                        continue
+            except Exception:
+                pass
             logged_off = False
             is_dead = False
             if is_flatlined(char):
@@ -553,38 +871,157 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
         return " ".join(lines)
 
     def get_display_exits(self, looker, **kwargs):
-        """There are exits to the north (n), south (s). – exit names and shortcuts colored."""
-        exits = self.filter_visible(self.contents_get(content_type="exit"), looker, **kwargs)
-        if not exits:
+        """Interior: grey prose stem; exit name dim; |w only on (alias). Street mode: no summary line."""
+        if self._is_street_mode():
             return ""
-        exit_order = kwargs.get("exit_order")
-        if exit_order:
-            sort_index = {str(n).strip().lower(): i for i, n in enumerate(exit_order)}
-            exits = sorted(exits, key=lambda e: sort_index.get((e.key or "").strip().lower(), 999))
-        else:
-            exits = sorted(exits, key=lambda e: (e.key or "").lower())
-        seen = set()
-        bits = []
-        for exi in exits:
-            name = (exi.key or "out").strip()
-            raw_aliases = getattr(exi, "aliases", None)
-            if hasattr(raw_aliases, "all"):
-                aliases = list(raw_aliases.all())
-            else:
-                aliases = raw_aliases if isinstance(raw_aliases, (list, tuple)) else []
-            short = (aliases[0].strip() if aliases else name[0].lower()) if aliases else name[0].lower()
-            key = (name.lower(), short.lower())
-            if key in seen:
-                continue
-            seen.add(key)
-            bit = f"{ROOM_DESC_EXIT_NAME_COLOR}{name} ({short})|n"
-            bits.append(bit.strip())
-        if not bits:
+        rows = self._visible_exit_rows(looker, **kwargs)
+        if not rows:
             return ""
-        if len(bits) == 1:
-            line = "There are exits to the " + bits[0] + "."
-        elif len(bits) == 2:
-            line = "There are exits to the " + bits[0] + " and " + bits[1] + "."
-        else:
-            line = "There are exits to the " + ", ".join(bits[:-1]) + " and " + bits[-1] + "."
-        return re.sub(r"  +", " ", line)
+        bits = self._mechanical_exit_bits([(n, s) for _, n, s, _ in rows])
+        return self._mechanical_exit_line_from_bits(bits)
+
+
+# Floodgate passthrough rooms: `typeclasses.bulkhead_room.BulkheadRoom` (seal/unseal in `world.maps.bulkheads`).
+
+
+class CityRoom(XYZRoom, Room):
+    """
+    Base room for city grid cells. Inherits XYZ coordinate tags from the contrib
+    and full IC appearance from Room.
+    """
+
+    map_display = False
+
+    def at_object_creation(self):
+        super().at_object_creation()
+        self.db.city_level = None
+        self.db.district = None
+        self.db.stealth_modifier = 0
+        self.db.ambient_messages = []
+        self.db.specimen_tags = []
+
+    def get_display_desc(self, looker, **kwargs):
+        desc = super().get_display_desc(looker, **kwargs)
+        if not self.tags.has("lift_station"):
+            return desc
+        try:
+            from evennia.utils.utils import inherits_from
+            from typeclasses.freight_lift import FreightLift
+
+            docked = False
+            for exi in self.contents_get(content_type="exit"):
+                dest = getattr(exi, "destination", None)
+                if (
+                    dest
+                    and getattr(exi.db, "is_lift_exit", None)
+                    and inherits_from(dest, FreightLift)
+                ):
+                    docked = True
+                    break
+            extra = (
+                "\n\n|g[FREIGHT] A lift is docked here. Type |wboard|g to enter.|n"
+                if docked
+                else "\n\n|x[FREIGHT] The lift bay is empty. The lift is in transit.|n"
+            )
+            return (desc or "") + extra
+        except Exception:
+            return desc
+
+
+class SlumRoom(CityRoom):
+    """Top tier grid: largest footprint, lowest maintenance (mechanical tier, not lore name)."""
+
+    def at_object_creation(self):
+        super().at_object_creation()
+        self.db.city_level = "slums"
+
+
+class GuildRoom(CityRoom):
+    """Second tier: industrial / guild-controlled."""
+
+    def at_object_creation(self):
+        super().at_object_creation()
+        self.db.city_level = "guild"
+
+
+class BourgeoisRoom(CityRoom):
+    """Third tier: controlled, comfortable."""
+
+    def at_object_creation(self):
+        super().at_object_creation()
+        self.db.city_level = "bourgeois"
+
+
+class EliteRoom(CityRoom):
+    """Bottom tier: smallest footprint, seat of power."""
+
+    def at_object_creation(self):
+        super().at_object_creation()
+        self.db.city_level = "elite"
+
+
+class AirRoom(CityRoom):
+    """
+    Open vertical space between levels. Entering without flying/climbing triggers a fall.
+    """
+
+    def at_object_creation(self):
+        super().at_object_creation()
+        self.db.city_level = "shaft"
+        self.db.fall_damage_per_z = 8
+        self.db.fall_destination = None
+        self.db.is_air = True
+
+    def at_object_receive(self, obj, source_location, move_type="move", **kwargs):
+        super().at_object_receive(obj, source_location, move_type=move_type, **kwargs)
+        if not hasattr(obj, "msg"):
+            return
+        try:
+            from typeclasses.vehicles import AerialVehicle
+
+            if isinstance(obj, AerialVehicle) or getattr(obj.db, "vehicle_type", None) == "aerial":
+                return
+        except Exception:
+            pass
+        from world.movement.falling import process_fall
+
+        delay(0.5, process_fall, obj.id, self.id)
+
+
+class GateMixin:
+    """
+    Sealable bulkhead behavior. Mix into a district room typeclass, or use `GateRoom`
+    for a standalone gate cell on the same Z as that district.
+    Set `db.city_level` to the district (slums, guild, bourgeois, elite) when building.
+    """
+
+    def at_object_creation(self):
+        super().at_object_creation()
+        self.db.gate_id = ""
+        self.db.sealed = False
+        self.db.seal_reason = ""
+        self.db.connects_to = ""
+
+
+class GateRoom(GateMixin, CityRoom):
+    """
+    Sealable bulkhead on a district Z. Lifts handle vertical travel; street↔gate↔freight
+    are normal horizontal exits. Mark exits toward freight with `exit.db.gate_bulkhead = True`.
+    """
+
+    def return_appearance(self, looker, **kwargs):
+        if getattr(self.db, "sealed", False):
+            return self._sealed_appearance(looker)
+        return super().return_appearance(looker, **kwargs)
+
+    def _sealed_appearance(self, looker):
+        reason = self.db.seal_reason or "unspecified"
+        return (
+            f"|r{'=' * 52}|n\n"
+            f"  |RSEALED|n\n"
+            f"|r{'=' * 52}|n\n\n"
+            f"  The bulkhead is shut. Two feet of solid steel.\n"
+            f"  The warning lights pulse red.\n\n"
+            f"  |wSeal reason:|n {reason}\n"
+            f"|r{'=' * 52}|n"
+        )

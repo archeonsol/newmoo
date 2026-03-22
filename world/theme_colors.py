@@ -90,10 +90,14 @@ INJURY_COLORS = {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ROOM_COLORS = {
-    "room_name": "|w",
+    "room_name": "|g",  # room title (street + interior references)
+    # |=n — readable grey on black; |x is too dark / reads as black in many clients
+    "room_desc_body": "|=n",
     "exit": "|c",
     "exit_dim": "|x",
-    "ambient": "|x",
+    "exit_prose": "|=n",  # "There are exits to the " stem (interior)
+    "exit_name_dim": "|=n",  # exit name before (alias)
+    "ambient": "|=n",
     "character_name": "|520",
     "object": "|035",  # teal — objects/corpses in "You see" (legacy ROOM_DESC_OBJECT_NAME_COLOR)
 }

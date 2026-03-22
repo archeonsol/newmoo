@@ -120,6 +120,8 @@ PROTOTYPE_MODULES = [
     "world.prototypes.cyberware_prototypes",
     "world.prototypes.armor_prototypes",
     "world.prototypes.faction_prototypes",
+    "world.prototypes.vehicle_prototypes",
+    "evennia.contrib.grid.xyzgrid.prototypes",
 ]
 
 ######################################################################
@@ -129,4 +131,8 @@ try:
     from server.conf.secret_settings import *
 except ImportError:
     print("secret_settings.py file not found or failed to import.")
+
+# Launcher: `evennia xyzgrid init|add|spawn` (see Evennia xyzgrid contrib README).
+EXTRA_LAUNCHER_COMMANDS = dict(EXTRA_LAUNCHER_COMMANDS)
+EXTRA_LAUNCHER_COMMANDS["xyzgrid"] = "evennia.contrib.grid.xyzgrid.launchcmd.xyzcommand"
 # mygame/server/conf/settings.py

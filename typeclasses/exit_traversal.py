@@ -55,6 +55,65 @@ def precheck_exit_traversal(exit_obj, traversing_object, destination):
             pass
 
     try:
+        from evennia.utils.utils import inherits_from
+        from typeclasses.freight_lift import FreightLift
+
+        if destination and inherits_from(destination, FreightLift):
+            cap = getattr(destination.db, "lift_capacity", None)
+            if cap is not None:
+                try:
+                    cap_i = int(cap)
+                except (TypeError, ValueError):
+                    cap_i = None
+                if cap_i is not None:
+                    n = len(destination.contents_get(content_type="character"))
+                    if n >= cap_i:
+                        return (
+                            False,
+                            destination,
+                            "The lift is at capacity. Wait for the next cycle.",
+                            None,
+                        )
+    except Exception:
+        pass
+
+    try:
+        from world.rpg.factions.doors import staff_bypass as _faction_staff
+
+        if _faction_staff(traversing_object):
+            pass
+        elif getattr(exit_obj.db, "bulkhead_locked", False):
+            return (
+                False,
+                destination,
+                "|rThe blast door is sealed. Two feet of steel between you and the other side. "
+                "You are not getting through.|n",
+                None,
+            )
+    except Exception:
+        pass
+
+    try:
+        from evennia.utils.utils import inherits_from
+        from typeclasses.rooms import GateRoom
+        from world.rpg.factions.doors import staff_bypass as _faction_staff
+
+        if _faction_staff(traversing_object):
+            pass
+        else:
+            if getattr(exit_obj.db, "gate_bulkhead", False):
+                for room in (getattr(exit_obj, "location", None), destination):
+                    if room and inherits_from(room, GateRoom) and getattr(room.db, "sealed", False):
+                        return (
+                            False,
+                            destination,
+                            "|rThe bulkhead is sealed. You cannot pass.|n",
+                            None,
+                        )
+    except Exception:
+        pass
+
+    try:
         from world.rpg.factions import is_faction_member
         from world.rpg.factions.membership import get_member_rank
         from world.rpg.factions.doors import staff_bypass as _faction_staff

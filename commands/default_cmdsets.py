@@ -25,6 +25,8 @@ from evennia.commands.default.account import (
 )
 from evennia.utils import search, utils, logger
 
+from commands.base_cmds import CmdGo
+
 
 class SplinterPodCmdSet(CmdSet):
     """
@@ -121,6 +123,7 @@ class GrapplingCmdSet(CmdSet):
         self.add(CmdGrapple())
         self.add(CmdLetGo())
         self.add(CmdStopWalking())
+        self.add(CmdGo())
         self.add(CmdNoMatchGrappling())
 
 
@@ -179,7 +182,27 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         from commands.roleplay_cmds import CmdSit, CmdLieOnTable, CmdGetOffTable
         from commands.performance_cmds import CmdPerformance
         from commands.death_cmds import CmdGoOOC, CmdReturnIC, CmdEnterPod, CmdLeavePod, CmdSplinterMe
-        from commands.vehicle_cmds import CmdEnterVehicle, CmdExitVehicle, CmdStartEngine, CmdStopEngine, CmdShutoffEngine, CmdDrive, CmdVehicleStatus, CmdRepairPart
+        from commands.vehicle_cmds import (
+            CmdEnterVehicle,
+            CmdExitVehicle,
+            CmdMount,
+            CmdDismount,
+            CmdLockVehicle,
+            CmdUnlockVehicle,
+            CmdControlVehicle,
+            CmdReleaseControls,
+            CmdHaltVehicleMovement,
+            CmdStartEngine,
+            CmdStopEngine,
+            CmdShutoffEngine,
+            CmdDrive,
+            CmdFly,
+            CmdTakeoff,
+            CmdLand,
+            CmdVehicleStatus,
+            CmdRepairPart,
+        )
+        from commands.tunnel_cmds import CmdAutopilot
         from commands.matrix_cmds import CmdJackIn, CmdJackOut, CmdRoute
         from commands.network_cmds import CmdNetworkWho, CmdNetworkSend, CmdNetworkNtag
         from commands.handset_cmds import CmdHandset
@@ -190,7 +213,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdSpawnCreature, CmdCreatureSet, CmdDespawn, CmdNpc, CmdMakeNpc, CmdNpcSet, CmdSpawnPerfume, CmdBadSmellRoom,
             CmdGoto, CmdGotoRoom, CmdSummon, CmdSetVoid, CmdVoid, CmdRelease, CmdBoot, CmdFind, CmdAnnounce, CmdRestore, CmdDebugKill,
             CmdSpawnSeat, CmdSpawnBed, CmdSpawnPod, CmdSpawnDiveRig, CmdSpawnCamera, CmdSpawnTelevision,
-            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling, CmdBuffDebug
+            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling, CmdBuffDebug, CmdClimate
         )
         from commands.rpg.faction_cmds import CmdFaction
         from commands.sheet_cmds import CmdStats
@@ -200,6 +223,15 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdTag, CmdHere, CmdListCmds, CmdCloneSpawn, CmdDig, CmdMatrixDig, CmdDesc,
             CmdSetAttr, CmdName, CmdOpen, CmdDestroy, CmdMatrixLink, CmdDoor, CmdDoorPair,
         )
+        from commands.city_grid_cmds import (
+            CmdAirRoom,
+            CmdCityCoord,
+            CmdCityLevel,
+            CmdCityMap,
+            CmdShaftConnect,
+        )
+        from commands.freight_cmds import CmdFreight
+        from commands.bulkhead_cmds import CmdBulkheadAdmin, CmdBulkheadStatus, CmdSeal, CmdUnseal
         try:
             from evennia.commands.default.general import CmdGet as DefaultCmdGet
         except ImportError:
@@ -222,6 +254,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSearch())
         self.add(CmdUnhide())
         self.add(CmdStopWalking())
+        self.add(CmdGo())
         self.add(CmdScavenge())
         self.add(CmdSkin())
         self.add(CmdButcher())
@@ -341,10 +374,21 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CombatGrappleCmdSet())  # grapple/letgo/resist above exits (priority 120)
         self.add(CmdEnterVehicle())
         self.add(CmdExitVehicle())
+        self.add(CmdMount())
+        self.add(CmdDismount())
+        self.add(CmdLockVehicle())
+        self.add(CmdUnlockVehicle())
+        self.add(CmdControlVehicle())
+        self.add(CmdReleaseControls())
+        self.add(CmdHaltVehicleMovement())
         self.add(CmdStartEngine())
         self.add(CmdStopEngine())
         self.add(CmdShutoffEngine())
         self.add(CmdDrive())
+        self.add(CmdFly())
+        self.add(CmdTakeoff())
+        self.add(CmdLand())
+        self.add(CmdAutopilot())
         self.add(CmdVehicleStatus())
         self.add(CmdRepairPart())
         self.add(CmdJackIn())
@@ -403,7 +447,18 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdCyberware())
         self.add(CmdProfiling())
         self.add(CmdBuffDebug())
+        self.add(CmdClimate())
         self.add(CmdFaction())
+        self.add(CmdCityMap())
+        self.add(CmdCityLevel())
+        self.add(CmdCityCoord())
+        self.add(CmdAirRoom())
+        self.add(CmdShaftConnect())
+        self.add(CmdFreight())
+        self.add(CmdSeal())
+        self.add(CmdUnseal())
+        self.add(CmdBulkheadStatus())
+        self.add(CmdBulkheadAdmin())
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
     """
