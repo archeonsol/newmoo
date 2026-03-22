@@ -8,14 +8,62 @@ from typeclasses.matrix.rooms import MatrixNode
 from typeclasses.matrix.exits import MatrixExit
 
 
+def _format_tag_list(obj):
+    """Human-readable tag list, including category when present."""
+    if not hasattr(obj, "tags"):
+        return ""
+    try:
+        pairs = obj.tags.all(return_key_and_category=True)
+    except TypeError:
+        pairs = None
+    if not pairs:
+        plain = obj.tags.all()
+        if not plain:
+            return ""
+        return ", ".join(str(t) for t in plain)
+    parts = []
+    for item in pairs:
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            key, cat = item[0], item[1]
+            if cat:
+                parts.append("%s|%s" % (key, cat))
+            else:
+                parts.append(str(key))
+        else:
+            parts.append(str(item))
+    return ", ".join(parts)
+
+
+def _parse_tag_and_category(tag_spec):
+    """
+    Split 'name' or 'name:category' into (name, category_or_None).
+    Category is optional; omit or leave empty for default (uncategorized) tags.
+    """
+    tag_spec = (tag_spec or "").strip()
+    if not tag_spec:
+        return None, None
+    if ":" in tag_spec:
+        name, cat = tag_spec.split(":", 1)
+        name, cat = name.strip(), cat.strip()
+        if not name:
+            return None, None
+        return name, (cat if cat else None)
+    return tag_spec, None
+
+
 class CmdTag(Command):
     """
-    Add, remove, or list tags on an object.
+    Add, remove, or list tags on a room or object.
     Usage:
       butag [obj] = tagname[/remove]
+      butag [obj] = tagname:category[/remove]
       butag [obj]                    (list tags on obj)
-      butag here = clone_spawn       (tag current room)
-    If obj is omitted, 'here' (current room) is used.
+      butag here = clone_spawn
+      butag here = sewer_water:specimen    (alchemy room specimen — key from world.alchemy.ingredients)
+    If obj is omitted, 'here' (current room) is used. Use any object name or #dbref for objects.
+
+    Use |w:category|n when the game expects a tag category (e.g. alchemy |wcollect|n checks
+    category |wspecimen|n on rooms). Uncategorized tags use |wbutag here = foo|n with no colon.
     """
     key = "butag"
     locks = "cmd:perm(Builder)"
@@ -25,7 +73,11 @@ class CmdTag(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            caller.msg("Usage: |wbutag [obj] = tagname|n or |wbutag [obj] = tagname/remove|n or |wbutag [obj]|n to list.")
+            caller.msg(
+                "Usage: |wbutag [obj] = tagname|n or |wbutag [obj] = tagname:category|n "
+                "(append |w/remove|n to remove). |wbutag [obj]|n lists tags. "
+                "Omit obj for current room. Example: |wbutag here = coolant_runoff:specimen|n"
+            )
             return
         if "=" in args:
             left, right = args.split("=", 1)
@@ -55,21 +107,40 @@ class CmdTag(Command):
             caller.msg("That object doesn't support tags.")
             return
         if tag_spec is None:
-            tags = obj.tags.all()
-            if not tags:
+            formatted = _format_tag_list(obj)
+            if not formatted:
                 caller.msg("|w%s|n has no tags." % obj.get_display_name(caller))
             else:
-                caller.msg("|w%s|n tags: %s" % (obj.get_display_name(caller), ", ".join(tags)))
+                caller.msg("|w%s|n tags: %s" % (obj.get_display_name(caller), formatted))
+            return
+        tag_name, category = _parse_tag_and_category(tag_spec)
+        if not tag_name:
+            caller.msg("Invalid tag name.")
             return
         if remove:
-            if obj.tags.has(tag_spec):
-                obj.tags.remove(tag_spec)
-                caller.msg("Removed tag |w%s|n from %s." % (tag_spec, obj.get_display_name(caller)))
+            if category:
+                has_it = obj.tags.has(tag_name, category=category)
             else:
-                caller.msg("%s doesn't have that tag." % obj.get_display_name(caller))
+                has_it = obj.tags.has(tag_name)
+            if has_it:
+                if category:
+                    obj.tags.remove(tag_name, category=category)
+                else:
+                    obj.tags.remove(tag_name)
+                cat_note = " (%s)" % category if category else ""
+                caller.msg("Removed tag |w%s|n%s from %s." % (tag_name, cat_note, obj.get_display_name(caller)))
+            else:
+                caller.msg("%s doesn't have that tag (check name and category)." % obj.get_display_name(caller))
         else:
-            obj.tags.add(tag_spec)
-            caller.msg("Added tag |w%s|n to %s." % (tag_spec, obj.get_display_name(caller)))
+            if category:
+                obj.tags.add(tag_name, category=category)
+                caller.msg(
+                    "Added tag |w%s|n (category |w%s|n) to %s."
+                    % (tag_name, category, obj.get_display_name(caller))
+                )
+            else:
+                obj.tags.add(tag_name)
+                caller.msg("Added tag |w%s|n to %s." % (tag_name, obj.get_display_name(caller)))
 
 
 class CmdHere(Command):
@@ -89,8 +160,9 @@ class CmdHere(Command):
             return
         name = loc.get_display_name(caller)
         dbref = "#%s" % loc.id
-        tags = loc.tags.all() if hasattr(loc, "tags") else []
-        tags_str = ", ".join(tags) if tags else "none"
+        tags_str = _format_tag_list(loc) if hasattr(loc, "tags") else ""
+        if not tags_str:
+            tags_str = "none"
         exits = [e for e in (loc.exits or []) if e]
         caller.msg(
             "|w%s|n  %s\n  Tags: %s  Exits: %d"

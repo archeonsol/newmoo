@@ -169,6 +169,13 @@ class CmdUse(Command):
                 if not target or target == caller:
                     caller.msg("Use the defibrillator on who? Usage: use defibrillator on <target>")
                     return
+                if target != caller:
+                    from world.rpg.trust import check_trust_or_incapacitated
+
+                    ok, _r = check_trust_or_incapacitated(target, caller, "heal")
+                    if not ok:
+                        caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+                        return
                 if getattr(target, "hp", 1) > 0:
                     caller.msg("They are not in arrest. The defibrillator is for the dead.")
                     return
@@ -179,6 +186,13 @@ class CmdUse(Command):
                 return
 
             if Bioscanner and isinstance(obj, Bioscanner):
+                if target != caller:
+                    from world.rpg.trust import check_trust_or_incapacitated
+
+                    ok, _r = check_trust_or_incapacitated(target, caller, "heal")
+                    if not ok:
+                        caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+                        return
                 success, out = obj.use_for_scan(caller, target)
                 if not success:
                     caller.msg(out if isinstance(out, str) else "Scan failed.")

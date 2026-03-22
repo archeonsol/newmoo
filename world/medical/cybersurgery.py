@@ -74,14 +74,21 @@ def _cybersurgery_roll(operator, difficulty=0, modifier=0):
     return 0, value
 
 
+def _operate_trust_or_fail(caller, target):
+    if not target or target == caller:
+        return True, None
+    from world.rpg.trust import check_trust_or_incapacitated
+
+    ok, _reason = check_trust_or_incapacitated(target, caller, "operate")
+    if not ok:
+        return False, "They don't trust you enough for that. They need to @trust you to operate."
+    return True, None
+
+
 def _is_sedated(target):
-    now = time.time()
-    if float(getattr(target.db, "sedated_until", 0.0) or 0.0) > now:
-        return True
-    if bool(getattr(target.db, "medical_unconscious", False)):
-        wake_at = float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0)
-        return wake_at <= 0.0 or wake_at > now
-    return False
+    from world.medical import is_sedated_for_surgery
+
+    return is_sedated_for_surgery(target)
 
 
 def _table_bonus():
@@ -325,6 +332,9 @@ def start_cybersurgery_install(caller, target, table, cyberware_obj, narrative_o
         return False, "You are already in the middle of a procedure."
     if caller.location != table.location or table.get_patient() != target:
         return False, "Patient must be on the operating table with you present."
+    ok_trust, err_trust = _operate_trust_or_fail(caller, target)
+    if not ok_trust:
+        return False, err_trust
     if cyberware_obj.location != caller:
         return False, "You must hold the cyberware in your inventory."
     conflict = _check_cyberware_conflicts(target, cyberware_obj)
@@ -426,6 +436,9 @@ def is_organ_destroyed(target, organ_key):
 def start_cybersurgery_replace(caller, target, table, replacement_key):
     if caller.location != table.location or table.get_patient() != target:
         return False, "Patient must be on the operating table with you present."
+    ok_trust, err_trust = _operate_trust_or_fail(caller, target)
+    if not ok_trust:
+        return False, err_trust
     if replacement_key in LIMB_SLOTS:
         from world.medical.limb_trauma import is_limb_destroyed
         if not is_limb_destroyed(target, replacement_key):
@@ -482,6 +495,9 @@ def start_cybersurgery_replace(caller, target, table, replacement_key):
 def start_cybersurgery_repair(caller, target, table, cyberware_name):
     if caller.location != table.location or table.get_patient() != target:
         return False, "Patient must be on the operating table with you present."
+    ok_trust, err_trust = _operate_trust_or_fail(caller, target)
+    if not ok_trust:
+        return False, err_trust
     installed = list(target.db.cyberware or [])
     matches = [c for c in installed if c.key.lower() == cyberware_name.lower()]
     if not matches:

@@ -102,6 +102,28 @@ class GrappledCmdSet(CmdSet):
         self.add(CmdNoMatchGrappled())
 
 
+class GrapplingCmdSet(CmdSet):
+    """
+    When character is holding someone in a grapple: only look, attack (strangle),
+    grapple/letgo, stop walking, and exits (movement). Hands are occupied.
+    Added/removed by world.combat.grapple when grappling state changes.
+    """
+    key = "GrapplingCmdSet"
+    priority = 180
+
+    def at_cmdset_creation(self):
+        from commands.base_cmds import CmdLook, CmdStopWalking
+        from commands.combat_cmds import CmdGrapplingAttack, CmdGrapple, CmdLetGo
+        from commands.death_cmds import CmdNoMatchGrappling
+
+        self.add(CmdLook())
+        self.add(CmdGrapplingAttack())
+        self.add(CmdGrapple())
+        self.add(CmdLetGo())
+        self.add(CmdStopWalking())
+        self.add(CmdNoMatchGrappling())
+
+
 class CharacterCmdSet(default_cmds.CharacterCmdSet):
     """
     The `CharacterCmdSet` contains general in-game commands like `look`,
@@ -117,6 +139,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         super().at_cmdset_creation()
 
         from commands.base_cmds import CmdLook, CmdExamine, CmdGet, CmdPut, CmdStopWalking
+        from commands.stealth_cmds import CmdHide, CmdSneak, CmdSearch, CmdUnhide
         from commands.matrix_cmds import CmdMacl
         from commands.combat_cmds import (
             CmdAttack,
@@ -138,7 +161,19 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         from commands.survival_cmds import CmdEat, CmdDrink
         from commands.inventory_cmds import CmdWield, CmdUnwield, CmdFreehands, CmdInventory, CmdReload, CmdUnload, CmdCheckAmmo, CmdWear, CmdRemove, CmdStrip, CmdFrisk
         from commands.crafting_cmds import CmdSurvey, CmdRepairArmor, CmdTailor
+        from commands.alchemy_cmds import (
+            CmdAlchemyCheck,
+            CmdAnalyze,
+            CmdBrew,
+            CmdClaim,
+            CmdCollect,
+            CmdDose,
+            CmdLoad,
+            CmdRefine,
+            CmdTend,
+        )
         from commands.media_cmds import CmdCamera, CmdTuneTelevision, CmdLabel
+        from commands.trust_cmds import CmdTrust, CmdUntrust, CmdTrusted
         from commands.roleplay_cmds import CmdTease, CmdDescribeMeAs, CmdBody, CmdVoice, CmdSmellSet, CmdLanguage, CmdSdesc, CmdPending, CmdLookPlace, CmdTempPlace, CmdSleepPlace, CmdWakeMsg, CmdFlatlineMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch, CmdCount, CmdRecog, CmdMemorize, CmdMemory, CmdSmell
         from commands.skintone_cmd import CmdSkintone
         from commands.roleplay_cmds import CmdSit, CmdLieOnTable, CmdGetOffTable
@@ -155,7 +190,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdSpawnCreature, CmdCreatureSet, CmdDespawn, CmdNpc, CmdMakeNpc, CmdNpcSet, CmdSpawnPerfume, CmdBadSmellRoom,
             CmdGoto, CmdGotoRoom, CmdSummon, CmdSetVoid, CmdVoid, CmdRelease, CmdBoot, CmdFind, CmdAnnounce, CmdRestore, CmdDebugKill,
             CmdSpawnSeat, CmdSpawnBed, CmdSpawnPod, CmdSpawnDiveRig, CmdSpawnCamera, CmdSpawnTelevision,
-            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling
+            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling, CmdBuffDebug
         )
         from commands.rpg.faction_cmds import CmdFaction
         from commands.sheet_cmds import CmdStats
@@ -182,6 +217,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         except Exception:
             pass
         self.add(CmdLook())
+        self.add(CmdHide())
+        self.add(CmdSneak())
+        self.add(CmdSearch())
+        self.add(CmdUnhide())
         self.add(CmdStopWalking())
         self.add(CmdScavenge())
         self.add(CmdSkin())
@@ -241,6 +280,15 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdCamera())
         self.add(CmdTuneTelevision())
         self.add(CmdTailor())
+        self.add(CmdCollect())
+        self.add(CmdLoad())
+        self.add(CmdBrew())
+        self.add(CmdTend())
+        self.add(CmdRefine())
+        self.add(CmdAlchemyCheck())
+        self.add(CmdClaim())
+        self.add(CmdAnalyze())
+        self.add(CmdDose())
         self.add(CmdTease())
         self.add(CmdXp())
         self.add(CmdDescribeMeAs())
@@ -264,6 +312,9 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdEmote())
         self.add(CmdCount())
         self.add(CmdRecog())
+        self.add(CmdTrust())
+        self.add(CmdUntrust())
+        self.add(CmdTrusted())
         self.add(CmdNoMatch())
         self.add(CmdPerformance())
         self.add(CmdExamine())
@@ -351,6 +402,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdMusic())
         self.add(CmdCyberware())
         self.add(CmdProfiling())
+        self.add(CmdBuffDebug())
         self.add(CmdFaction())
 
 class AccountCmdSet(default_cmds.AccountCmdSet):

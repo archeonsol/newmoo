@@ -485,3 +485,15 @@ class CmdNoMatchGrappled(Command):
 
     def func(self):
         self.caller.msg("You're locked in someone's grasp. You can only |wlook|n and |wresist|n.")
+
+
+class CmdNoMatchGrappling(Command):
+    """When holding someone in a grapple, any other command shows this."""
+    key = CMD_NOMATCH
+    locks = "cmd:all()"
+
+    def func(self):
+        self.caller.msg(
+            "Your hands are full holding them. You can only |wlook|n, |wattack|n them, |wgrapple|n, "
+            "|wletgo|n, |wstop walking|n, or use an exit to move."
+        )

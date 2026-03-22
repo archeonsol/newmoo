@@ -73,6 +73,10 @@ class CmdAttack(Command):
         if target == caller:
             caller.msg("You can't attack yourself.")
             return
+        held = getattr(caller.db, "grappling", None)
+        if held and held != target:
+            caller.msg("Both hands are on your captive. You can't attack anyone else. |wletgo|n first.")
+            return
         try:
             from typeclasses.corpse import Corpse
             if isinstance(target, Corpse):
@@ -132,6 +136,63 @@ class CmdAttack(Command):
                 start_creature_ai_ticker(target)
             except Exception as e:
                 logger.log_trace("combat_cmds.CmdAttack creature_combat: %s" % e)
+
+
+class CmdGrapplingAttack(Command):
+    """
+    While holding someone in a grapple: attack only them (strangle). Same keys as attack;
+    used by GrapplingCmdSet so other targets are rejected.
+    """
+
+    key = "attack"
+    aliases = ["kill", "hit"]
+    locks = "cmd:all()"
+    help_category = "Combat"
+
+    def func(self):
+        caller = _combat_caller(self)
+        held = getattr(caller.db, "grappling", None)
+        args = (self.args or "").strip()
+        if not args:
+            caller.msg("Strangle who? Usage: |wattack <them>|n")
+            return
+        target = caller.search(args)
+        if not target:
+            return
+        if held != target:
+            caller.msg("Both hands are on your captive. You can't swing at anyone else. |wletgo|n first.")
+            return
+        try:
+            from typeclasses.corpse import Corpse
+            if isinstance(target, Corpse):
+                caller.msg("You can't attack a corpse.")
+                return
+        except ImportError:
+            pass
+        try:
+            from world.death import is_permanently_dead, is_flatlined, is_character_logged_off
+            if is_character_logged_off(target):
+                caller.msg("You can drag them, but you cannot attack someone who is not here.")
+                return
+            if is_permanently_dead(target):
+                caller.msg(f"|r{_combat_display_name(target, caller)} is already dead.|n")
+                return
+            if is_flatlined(target):
+                tname = _combat_display_name(target, caller)
+                caller.msg(f"|r{tname} is down and dying.|n")
+                return
+        except ImportError:
+            if getattr(target.db, "current_hp", None) is not None and target.db.current_hp <= 0:
+                caller.msg(f"|r{_combat_display_name(target, caller)} is already dead.|n")
+                return
+        from world.combat.grapple import grapple_strike, start_grapple_strike_ticker
+
+        success, msg = grapple_strike(caller, target)
+        if success:
+            caller.msg("|g%s|n" % msg)
+            start_grapple_strike_ticker(caller, target)
+        else:
+            caller.msg("|r%s|n" % msg)
 
 
 class CmdStop(Command):

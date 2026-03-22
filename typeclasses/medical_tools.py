@@ -213,8 +213,9 @@ class OperatingTable(MedicalTool):
         patient = self.get_patient()
         if patient != target:
             return False, "Anesthesia can only be administered to the patient on the operating table."
-        now_ts = time.time()
-        if bool(getattr(target.db, "medical_unconscious", False)) and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts:
+        from world.medical import is_unconscious
+
+        if is_unconscious(target):
             return False, "Patient is already unconscious."
         delay_secs = random.randint(5, 6)
         target.msg("|mA mask descends. You inhale |wsevoflurane|m vapor as the room starts to blur...|n")
@@ -236,9 +237,6 @@ class OperatingTable(MedicalTool):
             now = time.time()
             old_until = float(getattr(target.db, "sedated_until", 0.0) or 0.0)
             target.db.sedated_until = max(old_until, now + ko_secs)
-            old_med_until = float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0)
-            target.db.medical_unconscious = True
-            target.db.medical_unconscious_until = max(old_med_until, now + ko_secs)
             target.db.sedated_by = getattr(operator, "id", None)
             target.msg("|mThe vapor takes hold. Darkness closes in.|n")
 
@@ -256,19 +254,23 @@ class OperatingTable(MedicalTool):
             return False, "You can only wake the patient lying on the operating table."
 
         was_sedated = float(getattr(target.db, "sedated_until", 0.0) or 0.0) > time.time()
-        was_uncon = bool(getattr(target.db, "medical_unconscious", False))
+        from world.medical import is_unconscious
+
+        was_uncon = is_unconscious(target)
         if not was_sedated and not was_uncon:
             return False, "They are already awake."
 
         try:
             from world.combat.grapple import force_wake_medical_unconscious
+
             force_wake_medical_unconscious(target, silent=True)
         except Exception:
-            target.db.medical_unconscious = False
-            target.db.medical_unconscious_until = 0.0
+            try:
+                from world.unconscious_state import force_wake_unconscious
 
-        target.db.sedated_until = 0.0
-        target.db.sedated_by = None
+                force_wake_unconscious(target, silent=True)
+            except Exception:
+                pass
         target.msg("|mThe chemical haze thins. Your awareness snaps back in a rush.|n")
         if target.location and hasattr(target.location, "contents_get"):
             for v in target.location.contents_get(content_type="character"):

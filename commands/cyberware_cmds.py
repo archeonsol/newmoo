@@ -155,6 +155,29 @@ class CmdCyberware(Command):
 
 
 class CmdSkinWeave(Command):
+    """
+    Set how your skin weave appears in descriptions (functional skin weave required).
+
+    Usage:
+        skinweave
+        skinweave coverage
+        skinweave set <body part> = <description>
+        skinweave reset
+        skinweave preset list
+        skinweave preset save <name>
+        skinweave preset load <name>
+        skinweave preset delete <name>
+
+    With no arguments, lists current text per covered body part. Preset load default
+    resets appearance to factory defaults (same as skinweave reset).
+
+    Evennia color codes (e.g. |321, |w) are allowed. If you use them, the line is not
+    wrapped in the default chrome tint. Minimum length applies to visible text after
+    codes are removed.
+
+    Aliases: sw
+    """
+
     key = "skinweave"
     aliases = ["sw"]
     locks = "cmd:all()"
@@ -233,6 +256,16 @@ class CmdSkinWeave(Command):
 
 
 class CmdSurge(Command):
+    """
+    Trigger your adrenal pump surge or check its status (functional pump required).
+
+    Usage:
+        surge
+        surge status
+
+    Surge puts the pump on cooldown; status shows active surge, crash, or cooldown timers.
+    """
+
     key = "surge"
     locks = "cmd:all()"
     help_category = "Cyberware"
@@ -280,6 +313,18 @@ class CmdSurge(Command):
 
 
 class CmdClaws(Command):
+    """
+    Deploy or retract retractable claws (functional implant required).
+
+    Usage:
+        claws
+        claws status
+        claws deploy
+        claws retract
+
+    Aliases: claw
+    """
+
     key = "claws"
     aliases = ["claw"]
     locks = "cmd:all()"

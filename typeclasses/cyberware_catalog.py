@@ -2,6 +2,7 @@
 
 from typeclasses.cyberware import CyberwareBase
 from world.cyberware_buffs import *
+from world.skin_tones import strip_color_codes
 
 
 SKINWEAVE_DEFAULTS = {
@@ -265,8 +266,9 @@ class SkinWeave(CyberwareBase):
         if body_part not in parts:
             return False, f"Your skin weave doesn't cover your {body_part}."
         new_desc = (new_desc or "").strip()
-        if len(new_desc) < 20:
-            return False, "Description too short (min 20 characters)."
+        visible = (strip_color_codes(new_desc) or "").strip()
+        if len(visible) < 20:
+            return False, "Description too short (min 20 characters of visible text, not counting color codes)."
         if len(new_desc) > 500:
             return False, "Description too long (max 500 characters)."
         descs = dict(self.db.weave_descriptions or {})
@@ -489,6 +491,34 @@ class RetractableClaws(CyberwareBase):
     chrome_max_hp = 40
     body_mods = {}
 
+    def reapply_buffs(self, character):
+        super().reapply_buffs(character)
+        if getattr(self.db, "malfunctioning", False):
+            return
+        if self.are_deployed():
+            from world.cyberware_buffs import RetractableClawsDeployedBuff
+
+            character.buffs.add(RetractableClawsDeployedBuff)
+
+    def set_malfunction(self, character, value=True):
+        super().set_malfunction(character, value)
+        if value:
+            try:
+                character.buffs.remove("retractable_claws_deployed")
+            except Exception:
+                pass
+        elif self.are_deployed():
+            from world.cyberware_buffs import RetractableClawsDeployedBuff
+
+            character.buffs.add(RetractableClawsDeployedBuff)
+
+    def on_uninstall(self, character):
+        try:
+            character.buffs.remove("retractable_claws_deployed")
+        except Exception:
+            pass
+        super().on_uninstall(character)
+
     def _claw_descs(self):
         return {
             "left hand": ("append", "Sharp, animalistic claws extend from the fingertips, made out of some bone and steel composite."),
@@ -517,6 +547,9 @@ class RetractableClaws(CyberwareBase):
         if left or right:
             return False, "Your hands must be empty before deploying claws."
         self.db.claws_deployed = True
+        from world.cyberware_buffs import RetractableClawsDeployedBuff
+
+        character.buffs.add(RetractableClawsDeployedBuff)
         self.body_mods = self._claw_descs()
         for part, (_mode, text) in self.body_mods.items():
             appended = dict(character.db.appended_descriptions or {})
@@ -531,6 +564,10 @@ class RetractableClaws(CyberwareBase):
         if not self.are_deployed():
             return False, "Your claws are already retracted."
         self.db.claws_deployed = False
+        try:
+            character.buffs.remove("retractable_claws_deployed")
+        except Exception:
+            pass
         for part in ("left hand", "right hand"):
             appended = dict(character.db.appended_descriptions or {})
             if part in appended:

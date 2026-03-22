@@ -600,17 +600,20 @@ class CmdRestore(Command):
         if not target or not hasattr(target, "db"):
             return
         try:
-            from world.death import is_flatlined, clear_flatline
-            if is_flatlined(target):
-                clear_flatline(target)
-            from world.medical import reset_medical
-            reset_medical(target)
+            # Heal first, then clear flatline. If death_state is cleared while HP is still 0,
+            # character_can_act() still blocks on hp <= 0 with the same "dying" message.
             mx = target.max_hp
             target.db.current_hp = mx
             target.db.current_stamina = target.max_stamina
-            caller.msg("|g{} restored to full HP, stamina, and trauma cleared (no bleeding/fractures/organ damage).|n".format(target.name))
+            from world.death import clear_flatline
+
+            clear_flatline(target)
+            from world.medical import reset_medical
+
+            reset_medical(target)
+            caller.msg("|g{} restored to full HP, stamina, and trauma cleared; flatline/dying state cleared.|n".format(target.name))
             if target != caller:
-                target.msg("|gYou have been restored to full health; all trauma has been cleared.|n")
+                target.msg("|gYou have been restored to full health; all trauma and flatline state have been cleared.|n")
         except Exception as e:
             caller.msg("|rCould not restore: {}|n".format(e))
 
@@ -778,6 +781,8 @@ class CmdSpawnItem(Command):
       spawnitem list                      - list all prototype keys
       spawnitem list <category>           - list keys that have that tag (e.g. spawnitem list combat)
       spawnitem list <category> <subtag>  - list keys that have both tags (e.g. spawnitem list combat weapon)
+      spawnitem list drug                 - alchemy drugs (also: drugs, alchemy drug, …)
+      spawnitem list alchemy              - stations, chemicals, drugs, recipes, etc.
       spawnitem <prototype_key>           - spawn into your inventory (e.g. spawnitem bolt_of_silk)
 
     For typeclass-only items use |wtypeclasses|n and |wcreate <typeclass> = <key>|n.
@@ -802,9 +807,19 @@ class CmdSpawnItem(Command):
             if not rest:
                 self._show_list(caller, tag_filters=None)
             else:
-                self._show_list(caller, tag_filters=[x.lower() for x in rest])
+                self._show_list(
+                    caller,
+                    tag_filters=[self._normalize_spawnitem_tag(x) for x in rest],
+                )
             return
         self._spawn_prototype(caller, args)
+
+    @staticmethod
+    def _normalize_spawnitem_tag(token):
+        from world.prototypes.categories import SPAWNITEM_TAG_ALIASES
+
+        t = token.lower()
+        return SPAWNITEM_TAG_ALIASES.get(t, t)
 
     def _show_list(self, caller, tag_filters):
         from evennia.prototypes import prototypes as protlib
@@ -1834,6 +1849,58 @@ class CmdGiveXp(Command):
         else:
             caller.msg(f"|g[ADMIN]|n Granted |w{added}|n XP to |w{target.name}|n. Their total: |w{new_total}|n / {cap}.")
             target.msg(f"|g[ADMIN]|n You received |w{added}|n XP. Total: |w{new_total}|n / {cap}.")
+
+
+class CmdBuffDebug(Command):
+    """
+    Inspect BuffHandler state and the stat/skill check chain (staff).
+
+    Usage:
+      @buffdebug
+      @buffdebug <stat>
+    """
+
+    key = "@buffdebug"
+    aliases = ["buffdebug"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        stat = (self.args or "").strip() or "strength"
+        from world.rpg.xp import _stat_level
+
+        raw = _stat_level(caller, stat)
+        base = min(max((raw or 0) // 2, 0), 150)
+
+        if not hasattr(caller, "buffs"):
+            caller.msg("|rNo BuffHandler on this character.|n")
+            return
+
+        try:
+            buffed = caller.buffs.check(base, f"{stat}_display")
+        except Exception as err:
+            caller.msg(f"|rafter buffs.check: {err}|n")
+            buffed = base
+
+        final = caller.get_display_stat(stat) if hasattr(caller, "get_display_stat") else base
+
+        caller.msg(f"|wRaw stored:|n {raw}")
+        caller.msg(f"|wBase display (raw//2):|n {base}")
+        caller.msg(f"|wAfter buffs.check:|n {buffed}")
+        caller.msg(f"|wFinal get_display_stat:|n {final}")
+
+        try:
+            buff_list = list(caller.buffs.get_all().values())
+            caller.msg(f"|wActive buffs ({len(buff_list)}):|n")
+            for b in buff_list:
+                key = getattr(b, "key", "?")
+                dur = getattr(b, "duration", "?")
+                mods = getattr(b, "mods", [])
+                sm = getattr(type(b), "stat_mods", {})
+                caller.msg(f"  {key}: duration={dur}, mods={mods}, stat_mods={sm}")
+        except Exception as e:
+            caller.msg(f"|rError listing buffs: {e}|n")
 
 
 class CmdEmoteDebug(Command):

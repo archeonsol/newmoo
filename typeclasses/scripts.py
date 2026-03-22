@@ -159,6 +159,25 @@ class StaffPendingScript(Script):
         self.db.pending = []
 
 
+class AddictionWithdrawalScript(Script):
+    """
+    Every 30 minutes: addiction withdrawal onset, recovery steps, echoes.
+    """
+
+    def at_script_creation(self):
+        self.key = "addiction_withdrawal"
+        self.interval = 1800
+        self.repeats = 0
+        self.persistent = True
+
+    def at_repeat(self):
+        from world.profiling import timed_tick
+        from world.alchemy.addiction import tick_online_characters
+
+        with timed_tick("addiction_withdrawal", self.interval):
+            tick_online_characters()
+
+
 class HandsetMessageCleanupScript(Script):
     """
     Global cleanup: prune handset message buffers to last 24 hours.

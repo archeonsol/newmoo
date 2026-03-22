@@ -1,6 +1,9 @@
+from collections.abc import Mapping
+
 from evennia import DefaultCharacter
+from evennia.contrib.rpg.buffs.buff import BuffHandler
 from evennia.utils import logger
-from evennia.utils.utils import compress_whitespace, lazy_property
+from evennia.utils.utils import compress_whitespace, dbref, lazy_property
 
 from world.multipuppet import multi_puppet_relay
 from world.theme_colors import ROOM_COLORS
@@ -17,6 +20,126 @@ def _body_parts(character):
 # When you look at a character: name = orange (match room list), sdesc in parens = white
 LOOK_CHARACTER_NAME_COLOR = ROOM_COLORS["character_name"]
 LOOK_SDESC_COLOR = "|w"              # white for (a tall man wearing...)
+
+
+def _resolve_buff_handler_owner(handler):
+    """
+    Resolve BuffHandler.owner without storing a live object reference on the
+    handler. A strong ``Character`` reference breaks pickling of persistent
+    ``utils.delay(..., handler.cleanup, persistent=True)`` (e.g. timed drug buffs).
+    """
+    o = BuffHandler.owner.fget(handler)
+    if o is not None:
+        return o
+    ref = getattr(handler, "ownerref", None)
+    if not ref:
+        return None
+    try:
+        from evennia.objects.models import ObjectDB
+
+        oid = dbref(ref, reqhash=True)
+        if oid:
+            return ObjectDB.objects.get(id=oid)
+    except Exception:
+        pass
+    return None
+
+
+class _BuffCacheDict(dict):
+    """
+    Evennia Attribute values unpickle on every read; in-place mutation of the
+    dict returned by ``attributes.get`` does not write back. Route mutations
+    through ``attributes.add`` so BuffHandler writes persist.
+    """
+
+    __slots__ = ("_handler",)
+
+    def __init__(self, handler, *args, **kwargs):
+        self._handler = handler
+        super().__init__(*args, **kwargs)
+
+    def _persist(self):
+        h = self._handler
+        if h.owner is not None:
+            h.owner.attributes.add(h.dbkey, dict(self))
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self._persist()
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self._persist()
+
+    def clear(self):
+        super().clear()
+        self._persist()
+
+    def pop(self, *args, **kwargs):
+        result = super().pop(*args, **kwargs)
+        self._persist()
+        return result
+
+    def popitem(self):
+        result = super().popitem()
+        self._persist()
+        return result
+
+    def update(self, *args, **kwargs):
+        super().update(*args, **kwargs)
+        self._persist()
+
+    def setdefault(self, key, default=None):
+        if key in self:
+            return self[key]
+        self[key] = default
+        return default
+
+
+class _SafeBuffHandler(BuffHandler):
+    """
+    Ensures the persisted buff cache is always a dict. If db.buffs was ever
+    overwritten with a string or other type, Evennia's BuffHandler.get_all()
+    does dict(self.buffcache) and raises ValueError.
+
+    Evennia's BuffHandler.owner uses search_object(dbref); if that misses,
+    we fall back to ObjectDB.objects.get so buffcache writes still target the
+    character. We do not store a live owner reference on the handler so
+    ``utils.delay(..., self.cleanup, persistent=True)`` can pickle the handler.
+    """
+
+    def __init__(self, owner, dbkey="buffs", autopause=True):
+        self._buffcache_dict = None
+        super().__init__(owner, dbkey=dbkey, autopause=autopause)
+
+    @property
+    def owner(self):
+        return _resolve_buff_handler_owner(self)
+
+    @property
+    def buffcache(self):
+        if not self.owner:
+            return {}
+        if self._buffcache_dict is None:
+            if not self.owner.attributes.has(self.dbkey):
+                self.owner.attributes.add(self.dbkey, {})
+            cache = self.owner.attributes.get(self.dbkey)
+            # Evennia returns db-backed dicts as _SaverDict (MutableMapping), not plain dict.
+            # Treating that as invalid used to reset db.buffs to {} and wipe all buffs on load.
+            if not isinstance(cache, Mapping):
+                logger.log_warn(
+                    "buffs cache on {owner} was {cache!r} ({typ}); reset to empty dict",
+                    owner=self.owner,
+                    cache=cache,
+                    typ=type(cache).__name__,
+                )
+                self.owner.attributes.add(self.dbkey, {})
+                cache = {}
+            else:
+                cache = dict(cache)
+            self._buffcache_dict = _BuffCacheDict(self)
+            self._buffcache_dict.update(cache)
+        return self._buffcache_dict
 
 
 class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, FurnitureMixin, DefaultCharacter):
@@ -47,10 +170,8 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         Backed by Evennia's generic BuffHandler; all mechanical effects flow
         through stat/skill helpers rather than touching stored values directly.
         """
-        from evennia.contrib.rpg.buffs.buff import BuffHandler
-
         # Use a dedicated dbkey so buffs live on character.db.buffs.
-        return BuffHandler(self, dbkey="buffs", autopause=True)
+        return _SafeBuffHandler(self, dbkey="buffs", autopause=True)
 
     def at_object_creation(self):
         """Called only once, when the character is first created."""
@@ -129,6 +250,42 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         self.db.skin_tone = None
         self.db.skin_tone_code = None
         self.db.skin_tone_set = False
+        # Alchemy / drugs (see world.alchemy)
+        self.db.addictions = {}
+        self.db.active_drugs = {}
+        self.db.known_recipes = []
+        self.db.cyberpsychosis_score = 0
+        self.db.trust = {}
+        self.db.comedown_drugs = {}
+        self.db.alchemy_analysis = {}
+        # Stealth (see world.rpg.stealth)
+        self.db.stealth_hidden = False
+        self.db.stealth_roll_result = 0
+        self.db.stealth_spotted_by = []
+
+    def search(self, searchdata, **kwargs):
+        """Exclude hidden characters the searcher has not spotted."""
+        res = super().search(searchdata, **kwargs)
+        if not res:
+            return res
+        try:
+            from world.rpg import stealth
+
+            def _visible(obj):
+                if obj is self:
+                    return True
+                if stealth.is_hidden(obj) and not stealth.has_spotted(self, obj):
+                    return False
+                return True
+
+            if isinstance(res, (list, tuple)):
+                filtered = [o for o in res if _visible(o)]
+                return filtered if filtered else None
+            if not _visible(res):
+                return None
+            return res
+        except Exception:
+            return res
 
     def return_appearance(self, looker, **kwargs):
         """Same as DefaultObject but pass IC-colored name into the template."""
@@ -153,14 +310,28 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
             **kwargs,
         )
 
+    def trusts(self, actor, category):
+        """True if this character trusts actor for the given trust category (recog-based)."""
+        from world.rpg.trust import check_trust
+
+        return check_trust(self, actor, category)
+
+    def trusts_or_incapacitated(self, actor, category, operate_strict=False):
+        """(allowed, reason) — trust or sedated/restrained/flatlined/unconscious."""
+        from world.rpg.trust import check_trust_or_incapacitated
+
+        return check_trust_or_incapacitated(self, actor, category, operate_strict=operate_strict)
+
     def at_server_start(self):
         """Re-apply cyberware buffs after a server restart (BuffHandler is non-persistent)."""
         super().at_server_start()
         # Clear stale procedure lock on startup and reconcile unconscious timers/cmdset.
         self.db.surgery_in_progress = False
         try:
-            from world.combat.grapple import reconcile_unconscious_state
+            from world.combat.grapple import reconcile_unconscious_state, reconcile_grapple_cmdsets_after_reload
+
             reconcile_unconscious_state(self)
+            reconcile_grapple_cmdsets_after_reload(self)
         except Exception as err:
             logger.log_trace(f"characters.at_server_start reconcile_unconscious_state: {err}")
         for obj in (self.db.cyberware or []):
@@ -168,6 +339,12 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
                 obj.reapply_buffs(self)
             except Exception as err:
                 logger.log_trace(f"characters.at_server_start reapply_buffs ({obj}): {err}")
+        try:
+            from world.alchemy.effects import reconcile_active_drugs_after_reload
+
+            reconcile_active_drugs_after_reload(self)
+        except Exception as err:
+            logger.log_trace(f"characters.at_server_start reconcile_active_drugs: {err}")
 
     def install_cyberware(self, cyberware_obj, skip_surgery=False):
         """
@@ -480,6 +657,13 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         relayed_only = multi_puppet_relay(self, text, session=session, **kwargs)
         if relayed_only:
             session = None
+        if isinstance(text, str) and getattr(self.db, "drug_color_shift", False):
+            try:
+                from world.alchemy.effects import apply_msg_color_shift
+
+                text = apply_msg_color_shift(self, text)
+            except Exception as err:
+                logger.log_trace(f"characters.msg drug_color_shift: {err}")
         return super().msg(text=text, from_obj=from_obj, session=session, **kwargs)
 
     def at_post_puppet(self, **kwargs):
@@ -567,14 +751,23 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
             except Exception as err:
                 logger.log_trace("characters.at_post_unpuppet release_grapple: %s" % err)
             if self.location:
+                skip_fall_asleep_broadcast = False
                 try:
-                    from world.rpg.crafting import substitute_clothing_desc
-                    msg = getattr(self.db, "fall_asleep_message", None) or "$N falls asleep."
-                    msg = substitute_clothing_desc(msg, self)
-                    if msg:
-                        self.location.msg_contents(msg, exclude=[self])
-                except Exception as err:
-                    logger.log_trace("characters.at_post_unpuppet fall_asleep_message: %s" % err)
+                    from world.death import is_flatlined, is_permanently_dead
+
+                    if is_flatlined(self) or is_permanently_dead(self):
+                        skip_fall_asleep_broadcast = True
+                except ImportError:
+                    pass
+                if not skip_fall_asleep_broadcast:
+                    try:
+                        from world.rpg.crafting import substitute_clothing_desc
+                        msg = getattr(self.db, "fall_asleep_message", None) or "$N falls asleep."
+                        msg = substitute_clothing_desc(msg, self)
+                        if msg:
+                            self.location.msg_contents(msg, exclude=[self])
+                    except Exception as err:
+                        logger.log_trace("characters.at_post_unpuppet fall_asleep_message: %s" % err)
                 self.db.prelogout_location = self.location
             # Do NOT set self.location = None; character stays in the room.
 
@@ -628,6 +821,27 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         except Exception:
             # Be defensive in case a parent doesn't implement at_post_move
             pass
+
+        try:
+            from world.rpg import stealth
+
+            sneak = False
+            if hasattr(self.ndb, "_stealth_move_sneak"):
+                sneak = bool(getattr(self.ndb, "_stealth_move_sneak", False))
+                del self.ndb._stealth_move_sneak
+            loc = getattr(self, "location", None)
+            if loc and hasattr(loc, "contents_get"):
+                if sneak:
+                    stealth.sneak_arrival(self, loc)
+                stealth.run_arrival_detection(self, loc)
+                if sneak:
+                    if stealth.sneak_breaks_stealth_combat(self):
+                        stealth.reveal(self, "combat")
+                elif stealth.is_hidden(self):
+                    stealth.reveal(self, "action")
+        except Exception:
+            pass
+
         if hasattr(self.db, "temp_room_pose"):
             try:
                 del self.db.temp_room_pose

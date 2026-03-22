@@ -65,8 +65,10 @@ def spend_stamina(character, amount):
 
 def get_regen_rate(character):
     """
-    Stamina points added per regen tick. Base + bonus for sitting/lying
-    + multiplier for recent nutritious meal.
+    Stamina points added per regen tick. Base, endurance, sitting/lying,
+    medical/cyberware, recent meal/drink buff windows (multipliers), and
+    drug_stamina_regen_bonus. Passive hunger/thirst meter levels do not adjust
+    the rate — only the timed hydration/nutrition buffs from eating/drinking do.
     """
     rate = STAMINA_REGEN_BASE
     if getattr(character, "db", None):
@@ -107,17 +109,7 @@ def get_regen_rate(character):
         if last_drink and (time.time() - last_drink) < (HYDRATION_BUFF_MINUTES * 60):
             rate = int(rate * HYDRATION_REGEN_MULTIPLIER)
 
-        # Hunger/thirst directly affect stamina recovery quality.
-        hunger = int(getattr(character.db, "hunger", 100) or 100)
-        thirst = int(getattr(character.db, "thirst", 100) or 100)
-        if hunger <= 25:
-            rate -= 1
-        elif hunger >= 70:
-            rate += 1
-        if thirst <= 25:
-            rate -= 1
-        elif thirst >= 70:
-            rate += 1
+        rate += int(getattr(character.db, "drug_stamina_regen_bonus", 0) or 0)
     return max(1, rate)
 
 
@@ -145,10 +137,11 @@ STAMINA_RECOVERY_LABELS = (
 
 def get_stamina_recovery_label(character):
     """
-    Stamina recovery as a condition: base is moderately. Goes down when bleeding
-    or injured; goes up when sitting or lying. When actively fighting, this reports
-    a special "physically active" state instead of implying your stamina is barely
-    recovering at all.
+    Stamina recovery as a condition: base is moderately. Goes down when bleeding,
+    injured, starving, or dehydrated; goes up after a recent meal or drink, when
+    sitting or lying, or when a drug boosts stamina regen. When actively fighting
+    (or sneaking, running, etc.), this reports "physically active" instead of a
+    recovery tier.
     """
     if not character or not getattr(character, "db", None):
         return STAMINA_RECOVERY_LABELS[2]
@@ -199,7 +192,9 @@ def get_stamina_recovery_label(character):
     elif getattr(character.db, "sitting_on", None) is not None:
         score += 1
 
-    # Nutrition/hydration visibly improve stamina recovery.
+    # Nutrition/hydration improve the label after eating/drinking (buff windows),
+    # not merely from a full hunger/thirst meter — otherwise everyone at default
+    # 100/100 reads as "recovering very well" with no recent intake.
     now = time.time()
     last_meal = getattr(character.db, "last_nutritious_meal", None)
     last_drink = getattr(character.db, "last_hydrating_drink", None)
@@ -208,16 +203,15 @@ def get_stamina_recovery_label(character):
     if last_drink and (now - last_drink) < (HYDRATION_BUFF_MINUTES * 60):
         score += 1
 
+    if int(getattr(character.db, "drug_stamina_regen_bonus", 0) or 0) > 0:
+        score += 1
+
     hunger = int(getattr(character.db, "hunger", 100) or 100)
     thirst = int(getattr(character.db, "thirst", 100) or 100)
     if hunger <= 25:
         score -= 1
-    elif hunger >= 70:
-        score += 1
     if thirst <= 25:
         score -= 1
-    elif thirst >= 70:
-        score += 1
 
     score = max(0, min(4, score))
     return STAMINA_RECOVERY_LABELS[score]

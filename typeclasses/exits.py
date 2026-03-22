@@ -12,6 +12,7 @@ from evennia.utils import delay
 from evennia.objects.objects import DefaultExit
 
 from .objects import ObjectParent
+from typeclasses.exit_traversal import precheck_exit_traversal
 
 try:
     from world.rpg.staggered_movement import (
@@ -37,87 +38,17 @@ class Exit(ObjectParent, DefaultExit):
         if not destination:
             super().at_traverse(traversing_object, destination)
             return
-        # Sitting/lying: must stand/get up first (check before any messages)
-        if getattr(traversing_object.db, "sitting_on", None):
-            traversing_object.msg("You need to stand up first.")
+        if getattr(traversing_object.ndb, "hide_pending", False):
+            traversing_object.ndb.hide_pending = False
+            traversing_object.msg("|yYour attempt to hide is interrupted.|n")
             return
-        if getattr(traversing_object.db, "lying_on", None) or getattr(traversing_object.db, "lying_on_table", None):
-            traversing_object.msg("You need to get up first.")
+
+        ok, destination, err, direction_str = precheck_exit_traversal(self, traversing_object, destination)
+        if not ok:
+            if err:
+                traversing_object.msg(err)
             return
-        # Grappled: cannot walk away while someone has them locked in grasp.
-        grappled_by = getattr(traversing_object.db, "grappled_by", None)
-        if grappled_by:
-            # get_display_name() is viewer-aware; show the grappler name from the victim's perspective if available.
-            grappler_name = (
-                grappled_by.get_display_name(traversing_object)
-                if hasattr(grappled_by, "get_display_name")
-                else getattr(grappled_by, "key", "someone")
-            )
-            traversing_object.msg(f"You're locked in {grappler_name}'s grasp. Use |wresist|n to break free.")
-            return
-        # Flatlined (dying): no movement — lock all IC action
-        try:
-            from world.death import is_flatlined
-            if is_flatlined(traversing_object):
-                traversing_object.msg("|rYou are dying. There is nothing you can do.|n")
-                return
-        except ImportError:
-            pass
-        # In combat (attacking or being attacked): must use flee to try to break away
-        try:
-            from world.combat import is_in_combat
-            if is_in_combat(traversing_object):
-                traversing_object.msg("You're in combat! Use |wflee|n or |wflee <direction>|n to try to break away.")
-                return
-        except ImportError:
-            if getattr(traversing_object.db, "combat_target", None) is not None:
-                traversing_object.msg("You're in combat! Use |wflee|n or |wflee <direction>|n to try to break away.")
-                return
-        # Voided characters cannot leave the void room
-        if getattr(traversing_object.db, "voided", False):
-            try:
-                from evennia.server.models import ServerConfig
-                void_id = ServerConfig.objects.conf("VOID_ROOM_ID", default=None)
-                if void_id is not None and getattr(destination, "id", None) != int(void_id):
-                    traversing_object.msg("|rYou cannot leave the void.|n")
-                    return
-            except Exception:
-                pass
-
-        # Doors and faction-locked exits (before stamina / staggered move)
-        try:
-            from world.rpg.factions import is_faction_member
-            from world.rpg.factions.membership import get_member_rank
-            from world.rpg.factions.doors import staff_bypass as _faction_staff
-
-            if _faction_staff(traversing_object):
-                pass
-            else:
-                door = getattr(self.db, "door", None)
-                if door and not getattr(self.db, "door_open", False):
-                    dname = getattr(self.db, "door_name", None) or "door"
-                    if getattr(self.db, "door_locked", None):
-                        traversing_object.msg(f"The {dname} is locked.")
-                    elif getattr(self.db, "bioscan", None):
-                        dk = (self.key or "that way").strip()
-                        traversing_object.msg(
-                            f"The {dname} requires bioscan verification. Use: verify {dk}"
-                        )
-                    else:
-                        traversing_object.msg(f"The {dname} is closed.")
-                    return
-
-                fk = getattr(self.db, "faction_required", None)
-                if fk:
-                    min_r = int(getattr(self.db, "faction_required_rank", None) or 1)
-                    if not is_faction_member(traversing_object, fk):
-                        traversing_object.msg("|rAccess denied. Wrong faction clearance.|n")
-                        return
-                    if get_member_rank(traversing_object, fk) < min_r:
-                        traversing_object.msg("|rAccess denied. Insufficient rank.|n")
-                        return
-        except Exception:
-            pass
+        direction = direction_str or (self.key or "away").strip()
 
         try:
             from world.rpg.stamina import is_exhausted, spend_stamina, STAMINA_COST_WALK, STAMINA_COST_CRAWL
@@ -140,28 +71,6 @@ class Exit(ObjectParent, DefaultExit):
         except Exception:
             pass
         force_crawl = exhausted or leg_lost
-        # High intoxication: occasionally stagger into a random exit instead of intended one.
-        stagger_direction = None
-        try:
-            drunk_level = int(getattr(getattr(traversing_object, "db", None), "drunk_level", 0) or 0)
-        except Exception:
-            drunk_level = 0
-        if drunk_level >= 3:
-            import random
-            # 25% chance to misstep on each move.
-            if random.random() < 0.25:
-                exits_here = [o for o in (getattr(traversing_object.location, "contents", None) or []) if getattr(o, "destination", None)]
-                if exits_here:
-                    stagger_exit = random.choice(exits_here)
-                    if getattr(stagger_exit, "destination", None):
-                        destination = stagger_exit.destination
-                        stagger_direction = (stagger_exit.key or "away").strip()
-        # Drain hunger/thirst only when traversing scavenging tiles (wilderness/urban).
-        try:
-            from world.rpg.survival import apply_move_hunger_thirst
-            apply_move_hunger_thirst(traversing_object, traversing_object.location, destination)
-        except Exception:
-            pass
 
         # Starting a new move clears any previous "stop walking" request so
         # that fresh walks work normally.
@@ -175,7 +84,6 @@ class Exit(ObjectParent, DefaultExit):
         if force_crawl:
             spend_stamina(traversing_object, STAMINA_COST_CRAWL)
             delay_secs = CRAWL_DELAY_LEG_TRAUMA if leg_lost else CRAWL_DELAY_EXHAUSTED
-            direction = stagger_direction or (self.key or "away").strip()
             if leg_lost:
                 traversing_object.msg(f"You drag yourself {direction}, barely moving.")
             else:
@@ -183,7 +91,6 @@ class Exit(ObjectParent, DefaultExit):
         else:
             spend_stamina(traversing_object, STAMINA_COST_WALK)
             delay_secs = WALK_DELAY
-            direction = stagger_direction or (self.key or "away").strip()
             traversing_object.msg(f"You begin walking {direction}.")
 
         # Announce staggered move to others in the room with recog-aware names.
@@ -216,8 +123,14 @@ class Exit(ObjectParent, DefaultExit):
                         del db.cancel_walking
                     except Exception:
                         db.cancel_walking = False
+                    try:
+                        if hasattr(o.ndb, "_stealth_move_sneak"):
+                            del o.ndb._stealth_move_sneak
+                    except Exception:
+                        pass
                     return
-                o.move_to(d)
+                sneak = bool(getattr(o.ndb, "_stealth_move_sneak", False))
+                o.move_to(d, quiet=sneak)
                 victim = getattr(getattr(o, "db", None), "grappling", None)
                 if victim and hasattr(victim, "move_to"):
                     victim.move_to(d, quiet=True)

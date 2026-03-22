@@ -26,10 +26,42 @@ def _command_character(self):
     return caller
 
 
+def _stealth_and_hide_at_pre_cmd(cmd_self):
+    """
+    Hide-cancel + stealth reveal. Used by Command and by CmdLook (which must stay
+    DefaultCmdLook-only so Evennia's parse/func chain is not replaced by Command.parse).
+    Returns True if the command should abort (caller blocked).
+    """
+    caller = cmd_self.caller
+    if not caller:
+        return False
+    char = _command_character(cmd_self)
+    try:
+        from world.rpg import stealth
+
+        if getattr(char.ndb, "hide_pending", False):
+            cmd_key = (getattr(cmd_self, "key", None) or "").strip().lower()
+            if not cmd_key:
+                raw = getattr(cmd_self, "raw_string", "") or ""
+                part = raw.strip().split(None, 1)
+                cmd_key = (part[0] if part else "").lower()
+            if cmd_key != "hide":
+                stealth.cancel_hide_pending(char, None)
+                return True
+        if getattr(char.db, "stealth_hidden", False) and stealth.command_breaks_stealth(cmd_self):
+            stealth.reveal(char, reason="action")
+    except Exception:
+        pass
+    return False
+
+
 class Command(BaseCommand):
-    """
-    Base command. Blocks all commands when character is flatlined (dying) or dead except for Admins/Builders.
-    """
+    # Flatline/dead blocking lives in at_pre_cmd (character_can_act). Subclasses must
+    # define their own docstring for help; __doc__ is empty so Evennia's CommandMeta does
+    # not copy this class's text onto children that omit one (see _init_command in
+    # evennia.commands.command).
+    __doc__ = ""
+
     def parse(self):
         """Extract switches and args from raw_string. Sets self.switches (list) and self.args (str)."""
         raw = self.raw_string or ""
@@ -56,6 +88,8 @@ class Command(BaseCommand):
         if not can_act and msg:
             caller.msg(msg)
             return True
+        if _stealth_and_hide_at_pre_cmd(self):
+            return True
         return super().at_pre_cmd()
 
     def at_post_cmd(self):
@@ -75,22 +109,27 @@ class CmdLook(DefaultCmdLook):
     """
 
     def at_pre_cmd(self):
-        """Block look when flatlined/dead so state-specific cmdset message can show."""
+        """Flatline/dead, hide-pending cancel, stealth break — keep DefaultCmdLook.parse."""
         from world.profiling import record_command_start
+
         record_command_start(self)
         caller = self.caller
         if not caller:
             return super().at_pre_cmd() if hasattr(super(), "at_pre_cmd") else None
         char = _command_character(self)
         from world.death import character_can_act
+
         can_act, msg = character_can_act(char, allow_builders=True)
         if not can_act and msg:
             caller.msg(msg)
+            return True
+        if _stealth_and_hide_at_pre_cmd(self):
             return True
         return super().at_pre_cmd() if hasattr(super(), "at_pre_cmd") else None
 
     def at_post_cmd(self):
         from world.profiling import record_command_end
+
         record_command_end(self)
 
     def func(self):
@@ -278,6 +317,12 @@ class CmdLook(DefaultCmdLook):
                             o for o in contents
                             if getattr(o, "has_account", False) or bool(getattr(getattr(o, "db", None), "is_npc", False))
                         ]
+                    try:
+                        from world.rpg import stealth
+
+                        chars = [c for c in chars if not (stealth.is_hidden(c) and not stealth.has_spotted(caller, c))]
+                    except Exception:
+                        pass
                     if not chars:
                         caller.msg(f"To the {direction} you see |wnothing of note|n.")
                         return
@@ -373,7 +418,7 @@ class CmdExamine(Command):
 
 
 class CmdGet(DefaultCmdGet if DefaultCmdGet else BaseCommand):
-    """Get: supports 'get <item> from <container>'; from logged-off/corpse only when allowed."""
+    """Get: supports 'get <item> from <container>'; from corpse, unconscious, or logged-off (30+ min) when allowed."""
     key = "get"
     aliases = ["take", "pick up"]
 
@@ -421,11 +466,22 @@ class CmdGet(DefaultCmdGet if DefaultCmdGet else BaseCommand):
             from evennia import DefaultCharacter
             from world.death import is_character_logged_off, character_logged_off_long_enough
             if isinstance(container, DefaultCharacter) and not isinstance(container, Corpse):
-                if not is_character_logged_off(container):
+                try:
+                    from world.medical import is_unconscious as _is_unconscious
+
+                    target_is_unconscious = _is_unconscious(container)
+                except ImportError as e:
+                    logger.log_trace("base_cmds.CmdGet is_unconscious: %s" % e)
+                    target_is_unconscious = False
+
+                if is_character_logged_off(container):
+                    if not character_logged_off_long_enough(container):
+                        caller.msg(
+                            "They haven't been gone long enough. You can only take from someone who's been logged off at least half an hour."
+                        )
+                        return
+                elif not target_is_unconscious:
                     caller.msg("You can't take from someone who's wide awake!")
-                    return
-                if not character_logged_off_long_enough(container):
-                    caller.msg("They haven't been gone long enough. You can only take from someone who's been logged off at least half an hour.")
                     return
         except ImportError as e:
             logger.log_trace("base_cmds.CmdGet get-from-container check: %s" % e)

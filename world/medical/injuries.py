@@ -145,6 +145,9 @@ def compute_effective_bleed_level(character):
     for idx, injury in enumerate(active):
         rate = float(injury.get("bleed_rate", 0.0) or 0.0)
         weighted += rate if idx == 0 else (rate * BLEED_DAMPENING_FACTOR)
+    resist = float(getattr(character.db, "drug_bleed_resistance", 0.0) or 0.0)
+    if resist > 0:
+        weighted *= max(0.0, 1.0 - resist)
     level = 4
     for threshold, lvl in BLEED_RATE_TO_LEVEL:
         if weighted <= threshold:

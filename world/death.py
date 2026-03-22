@@ -167,6 +167,15 @@ def is_permanently_dead(obj):
     return getattr(obj.db, "death_state", None) == DEATH_STATE_PERMANENT
 
 
+def _room_pose_is_flatline_dead_placeholder(text):
+    """
+    True if room_pose (or @tp) matches the flatline corpse line from make_flatlined.
+    Normalized so minor edits (spacing, final period, case) still clear on resuscitation/@restore.
+    """
+    p = (text or "").strip().lower().rstrip(".")
+    return p == "lying here, dead"
+
+
 def character_can_act(character, allow_builders=True):
     """
     Central check for whether a character can act (not flatlined, not permanently dead).
@@ -654,11 +663,30 @@ def clear_flatline(target):
         except Exception:
             pass
     try:
-        target.cmdset.remove("FlatlinedCmdSet")
+        # add() uses the dotted path; remove() must match the same identifier or the set can stay on the stack.
+        for _cs_key in ("commands.default_cmdsets.FlatlinedCmdSet", "FlatlinedCmdSet"):
+            try:
+                target.cmdset.remove(_cs_key)
+            except Exception:
+                pass
         from django.conf import settings
+
         char_cmdset = getattr(settings, "CMDSET_CHARACTER", "commands.default_cmdsets.CharacterCmdSet")
         target.cmdset.add_default(char_cmdset)
+        try:
+            target.cmdset.update()
+        except Exception:
+            pass
     except Exception:
         pass
-    if getattr(target.db, "room_pose", None) == "lying here, dead.":
+    if _room_pose_is_flatline_dead_placeholder(getattr(target.db, "room_pose", None)):
         target.db.room_pose = "standing here"
+    if _room_pose_is_flatline_dead_placeholder(getattr(target.db, "temp_room_pose", None)):
+        try:
+            if hasattr(target.db, "temp_room_pose"):
+                target.attributes.remove("temp_room_pose")
+        except Exception:
+            try:
+                del target.db.temp_room_pose
+            except Exception:
+                pass

@@ -201,14 +201,9 @@ def _surgery_finish(ids, organ_key):
 
     names = ORGAN_INFO.get(organ_key, (organ_key,) * 4)
     difficulty = _splint_difficulty(organ_key) + 8 if is_bone_case else _organ_difficulty(severity)
-    now_ts = time.time()
-    sedated = (
-        float(getattr(target.db, "sedated_until", 0.0) or 0.0) > now_ts
-        or (
-            bool(getattr(target.db, "medical_unconscious", False))
-            and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts
-        )
-    )
+    from world.medical import is_sedated_for_surgery
+
+    sedated = is_sedated_for_surgery(target)
     if not sedated:
         # Awake surgery is much harder due to movement/pain response.
         difficulty += 18
@@ -302,6 +297,12 @@ def start_surgery_sequence(caller, target, table, organ_key):
         return False, "They are not on the operating table."
     if caller.location != table.location:
         return False, "You must be at the operating table to perform surgery."
+    if caller != target:
+        from world.rpg.trust import check_trust_or_incapacitated
+
+        ok, _reason = check_trust_or_incapacitated(target, caller, "operate", operate_strict=True)
+        if not ok:
+            return False, "They don't trust you enough for that. They need to @trust you to operate."
     from world.medical import rebuild_derived_trauma_views
     from world.medical.limb_trauma import body_part_to_limb_slot, is_limb_destroyed
     rebuild_derived_trauma_views(target)
@@ -321,14 +322,9 @@ def start_surgery_sequence(caller, target, table, organ_key):
     if organ_key not in ORGAN_SURGERY_NARRATIVES and organ_key not in BONE_SURGERY_NARRATIVES:
         return False, "No surgical procedure for that organ."
 
-    now_ts = time.time()
-    sedated = (
-        float(getattr(target.db, "sedated_until", 0.0) or 0.0) > now_ts
-        or (
-            bool(getattr(target.db, "medical_unconscious", False))
-            and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts
-        )
-    )
+    from world.medical import is_sedated_for_surgery
+
+    sedated = is_sedated_for_surgery(target)
     if not sedated and hasattr(caller, "msg"):
         caller.msg(f"{MC['compensated']}Warning: patient is not sedated. The surgery will be harder.|n")
 

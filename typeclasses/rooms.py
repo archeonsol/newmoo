@@ -113,6 +113,31 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
             except Exception:
                 pass
 
+    def filter_visible(self, obj_list, looker, **kwargs):
+        """Hide unspotted sneaking characters from look; staff see everyone."""
+        result = super().filter_visible(obj_list, looker, **kwargs)
+        if not result or not looker:
+            return result
+        try:
+            from evennia.utils.utils import inherits_from
+            from world.rpg import stealth
+
+            if stealth._is_staff(looker):
+                return result
+        except Exception:
+            return result
+
+        out = []
+        for obj in result:
+            try:
+                if inherits_from(obj, "evennia.objects.objects.DefaultCharacter"):
+                    if stealth.is_hidden(obj) and not stealth.has_spotted(looker, obj):
+                        continue
+            except Exception:
+                pass
+            out.append(obj)
+        return out
+
     def return_appearance(self, looker, **kwargs):
         """
         Override to explicitly call all display methods including furniture.
@@ -400,6 +425,14 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                         pose = re.sub(pattern_base + r"'s", "your", pose, flags=re.IGNORECASE)
                         pose = re.sub(pattern_base, "you", pose, flags=re.IGNORECASE)
             name = _ic_room_char_name(char, looker, **kwargs)
+            if char is not looker:
+                try:
+                    from world.rpg import stealth
+
+                    if stealth._is_staff(looker) and stealth.is_hidden(char):
+                        name = f"{name} |c[HIDDEN]|n"
+                except Exception:
+                    pass
             if char is looker:
                 # Special handling so you see "You are ..." instead of "Name is ..."
                 you_pose = pose

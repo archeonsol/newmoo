@@ -355,13 +355,15 @@ class CmdButcher(Command):
 
         import random
 
-        # Organ difficulties (relative to base_roll). Some are harder to take clean.
+        # Organ difficulties (relative to base_roll). Optional third element: alchemy specimen key.
         organs = [
-            ("lungs", 50),
-            ("heart", 55),
-            ("liver", 60),
-            ("spleen", 65),
-            ("brain", 70),
+            ("lungs", 50, None),
+            ("heart", 55, None),
+            ("liver", 60, None),
+            ("spleen", 65, None),
+            ("brain", 70, "cerebrospinal_fluid"),
+            ("adrenal glands", 68, "adrenal_fluid"),
+            ("gut", 52, "render_fat"),
         ]
 
         made_any = {"value": False}
@@ -399,7 +401,7 @@ class CmdButcher(Command):
                 )
                 return
 
-            organ_key, diff = organs[index]
+            organ_key, diff, specimen_key = organs[index]
             roll = base_roll + random.randint(-10, 10)
             if roll < diff:
                 caller.msg(f"|rYou tear through where the {organ_key} should be, leaving nothing usable.|n")
@@ -417,6 +419,8 @@ class CmdButcher(Command):
                     organ = create_object("typeclasses.items.Item", key=key, location=caller)
                     organ.db.desc = desc
                     organ.tags.add("butchered_organ")
+                    if specimen_key:
+                        organ.db.organ_specimen_key = specimen_key
                     made_any["value"] = True
                     caller.msg(f"|gYou ease out {name_for_msg}, cradling it in both hands before setting it aside.|n")
                 except Exception as e:

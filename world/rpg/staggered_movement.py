@@ -36,8 +36,14 @@ def _staggered_walk_callback(obj_id, dest_id):
             except Exception:
                 # Fallback: ensure the flag is false if it couldn't be deleted cleanly.
                 db.cancel_walking = False
+            try:
+                if hasattr(obj.ndb, "_stealth_move_sneak"):
+                    del obj.ndb._stealth_move_sneak
+            except Exception:
+                pass
             return
-        obj.move_to(dest)
+        sneak = bool(getattr(obj.ndb, "_stealth_move_sneak", False))
+        obj.move_to(dest, quiet=sneak)
         # If grappler: bring grappled victim along
         victim = getattr(getattr(obj, "db", None), "grappling", None)
         if victim and hasattr(victim, "move_to"):

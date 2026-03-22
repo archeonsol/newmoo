@@ -153,6 +153,13 @@ class CmdSedate(Command):
         if table.get_patient() != target:
             caller.msg("They must be the patient lying on the operating table first.")
             return
+        if target != caller:
+            from world.rpg.trust import check_trust_or_incapacitated
+
+            ok, _r = check_trust_or_incapacitated(target, caller, "heal")
+            if not ok:
+                caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+                return
         success, msg = table.use_for_sedation(caller, target)
         if success:
             caller.msg(MC["stable"] + msg + "|n")
@@ -356,6 +363,14 @@ class CmdApply(Command):
         except ImportError as e:
             logger.log_trace("medical_cmds.CmdApply is_flatlined: %s" % e)
 
+        if target != caller:
+            from world.rpg.trust import check_trust_or_incapacitated
+
+            ok, _r = check_trust_or_incapacitated(target, caller, "heal")
+            if not ok:
+                caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+                return
+
         tool_type = tool.medical_tool_type
         tools_by_type = {tool_type: [tool]}
         options = get_treatment_options(caller, target, tools_by_type)
@@ -471,6 +486,13 @@ class CmdSurgery(Command):
         if not patient:
             caller.msg("No one is on the operating table. They must use 'lie on operating table' first.")
             return
+        if patient != caller:
+            from world.rpg.trust import check_trust_or_incapacitated
+
+            ok, _r = check_trust_or_incapacitated(patient, caller, "operate", operate_strict=True)
+            if not ok:
+                caller.msg("They don't trust you enough for that. They need to @trust you to operate.")
+                return
         if verb in ("install", "remove", "replace", "repair", "list"):
             from world.medical.cybersurgery import (
                 start_cybersurgery_install,
@@ -533,14 +555,9 @@ class CmdSurgery(Command):
                         cw.db.surgery_difficulty = int(getattr(cw, "surgery_difficulty", 12) or 12) + diff_bonus
                     except Exception:
                         pass
-                now_ts = __import__("time").time()
-                sedated = (
-                    float(getattr(target.db, "sedated_until", 0.0) or 0.0) > now_ts
-                    or (
-                        bool(getattr(target.db, "medical_unconscious", False))
-                        and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts
-                    )
-                )
+                from world.medical import is_sedated_for_surgery
+
+                sedated = is_sedated_for_surgery(target)
                 if getattr(cw, "surgery_requires_sedation", True) and not sedated:
                     caller.msg(f"{MC['compensated']}Patient is not sedated. Surgery difficulty will be significantly higher.|n")
                 started, err = start_cybersurgery_install(caller, target, table, cw)
@@ -636,6 +653,13 @@ class CmdDefib(Command):
         if not defib:
             caller.msg("You need a defibrillator in your inventory.")
             return
+        if target != caller:
+            from world.rpg.trust import check_trust_or_incapacitated
+
+            ok, _r = check_trust_or_incapacitated(target, caller, "heal")
+            if not ok:
+                caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+                return
         from world.medical.medical_defib import start_defib_sequence
         started, err = start_defib_sequence(caller, target, defib)
         if not started:

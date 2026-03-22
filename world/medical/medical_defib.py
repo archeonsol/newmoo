@@ -10,26 +10,33 @@ DEFIB_MSG1, DEFIB_MSG2, DEFIB_MSG3 = 3, 6, 9
 
 
 def _get_object_by_id(dbref):
-    """Resolve dbref to typeclassed Object."""
+    """Resolve database id (Evennia object pk) to the live typeclass instance."""
     if dbref is None:
         return None
     try:
-        from world.combat import _get_object_by_id as combat_resolve
-        return combat_resolve(dbref)
+        pk = int(dbref)
+    except (TypeError, ValueError):
+        return None
+    try:
+        from evennia.objects.models import ObjectDB
+
+        return ObjectDB.objects.get(id=pk)
+    except ObjectDB.DoesNotExist:
+        pass
     except Exception as e:
         from evennia.utils import logger
-        logger.log_trace("medical_defib._get_object_by_id(combat_resolve #%s): %s" % (dbref, e))
+
+        logger.log_trace("medical_defib._get_object_by_id(ObjectDB #%s): %s" % (pk, e))
     try:
         from evennia.utils.search import search_object
-        result = search_object(f"#{int(dbref)}")
-        if result:
-            return result[0]
-        result = search_object(key=int(dbref))
+
+        result = search_object(pk)
         if result:
             return result[0]
     except Exception as e:
         from evennia.utils import logger
-        logger.log_trace("medical_defib._get_object_by_id(#%s): %s" % (dbref, e))
+
+        logger.log_trace("medical_defib._get_object_by_id(search #%s): %s" % (pk, e))
     return None
 
 
@@ -84,12 +91,13 @@ def _defib_msg3_and_finish(*args):
     caller = _get_object_by_id(cid)
     target = _get_object_by_id(tid)
     defib = _get_object_by_id(did) if did else None
-    
+
     if not caller or not target or not hasattr(target, "db"):
         if caller and hasattr(caller, "db"):
             caller.db.defib_in_progress = False
+            caller.msg("|rYou lose contact with the patient before the shock lands. The sequence aborts.|n")
         return
-        
+
     if hasattr(caller, "db"):
         caller.db.defib_in_progress = False
         

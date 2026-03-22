@@ -75,6 +75,12 @@ def at_server_start():
             key="handset_message_cleanup",
             persistent=True,
         )
+    if not ScriptDB.objects.filter(db_key="addiction_withdrawal").first():
+        create_script(
+            "typeclasses.scripts.AddictionWithdrawalScript",
+            key="addiction_withdrawal",
+            persistent=True,
+        )
     # Staff pending channel: so staff can subscribe and see new requests
     if not list(search_channel(STAFF_PENDING_CHANNEL_ALIAS)):
         create_channel(
@@ -145,8 +151,22 @@ def at_server_stop():
 def at_server_reload_start():
     """
     This is called only when server starts back up after a reload.
+
+    Evennia invokes this inside run_init_hooks() before portal_sessions_sync() in the
+    same PSYNC handler. Schedule a follow-up broadcast on the next reactor tick so it
+    runs after sessions are rebuilt and after the default "... Server restarted." line,
+    which helps web/telnet clients that otherwise appear stuck on the pre-reload banner.
     """
-    pass
+    from twisted.internet import reactor
+
+    def _after_full_psync():
+        from django.conf import settings
+        from evennia import SESSION_HANDLER
+
+        if getattr(settings, "BROADCAST_SERVER_RESTART_MESSAGES", True):
+            SESSION_HANDLER.announce_all(" |gReload complete.|n")
+
+    reactor.callLater(0, _after_full_psync)
 
 
 def at_server_reload_stop():

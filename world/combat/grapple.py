@@ -20,6 +20,17 @@ from world.combat.range_system import (
 from world.combat.cover import force_leave_cover
 
 from world.theme_colors import COMBAT_COLORS as CC
+from world.unconscious_state import (
+    UNCONSCIOUS_WAKE_MAX,
+    UNCONSCIOUS_WAKE_MIN,
+    _restore_prev_room_pose_after_unconscious,
+    _wake_unconscious_callback,
+    clear_sedation_markers,
+    force_wake_unconscious,
+    get_unconscious_wake_seconds,
+    set_unconscious,
+    set_unconscious_for_seconds,
+)
 
 # Delay (seconds) between "lunge" and resolution
 GRAPPLE_DELAY_MIN, GRAPPLE_DELAY_MAX = 3.0, 4.0
@@ -40,49 +51,14 @@ RESIST_COOLDOWN = 15
 # Grapple strike (attack while holding): stamina drain on victim until knockout
 STAMINA_DRAIN_GRAPPLE_STRIKE = 15   # victim loses this much per strike
 GRAPPLE_STRIKE_INTERVAL = 10   # seconds between strangle ticks while holding
-UNCONSCIOUS_WAKE_MIN = 10   # seconds
-UNCONSCIOUS_WAKE_MAX = 30   # seconds (endurance scales within this range)
 
 # Unarmed flat bonus for holding/contesting the grapple (third party grab and defender both use it).
 GRAPPLE_UNARMED_BONUS = 5
 
-# Room @lp while KO / OR sedation (must match set_*_unconscious_* assignments below).
-_UNCONSCIOUS_ROOM_POSE_TEXT = "lying here, unconscious"
-
-
-def _room_pose_is_unconscious_placeholder(text):
-    p = (text or "").strip().lower().rstrip(".")
-    return p == _UNCONSCIOUS_ROOM_POSE_TEXT
-
-
-def _snapshot_room_pose_before_unconscious(character):
-    """Never store the unconscious placeholder as 'previous' or wake will restore stuck @lp."""
-    raw = getattr(character.db, "room_pose", None) or "standing here"
-    if _room_pose_is_unconscious_placeholder(raw):
-        return "standing here"
-    return raw
-
-
-def _restore_prev_room_pose_after_unconscious(character):
-    prev_pose = getattr(character.db, "_unconscious_prev_room_pose", None)
-    if prev_pose is None:
-        return
-    if _room_pose_is_unconscious_placeholder(prev_pose):
-        character.db.room_pose = "standing here"
-    else:
-        character.db.room_pose = prev_pose
-    try:
-        character.attributes.remove("_unconscious_prev_room_pose")
-    except Exception:
-        pass
-
 
 def _clear_operating_room_sedation(character):
-    """Clear OR anesthesia flags when medical unconsciousness ends (timer or wake command)."""
-    if not character or not getattr(character, "db", None):
-        return
-    character.db.sedated_until = 0.0
-    character.db.sedated_by = None
+    """Clear OR anesthesia flags when unconsciousness ends (timer or wake command)."""
+    clear_sedation_markers(character)
 
 
 def _apply_grappled_cmdset(character):
@@ -110,6 +86,88 @@ def _clear_grappled_cmdset(character):
         pass
 
 
+def _apply_grappling_cmdset(grappler):
+    """Lock grappler commands to grapple actions + movement while holding someone."""
+    if not grappler:
+        return
+    try:
+        grappler.cmdset.remove("GrapplingCmdSet")
+    except Exception:
+        pass
+    try:
+        grappler.cmdset.add("commands.default_cmdsets.GrapplingCmdSet")
+    except Exception:
+        pass
+
+
+def _clear_grappling_cmdset(grappler):
+    """Remove grappling command lock from grappler (if present)."""
+    if not grappler:
+        return
+    try:
+        grappler.cmdset.remove("GrapplingCmdSet")
+    except Exception:
+        pass
+
+
+def clear_grapple_cmdsets_on_clone_reset(character):
+    """Remove grapple/grappling cmdsets when clone/respawn logic clears grapple db state."""
+    if not character:
+        return
+    _clear_grappled_cmdset(character)
+    _clear_grappling_cmdset(character)
+
+
+def free_hands_for_grapple(character, announce=True):
+    """
+    Clear both hands; held objects stay in inventory. Used when starting a grapple
+    attempt and when a grapple successfully locks so the grappler is never
+    holding items while grappling.
+    """
+    if not character or not getattr(character, "db", None):
+        return
+    from commands.inventory_cmds import _update_primary_wielded
+
+    left = getattr(character.db, "left_hand_obj", None)
+    right = getattr(character.db, "right_hand_obj", None)
+    if left and getattr(left, "location", None) != character:
+        left = None
+    if right and getattr(right, "location", None) != character:
+        right = None
+    if not left and not right:
+        return
+    names = []
+    if left:
+        names.append(left)
+    if right and right is not left:
+        names.append(right)
+    character.db.left_hand_obj = None
+    character.db.right_hand_obj = None
+    _update_primary_wielded(character)
+    if getattr(character.db, "combat_target", None) is not None:
+        character.db.combat_skip_next_turn = True
+    if not announce or not hasattr(character, "msg"):
+        return
+    self_names = [
+        (obj.get_display_name(character) if hasattr(obj, "get_display_name") else obj.name)
+        for obj in names
+    ]
+    character.msg(
+        "|yYou set aside %s to use your hands.|n" % " and ".join("|w%s|n" % n for n in self_names)
+    )
+    loc = getattr(character, "location", None)
+    if loc and hasattr(loc, "contents_get"):
+        for viewer in loc.contents_get(content_type="character"):
+            if viewer == character:
+                continue
+            vcaller = character.get_display_name(viewer) if hasattr(character, "get_display_name") else character.name
+            vnames = [
+                (obj.get_display_name(viewer) if hasattr(obj, "get_display_name") else obj.name)
+                for obj in names
+            ]
+            viewer.msg("%s sets aside %s." % (vcaller, " and ".join(vnames)))
+
+
 def _roll_result(character, stat_list, skill_name, modifier=0):
     """Return (result_string, final_result) from character's roll_check."""
     if not hasattr(character, "roll_check"):
@@ -134,6 +192,30 @@ def _validate_grapple_resolution(actor, victim, actor_err="" + CC["dodge"] + "Th
             actor.msg(actor_err)
         return False
     return True
+
+
+def apply_grapple_lock(grappler, victim):
+    """Apply grapple state after a successful grab (contested or voluntary trust)."""
+    try:
+        from world.rpg import stealth
+
+        if victim and stealth.is_hidden(victim):
+            stealth.reveal(victim, reason="combat")
+    except Exception:
+        pass
+    free_hands_for_grapple(grappler, announce=False)
+    victim.db.grappled_by = grappler
+    grappler.db.grappling = victim
+    _apply_grappling_cmdset(grappler)
+    set_combat_range(grappler, victim, RANGE_CLINCH)
+    force_leave_cover(victim, reason_msg="" + CC["miss"] + "You're pulled from cover!|n")
+    str_display = getattr(grappler, "get_display_stat", lambda x: 0)("strength") or 0
+    victim.db.grapple_hold_strength = HOLD_STRENGTH_BASE + (str_display * HOLD_STRENGTH_PER_STR // 10)
+    for key in ("lying_on_table", "sitting_on", "lying_on"):
+        if hasattr(victim.db, key) and getattr(victim.db, key) is not None:
+            victim.attributes.remove(key)
+    _apply_grappled_cmdset(victim)
+    return True, "You lock {} in your grasp.".format(_combat_display_name(victim, grappler))
 
 
 def _resolve_grapple_callback(grappler_id, victim_id):
@@ -195,6 +277,26 @@ def start_grapple_attempt(grappler, victim):
         # Logged-off (sleeping) characters can be grappled and dragged, but not attacked in the grapple.
     except ImportError:
         pass
+
+    from world.rpg.trust import check_trust
+
+    if check_trust(victim, grappler, "grapple"):
+        free_hands_for_grapple(grappler, announce=True)
+        apply_grapple_lock(grappler, victim)
+        grappler.msg("|gThey don't resist. You take hold.|n")
+        victim.msg("|g%s takes hold of you. You allow it.|n" % _combat_display_name(grappler, victim))
+        loc = grappler.location
+        if loc and hasattr(loc, "contents_get"):
+            for v in loc.contents_get(content_type="character"):
+                if v in (grappler, victim):
+                    continue
+                v.msg(
+                    "%s takes hold of %s."
+                    % (_combat_display_name(grappler, v), _combat_display_name(victim, v))
+                )
+        return True, None
+
+    free_hands_for_grapple(grappler, announce=True)
 
     # Phase 1: grappler sees lunge; room sees tense + lunge; target sees tense then lunge (per-viewer display names)
     v_name_for_grappler = _combat_display_name(victim, grappler)
@@ -267,8 +369,11 @@ def start_grapple_third_party_attempt(third_party, victim):
         return False, "You are already holding them."
     if third_party == victim:
         return False, "You cannot grapple yourself."
+    if getattr(third_party.db, "grappling", None):
+        return False, "You are already holding someone. Release them first."
     if third_party.location != victim.location or grappler.location != victim.location:
         return False, "You need to be in the same place."
+    free_hands_for_grapple(third_party, announce=True)
     v_name_for_tp = _combat_display_name(victim, third_party)
     g_name_for_tp = _combat_display_name(grappler, third_party)
     tp_name_for_v = _combat_display_name(third_party, victim)
@@ -334,18 +439,7 @@ def attempt_grapple(grappler, victim):
     if vg2 <= vv2:
         return False, "You grab at them but they slip free. The grapple fails."
 
-    # Grapple lands: set state and clear sitting/lying/table
-    victim.db.grappled_by = grappler
-    grappler.db.grappling = victim
-    set_combat_range(grappler, victim, RANGE_CLINCH)
-    force_leave_cover(victim, reason_msg="" + CC["miss"] + "You're pulled from cover!|n")
-    str_display = getattr(grappler, "get_display_stat", lambda x: 0)("strength") or 0
-    victim.db.grapple_hold_strength = HOLD_STRENGTH_BASE + (str_display * HOLD_STRENGTH_PER_STR // 10)
-    for key in ("lying_on_table", "sitting_on", "lying_on"):
-        if hasattr(victim.db, key) and getattr(victim.db, key) is not None:
-            victim.attributes.remove(key)
-    _apply_grappled_cmdset(victim)
-    return True, "You lock {} in your grasp.".format(_combat_display_name(victim, grappler))
+    return apply_grapple_lock(grappler, victim)
 
 
 def _grapple_strike_ticker_id(grappler, victim):
@@ -458,13 +552,16 @@ def attempt_grapple_third_party(third_party, victim):
     # Success: transfer grapple. Stop any strangle ticker on the old grappler first.
     stop_grapple_strike_ticker(grappler, victim)
     grappler.db.grappling = None
+    _clear_grappling_cmdset(grappler)
     victim.db.grappled_by = None
     for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
         if hasattr(victim.db, key):
             victim.attributes.remove(key)
     # New grapple: third_party now holds victim
+    free_hands_for_grapple(third_party, announce=False)
     victim.db.grappled_by = third_party
     third_party.db.grappling = victim
+    _apply_grappling_cmdset(third_party)
     set_combat_range(third_party, victim, RANGE_CLINCH)
     force_leave_cover(victim, reason_msg="" + CC["miss"] + "You're pulled from cover!|n")
     str_display = getattr(third_party, "get_display_stat", lambda x: 0)("strength") or 0
@@ -483,6 +580,7 @@ def release_grapple(grappler):
         return False, "You are not holding anyone."
     stop_grapple_strike_ticker(grappler, victim)
     grappler.db.grappling = None
+    _clear_grappling_cmdset(grappler)
     if hasattr(victim.db, "grappled_by") and victim.db.grappled_by == grappler:
         victim.db.grappled_by = None
     for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
@@ -504,6 +602,7 @@ def release_grapple_forced(grappler, room_message=None):
         return
     stop_grapple_strike_ticker(grappler, victim)
     grappler.db.grappling = None
+    _clear_grappling_cmdset(grappler)
     if hasattr(victim.db, "grappled_by") and victim.db.grappled_by == grappler:
         victim.db.grappled_by = None
     for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
@@ -561,6 +660,7 @@ def attempt_resist(victim):
     if v_val > g_val:
         # Break free
         grappler.db.grappling = None
+        _clear_grappling_cmdset(grappler)
         victim.db.grappled_by = None
         for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
             if hasattr(victim.db, key):
@@ -573,196 +673,110 @@ def attempt_resist(victim):
 
 def is_unconscious(character):
     """
-    True if character is in the knocked-out state (0 stamina from grapple strikes).
+    True if character is globally unconscious (trauma KO, OR anesthesia, drugs, etc.).
 
-    This is a thin wrapper around the global medical.is_unconscious helper so
-    other systems (drugs, injuries, commands) can share the same definition.
+    Thin wrapper around world.medical.is_unconscious (db.unconscious).
     """
     from world.medical import is_unconscious as _is_unconscious
+
     return _is_unconscious(character)
-
-
-def get_unconscious_wake_seconds(character):
-    """Wake duration in seconds: min UNCONSCIOUS_WAKE_MIN, max UNCONSCIOUS_WAKE_MAX, scaled by endurance (high = faster wake)."""
-    end = 0
-    if hasattr(character, "get_stat_level"):
-        end = character.get_stat_level("endurance") or 0
-    # endurance 0 -> 30s, endurance 300 -> 10s; linear
-    ratio = min(1.0, max(0.0, (end or 0) / 300.0))
-    return max(UNCONSCIOUS_WAKE_MIN, min(UNCONSCIOUS_WAKE_MAX, UNCONSCIOUS_WAKE_MAX - ratio * (UNCONSCIOUS_WAKE_MAX - UNCONSCIOUS_WAKE_MIN)))
-
-
-def _wake_unconscious_callback(character_id):
-    """Scheduled when setting unconscious; removes unconscious state and cmdset, messages character."""
-    try:
-        result = search_object("#%s" % character_id)
-        if not result:
-            return
-        character = result[0]
-    except Exception:
-        return
-    if not getattr(character.db, "unconscious", False):
-        return
-    wake_at = float(getattr(character.db, "unconscious_until", 0.0) or 0.0)
-    now = time.time()
-    if wake_at > now:
-        delay(max(1.0, wake_at - now), _wake_unconscious_callback, character.id)
-        return
-    character.db.unconscious = False
-    character.db.unconscious_until = 0.0
-    med_active = bool(getattr(character.db, "medical_unconscious", False))
-    if not med_active:
-        _restore_prev_room_pose_after_unconscious(character)
-        try:
-            character.cmdset.remove("UnconsciousCmdSet")
-        except Exception:
-            pass
-    character.msg("|gYou groggily come to.|n")
-    if character.location and hasattr(character.location, "contents_get"):
-        for v in character.location.contents_get(content_type="character"):
-            if v == character:
-                continue
-            v.msg("%s groggily comes to." % _combat_display_name(character, v))
-
-
-def set_unconscious(character):
-    """
-    Put character in knocked-out state: lock commands (UnconsciousCmdSet), set room pose, schedule wake.
-    Call after grapple strike drains their stamina to 0.
-    """
-    secs = get_unconscious_wake_seconds(character)
-    set_unconscious_for_seconds(character, secs)
-
-
-def set_unconscious_for_seconds(character, seconds):
-    """
-    Put character in knocked-out state for at least `seconds`.
-    Uses the same unconscious cmdset/pose path as grapple KO.
-    """
-    if not character or not getattr(character, "db", None):
-        return
-    now = time.time()
-    secs = max(1.0, float(seconds or 0.0))
-    character.db.unconscious = True
-    until = now + secs
-    old_until = float(getattr(character.db, "unconscious_until", 0.0) or 0.0)
-    character.db.unconscious_until = max(old_until, until)
-    if not hasattr(character.db, "_unconscious_prev_room_pose"):
-        character.db._unconscious_prev_room_pose = _snapshot_room_pose_before_unconscious(character)
-    character.db.room_pose = _UNCONSCIOUS_ROOM_POSE_TEXT
-    try:
-        character.cmdset.add("commands.default_cmdsets.UnconsciousCmdSet")
-    except Exception:
-        pass
-    delay(secs, _wake_unconscious_callback, character.id)
-
-
-def _wake_medical_unconscious_callback(character_id):
-    """Scheduled when medical KO is set; clears only medical KO state."""
-    try:
-        result = search_object("#%s" % character_id)
-        if not result:
-            return
-        character = result[0]
-    except Exception:
-        return
-    if not getattr(character.db, "medical_unconscious", False):
-        return
-    wake_at = float(getattr(character.db, "medical_unconscious_until", 0.0) or 0.0)
-    now = time.time()
-    if wake_at > now:
-        delay(max(1.0, wake_at - now), _wake_medical_unconscious_callback, character.id)
-        return
-    force_wake_medical_unconscious(character, silent=False)
 
 
 def set_medical_unconscious_for_seconds(character, seconds):
     """
-    Put character in medically-induced unconscious state for at least `seconds`.
-    This is distinct from trauma KO (db.unconscious).
+    Put character under for OR anesthesia (or equivalent). Uses the same global
+    db.unconscious / unconscious_until and wake pipeline as trauma KO.
     """
-    if not character or not getattr(character, "db", None):
-        return
-    now = time.time()
-    secs = max(1.0, float(seconds or 0.0))
-    character.db.medical_unconscious = True
-    until = now + secs
-    old_until = float(getattr(character.db, "medical_unconscious_until", 0.0) or 0.0)
-    character.db.medical_unconscious_until = max(old_until, until)
-    if not hasattr(character.db, "_unconscious_prev_room_pose"):
-        character.db._unconscious_prev_room_pose = _snapshot_room_pose_before_unconscious(character)
-    character.db.room_pose = _UNCONSCIOUS_ROOM_POSE_TEXT
-    try:
-        character.cmdset.add("commands.default_cmdsets.UnconsciousCmdSet")
-    except Exception:
-        pass
-    delay(secs, _wake_medical_unconscious_callback, character.id)
-
-
-def force_wake_unconscious(character, silent=False):
-    """
-    Immediately wake a character and clear unconscious lock state.
-    """
-    if not character or not getattr(character, "db", None):
-        return
-    was_uncon = bool(getattr(character.db, "unconscious", False))
-    character.db.unconscious = False
-    character.db.unconscious_until = 0.0
-    med_active = bool(getattr(character.db, "medical_unconscious", False))
-    if not med_active:
-        _restore_prev_room_pose_after_unconscious(character)
-        try:
-            character.cmdset.remove("UnconsciousCmdSet")
-        except Exception:
-            pass
-    if (not silent) and was_uncon:
-        character.msg("|gYou groggily come to.|n")
-        if character.location and hasattr(character.location, "contents_get"):
-            for v in character.location.contents_get(content_type="character"):
-                if v == character:
-                    continue
-                v.msg("%s groggily comes to." % _combat_display_name(character, v))
+    set_unconscious_for_seconds(character, seconds)
 
 
 def force_wake_medical_unconscious(character, silent=False):
     """
-    Immediately clear medical KO without touching trauma KO.
+    Wake from anesthesia (same global unconscious state as trauma KO).
+    Clears OR sedation markers via force_wake_unconscious.
+    """
+    force_wake_unconscious(character, silent=silent)
+
+
+def reconcile_grapple_cmdsets_after_reload(character):
+    """
+    After a server reload, re-apply grapple cmdsets from db state, or clear stale mutual refs.
+    Called from Character.at_server_start (each online character).
     """
     if not character or not getattr(character, "db", None):
         return
-    was_uncon = bool(getattr(character.db, "medical_unconscious", False))
-    character.db.medical_unconscious = False
-    character.db.medical_unconscious_until = 0.0
-    _clear_operating_room_sedation(character)
-    trauma_active = bool(getattr(character.db, "unconscious", False))
-    if not trauma_active:
-        _restore_prev_room_pose_after_unconscious(character)
-        try:
-            character.cmdset.remove("UnconsciousCmdSet")
-        except Exception:
-            pass
-    if (not silent) and was_uncon:
-        character.msg("|gYou groggily come to.|n")
-        if character.location and hasattr(character.location, "contents_get"):
-            for v in character.location.contents_get(content_type="character"):
-                if v == character:
-                    continue
-                v.msg("%s groggily comes to." % _combat_display_name(character, v))
+
+    def _same_room(a, b):
+        la = getattr(a, "location", None)
+        lb = getattr(b, "location", None)
+        return la is not None and la == lb
+
+    grappling = getattr(character.db, "grappling", None)
+    grappled_by = getattr(character.db, "grappled_by", None)
+
+    if grappling:
+        valid = (
+            grappling
+            and getattr(grappling.db, "grappled_by", None) == character
+            and _same_room(character, grappling)
+        )
+        if not valid:
+            character.db.grappling = None
+            _clear_grappling_cmdset(character)
+            try:
+                if grappling and getattr(grappling.db, "grappled_by", None) == character:
+                    grappling.db.grappled_by = None
+                    _clear_grappled_cmdset(grappling)
+            except Exception:
+                pass
+        else:
+            free_hands_for_grapple(character, announce=False)
+            _apply_grappling_cmdset(character)
+            _apply_grappled_cmdset(grappling)
+
+    if grappled_by:
+        valid = (
+            grappled_by
+            and getattr(grappled_by.db, "grappling", None) == character
+            and _same_room(character, grappled_by)
+        )
+        if not valid:
+            character.db.grappled_by = None
+            _clear_grappled_cmdset(character)
+            try:
+                if grappled_by and getattr(grappled_by.db, "grappling", None) == character:
+                    grappled_by.db.grappling = None
+                    _clear_grappling_cmdset(grappled_by)
+            except Exception:
+                pass
+        else:
+            _apply_grappled_cmdset(character)
+            _apply_grappling_cmdset(grappled_by)
 
 
 def reconcile_unconscious_state(character):
     """
     Repair unconscious state after reload/startup.
 
-    - If unconscious timer has expired, clear unconscious flags/cmdset.
-    - If still unconscious, ensure cmdset is present and wake callback is scheduled.
+    - Legacy db.medical_unconscious* is merged into global db.unconscious until.
+    - If still within the wake window, ensure cmdset and schedule _wake_unconscious_callback.
     """
     if not character or not getattr(character, "db", None):
         return
-    is_uncon = bool(getattr(character.db, "unconscious", False))
-    wake_at = float(getattr(character.db, "unconscious_until", 0.0) or 0.0)
-    is_med_uncon = bool(getattr(character.db, "medical_unconscious", False))
-    med_wake_at = float(getattr(character.db, "medical_unconscious_until", 0.0) or 0.0)
+    db = character.db
+    # One-time merge: old OR anesthesia used separate medical_* attributes.
+    if bool(getattr(db, "medical_unconscious", False)):
+        med_wake_at = float(getattr(db, "medical_unconscious_until", 0.0) or 0.0)
+        now = time.time()
+        if med_wake_at > now:
+            db.unconscious = True
+            old_u = float(getattr(db, "unconscious_until", 0.0) or 0.0)
+            db.unconscious_until = max(old_u, med_wake_at)
+        db.medical_unconscious = False
+        db.medical_unconscious_until = 0.0
+
+    is_uncon = bool(getattr(db, "unconscious", False))
+    wake_at = float(getattr(db, "unconscious_until", 0.0) or 0.0)
     now = time.time()
     if is_uncon and wake_at > now:
         try:
@@ -771,20 +785,10 @@ def reconcile_unconscious_state(character):
             pass
         delay(max(1.0, wake_at - now), _wake_unconscious_callback, character.id)
     elif is_uncon:
-        character.db.unconscious = False
-        character.db.unconscious_until = 0.0
+        db.unconscious = False
+        db.unconscious_until = 0.0
 
-    if is_med_uncon and med_wake_at > now:
-        try:
-            character.cmdset.add("commands.default_cmdsets.UnconsciousCmdSet")
-        except Exception:
-            pass
-        delay(max(1.0, med_wake_at - now), _wake_medical_unconscious_callback, character.id)
-    elif is_med_uncon:
-        character.db.medical_unconscious = False
-        character.db.medical_unconscious_until = 0.0
-
-    if not bool(getattr(character.db, "unconscious", False)) and not bool(getattr(character.db, "medical_unconscious", False)):
+    if not bool(getattr(db, "unconscious", False)):
         _restore_prev_room_pose_after_unconscious(character)
         _clear_operating_room_sedation(character)
         try:
@@ -841,6 +845,7 @@ def grapple_strike(grappler, victim):
         # Knock out: release grapple, set unconscious, schedule wake; stop strangle ticker
         stop_grapple_strike_ticker(grappler, victim)
         grappler.db.grappling = None
+        _clear_grappling_cmdset(grappler)
         victim.db.grappled_by = None
         for key in ("grapple_hold_strength", "grapple_resist_cooldown"):
             if hasattr(victim.db, key):

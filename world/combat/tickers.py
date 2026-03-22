@@ -251,6 +251,15 @@ def start_combat_ticker(attacker, target):
                 rig.disconnect(target, severity=JACKOUT_EMERGENCY, reason="Combat initiated")
 
     set_combat_target(attacker, target)
+    try:
+        from world.rpg import stealth
+
+        if stealth.is_hidden(attacker):
+            stealth.reveal(attacker, reason="combat")
+        if stealth.is_hidden(target):
+            stealth.reveal(target, reason="combat")
+    except Exception:
+        pass
     if not getattr(target.db, "is_creature", False) and get_combat_target(target) is None:
         set_combat_target(target, attacker)
     if getattr(attacker.db, "current_hp", None) is None or (attacker.db.current_hp or 0) <= 0:

@@ -95,14 +95,26 @@ ORGAN_INFO = {
 
 def is_unconscious(character):
     """
-    True if character is in the global knocked-out/unconscious state.
-
-    This is a simple flag on character.db and is used by grapple, sever,
-    and any future mechanics (drugs, injuries, etc.) that need to check
-    or set unconsciousness.
+    True if character is in the global knocked-out/unconscious state (trauma KO,
+    OR anesthesia, overdoses, etc.). Single flag: character.db.unconscious
+    (with character.db.unconscious_until for the scheduled wake).
     """
     db = getattr(character, "db", None)
-    return bool(getattr(db, "unconscious", False) or getattr(db, "medical_unconscious", False))
+    return bool(getattr(db, "unconscious", False))
+
+
+def is_sedated_for_surgery(character):
+    """
+    True if the patient is chemically sedated (OR vapor timer) and/or globally
+    unconscious (same db.unconscious flag). Used for surgery difficulty / access.
+    """
+    db = getattr(character, "db", None)
+    if not db:
+        return False
+    if float(getattr(db, "sedated_until", 0.0) or 0.0) > time.time():
+        return True
+    return bool(getattr(db, "unconscious", False))
+
 
 # Body part -> bones that can fracture
 BODY_PART_BONES = {
@@ -371,6 +383,9 @@ def _process_one_regen(character):
         quality = int(injury.get("treatment_quality", 0) or 0)
         quality_mult = 1.0 + (0.2 * quality)
         heal_amt = (1.0 if idx == 0 else REGEN_PARALLEL_EFFICIENCY) * quality_mult
+        reg_mult = float(getattr(character.db, "drug_regen_multiplier", 1.0) or 1.0)
+        if reg_mult != 1.0:
+            heal_amt *= reg_mult
         old_hp = injury["hp_occupied"]
         injury["hp_occupied"] = max(0, old_hp - heal_amt)
         healed = max(0.0, old_hp - injury["hp_occupied"])

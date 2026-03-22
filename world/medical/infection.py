@@ -221,6 +221,9 @@ def apply_infection_tick(character):
             risk_gain -= 0.04
         if injury.get("bleed_treated") is False and float(injury.get("bleed_rate", 0.0) or 0.0) > 0:
             risk_gain += 0.04
+        ir_drug = float(getattr(character.db, "drug_infection_resistance", 0.0) or 0.0)
+        if ir_drug > 0:
+            risk_gain = max(0.0, risk_gain - ir_drug)
         part = (injury.get("body_part") or "").lower()
         if part and hasattr(character, "db"):
             try:

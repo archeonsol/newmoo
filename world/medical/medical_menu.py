@@ -30,6 +30,32 @@ _N = "|n"
  
 def _line(char="-"):
     return f"{_BORDER_COLOR}{''.ljust(_W, char)}{_N}"
+
+
+def _trust_heal_ok(caller, target):
+    if target == caller:
+        return True
+    from world.rpg.trust import check_trust_or_incapacitated
+
+    ok, _reason = check_trust_or_incapacitated(target, caller, "heal")
+    if not ok:
+        caller.msg(
+            f"{_CRIT}They don't trust you enough for that. They need to |w@trust you to heal|n.{_N}"
+        )
+    return ok
+
+
+def _trust_operate_ok(caller, target):
+    if target == caller:
+        return True
+    from world.rpg.trust import check_trust_or_incapacitated
+
+    ok, _reason = check_trust_or_incapacitated(target, caller, "operate")
+    if not ok:
+        caller.msg(
+            f"{_CRIT}They don't trust you enough for that. They need to |w@trust you to operate|n.{_N}"
+        )
+    return ok
  
  
 def _heavy_line():
@@ -360,7 +386,9 @@ def node_medical_main(caller, raw_string, **kwargs):
     if not target:
         caller.msg("Invalid target.")
         return None, None
- 
+    if not _trust_heal_ok(caller, target):
+        return None, None
+
     compact = kwargs.get("compact", False)
     operating_table = kwargs.get("operating_table") or _find_operating_table(caller)
  
@@ -422,6 +450,8 @@ def node_do_scan(caller, raw_string, **kwargs):
     target = kwargs.get("target") or _get_menu_target(caller, kwargs)
     scanner = kwargs.get("scanner")
     operating_table = kwargs.get("operating_table")
+    if target and not _trust_heal_ok(caller, target):
+        return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
     if not scanner or not hasattr(scanner, "use_for_scan"):
         caller.msg(f"{_CRIT}No scanner.{_N}")
         return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
@@ -484,7 +514,14 @@ def node_do_treatment(caller, raw_string, **kwargs):
     display_name = kwargs.get("display_name") or action_id or "intervention"
     if not action_id:
         return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
- 
+
+    if action_id in ("cyber_install", "cyber_remove", "chrome_replace", "cyber_repair"):
+        if not _trust_operate_ok(caller, target):
+            return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
+    elif target != caller:
+        if not _trust_heal_ok(caller, target):
+            return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
+
     tools = get_medical_tools_from_inventory(caller)
     tool_list = tools.get(tool_type, [])
     if not tool_list:
@@ -699,6 +736,13 @@ def node_medical_exit(caller, raw_string, **kwargs):
  
  
 def start_medical_menu(caller, target):
+    if target != caller:
+        from world.rpg.trust import check_trust_or_incapacitated
+
+        ok, _reason = check_trust_or_incapacitated(target, caller, "heal")
+        if not ok:
+            caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+            return
     from evennia.utils.evmenu import EvMenu
     EvMenu(
         caller,

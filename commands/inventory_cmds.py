@@ -96,6 +96,9 @@ class CmdWield(Command):
         if not use_left and not use_right:
             caller.msg("Your arms are ruined. You can't hold anything until you get chrome.")
             return
+        if getattr(caller.db, "grappling", None):
+            caller.msg("Your hands are full holding someone. Let go first.")
+            return
 
         target = caller.search(self.args.strip(), location=caller)
         if not target:
@@ -756,18 +759,33 @@ class CmdStrip(Command):
             target = caller.search(target_spec, location=caller.location)
             if not target:
                 return
-            if target != caller:
+        else:
+            item_spec = args
+            target = caller
+
+        if target != caller:
+            try:
+                from typeclasses.corpse import Corpse
+            except ImportError:
+                Corpse = None
+            if Corpse and isinstance(target, Corpse):
+                pass
+            else:
                 try:
                     from world.death import is_character_logged_off, character_logged_off_long_enough
+                    from world.rpg.trust import check_trust_or_incapacitated
+
                     if is_character_logged_off(target):
                         if not character_logged_off_long_enough(target):
                             caller.msg("They haven't been asleep long enough.")
                             return
+                    else:
+                        ok, _r = check_trust_or_incapacitated(target, caller, "strip")
+                        if not ok:
+                            caller.msg("They don't trust you for that. They need to @trust you to strip.")
+                            return
                 except ImportError as e:
                     logger.log_trace("inventory_cmds.CmdStrip is_character_logged_off: %s" % e)
-        else:
-            item_spec = args
-            target = caller
         worn = list(target.db.worn or [])
         if not worn:
             if target is caller:
@@ -831,6 +849,12 @@ class CmdFrisk(Command):
             return
         if target == caller:
             caller.msg("You know what you're carrying.")
+            return
+        from world.rpg.trust import check_trust_or_incapacitated
+
+        ok, _r = check_trust_or_incapacitated(target, caller, "strip")
+        if not ok:
+            caller.msg("They don't trust you for that. They need to @trust you to strip.")
             return
         tname = target.get_display_name(caller)
         caller.msg("You run your hands over %s's pockets and belongings." % tname)

@@ -849,14 +849,9 @@ def get_treatment_options(operator, target, tools_by_type):
                         table = obj
                         break
             if table and table.get_patient() == target:
-                now_ts = time.time()
-                sedated = (
-                    float(getattr(target.db, "sedated_until", 0.0) or 0.0) > now_ts
-                    or (
-                        bool(getattr(target.db, "medical_unconscious", False))
-                        and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts
-                    )
-                )
+                from world.medical import is_sedated_for_surgery
+
+                sedated = is_sedated_for_surgery(target)
                 if not sedated:
                     options.append(("sedate_patient", "Sedate patient", TOOL_SURGICAL_KIT, None))
                 cyberware_in_inv = [
@@ -917,9 +912,10 @@ def attempt_resuscitate(caller, target):
     if hp > 0:
         return False, "They are not in arrest. The defibrillator is for the dead."
     
-    # Medicine roll: low difficulty, +5 modifier for equipment (defibrillator)
+    # Medicine roll: low difficulty, +5 modifier for equipment (defibrillator).
+    # Untrained operators (medicine 0) always fail per roll_check — no AED bypass.
     success_level, _ = _medicine_roll(caller, difficulty=0, modifier=5)
-    
+
     if success_level == 0:
         return False, "No rhythm. Flatline. You charge again, deliver another shock. Nothing. They are gone."
     

@@ -115,7 +115,15 @@ def apply_bleeding_tick(character):
         return False
     character.db.current_hp = max(0, (current or 0) - drain)
     if character.location:
-        has_pain_editor = any(type(cw).__name__ == "PainEditor" and not bool(getattr(cw.db, "malfunctioning", False)) for cw in (getattr(character.db, "cyberware", None) or []))
+        try:
+            from world.alchemy.effects import has_pain_suppression
+
+            has_pain_editor = has_pain_suppression(character)
+        except Exception:
+            has_pain_editor = any(
+                type(cw).__name__ == "PainEditor" and not bool(getattr(cw.db, "malfunctioning", False))
+                for cw in (getattr(character.db, "cyberware", None) or [])
+            )
         if not has_pain_editor:
             character.msg(f"{MC['critical']}You're bleeding.|n")
         character.location.msg_contents(

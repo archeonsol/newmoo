@@ -292,6 +292,11 @@ def render_chrome_description(cyberware_obj, body_part):
     text = get_chrome_desc_text(cyberware_obj, body_part)
     if not text:
         return ""
+    # Skin weave: player-authored lines may include Evennia color codes; skip the
+    # default chrome tint so | codes control appearance (like splicer @body exceptions).
+    path = getattr(cyberware_obj, "typeclass_path", "") or ""
+    if path.endswith("SkinWeave") and _text_has_markup(text):
+        return f"{text}|n"
     color = get_chrome_desc_color(cyberware_obj)
     return f"{color}{text}|n"
 

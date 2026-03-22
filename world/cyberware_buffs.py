@@ -1,6 +1,8 @@
 """Cyberware buff definitions."""
 
-from evennia.contrib.rpg.buffs.buff import BaseBuff
+from evennia.contrib.rpg.buffs.buff import Mod
+
+from world.buffs import GameBuffBase
 
 
 WEAPON_SKILLS = (
@@ -14,9 +16,33 @@ WEAPON_SKILLS = (
 )
 
 
-class _CyberBuff(BaseBuff):
-    # Use a permanent numeric duration for compatibility with handlers that
-    # compare duration against integer thresholds.
+class _CyberBuffMeta(type):
+    """
+    Build Evennia ``Mod`` lists from ``stat_mods`` / ``skill_mods`` on each
+    cyberware buff class. BuffHandler only applies ``check()`` modifiers for
+    buffs with non-empty ``mods`` (see traits / get_by_stat in the contrib).
+    """
+
+    def __new__(mcs, name, bases, namespace, **kwds):
+        cls = super().__new__(mcs, name, bases, namespace)
+        if name in ("_CyberBuff", "RetractableClawsBuff"):
+            return cls
+        if not any(getattr(b, "__name__", None) == "_CyberBuff" for b in bases):
+            return cls
+        stat_mods = namespace.get("stat_mods") or {}
+        skill_mods = namespace.get("skill_mods") or {}
+        mods = []
+        for stat, value in stat_mods.items():
+            mods.append(Mod(stat=f"{stat}_display", modifier="add", value=int(value)))
+        for skill, value in skill_mods.items():
+            mods.append(Mod(stat=f"skill:{skill}", modifier="add", value=int(value)))
+        if mods:
+            cls.mods = mods
+        return cls
+
+
+class _CyberBuff(GameBuffBase, metaclass=_CyberBuffMeta):
+    # Evennia contrib: duration -1 is permanent (see BaseBuff in contrib).
     duration = -1
     tickrate = 0
     stat_mods = {}
@@ -285,11 +311,25 @@ class AdrenalineShuntBuff(_CyberBuff):
 
 
 class RetractableClawsBuff(_CyberBuff):
+    """Installed implant; unarmed bonus only while deployed (see RetractableClawsDeployedBuff)."""
+
     key = "retractable_claws"
     name = "Retractable Claws"
     flavor = "Finger-sheathed blade system."
-    skill_mods = {"unarmed": 8}
+    # No skill_mods here — unarmed +8 is applied only when claws are deployed.
+    skill_mods = {}
     vulnerabilities = {"arc": 0.05}
+
+
+class RetractableClawsDeployedBuff(GameBuffBase):
+    """Applied when claws are deployed; removed when retracted."""
+
+    key = "retractable_claws_deployed"
+    name = "Claws Deployed"
+    flavor = "Chrome talons extend from the fingertips."
+    duration = -1
+    tickrate = 0
+    mods = [Mod(stat="skill:unarmed", modifier="add", value=8)]
 
 
 class ChromeHeartBuff(_CyberBuff):

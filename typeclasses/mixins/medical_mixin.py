@@ -50,6 +50,18 @@ class MedicalMixin:
 
     def at_damage(self, attacker, damage, body_part=None, weapon_key=None, weapon_obj=None):
         """Apply HP loss. At 0 HP enter flatlined state (dying). Records injury for natural regen."""
+        try:
+            dmg = int(damage or 0)
+        except Exception:
+            dmg = 0
+        if dmg > 0:
+            try:
+                from world.rpg import stealth
+
+                if stealth.is_hidden(self):
+                    stealth.reveal(self, reason="damage")
+            except Exception:
+                pass
         self.db.current_hp -= damage
         if self.db.current_hp < 0:
             self.db.current_hp = 0
@@ -58,6 +70,11 @@ class MedicalMixin:
             add_injury(self, damage, body_part=body_part, weapon_key=weapon_key or "fists", weapon_obj=weapon_obj)
         except Exception as err:
             logger.log_trace("medical_mixin.at_damage add_injury: %s" % err)
+
+        if self.db.current_hp <= 0 and getattr(self.db, "drug_consciousness_sustain", False):
+            self.db.current_hp = 1
+            self.msg("|rYou should be unconscious. Why aren't you?|n")
+            return
 
         if self.db.current_hp <= 0:
             try:

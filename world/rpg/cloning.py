@@ -85,7 +85,12 @@ def build_clone_snapshot(character):
         "height_category": getattr(character.db, "height_category", None),
         "weight_category": getattr(character.db, "weight_category", None),
         "age_years": getattr(character.db, "age_years", None),
+        "addictions": dict(getattr(character.db, "addictions", None) or {}),
+        "known_recipes": list(getattr(character.db, "known_recipes", None) or []),
+        "cyberpsychosis_score": int(getattr(character.db, "cyberpsychosis_score", 0) or 0),
     }
+    _trust = dict(getattr(character.db, "trust", None) or {})
+    snapshot["trust"] = {k: list(v) if isinstance(v, (set, list)) else list(v) for k, v in _trust.items()}
     snapshot["factions"] = {}
     for fdata in get_character_factions(character):
         faction_key = fdata["key"]
@@ -160,6 +165,16 @@ def apply_clone_snapshot(character, snapshot):
         character.db.faction_joined = faction_joined
     character.db.faction_pay_collected = dict(snapshot.get("faction_pay_collected") or {})
 
+    if "addictions" in snapshot:
+        character.db.addictions = dict(snapshot.get("addictions") or {})
+    if "known_recipes" in snapshot:
+        character.db.known_recipes = list(snapshot.get("known_recipes") or [])
+    if "cyberpsychosis_score" in snapshot:
+        character.db.cyberpsychosis_score = int(snapshot.get("cyberpsychosis_score") or 0)
+    if "trust" in snapshot:
+        tdat = snapshot.get("trust") or {}
+        character.db.trust = {str(k): set(v) for k, v in tdat.items()}
+
     character.db.needs_chargen = False
     # Restrict stored naked descriptions to racial anatomy (legacy shards may have extra keys).
     from world.races import get_race_body_parts
@@ -208,6 +223,12 @@ def apply_clone_snapshot(character, snapshot):
     character.db.combat_ranges = {}
     character.db.grappling = None
     character.db.grappled_by = None
+    try:
+        from world.combat.grapple import clear_grapple_cmdsets_on_clone_reset
+
+        clear_grapple_cmdsets_on_clone_reset(character)
+    except Exception:
+        pass
     character.db.combat_target = None
     character.db.sedated_until = 0.0
 

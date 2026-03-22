@@ -789,10 +789,20 @@ class CmdRecog(Command):
                 caller.msg("You don't recognize anyone by that name.")
                 return
             target, perm_match, temp_match = found
+            perm = caller.recog.get(target) if hasattr(caller, "recog") else None
+            temp = get_helmet_recog_for_viewer(caller, target)
             if perm_match:
+                from world.rpg.trust import forget_trust_for_name
+
                 caller.recog.remove(target)
+                if perm:
+                    forget_trust_for_name(caller, perm)
             if temp_match:
+                from world.rpg.trust import forget_trust_for_name
+
                 clear_helmet_recog_for_viewer(caller, target)
+                if temp:
+                    forget_trust_for_name(caller, temp)
             sdesc = get_display_name_for_viewer(target, caller)
             caller.msg("You no longer recognize them. You'll see them as: |w%s|n" % sdesc)
             return
@@ -846,7 +856,12 @@ class CmdRecog(Command):
             # Normal recog: permanent name tied to their uncovered face; message should use the
             # *current* visible description (sdesc) before recog is applied.
             before = get_character_sdesc_for_viewer(target, caller)
+            old_perm = caller.recog.get(target) if hasattr(caller, "recog") else None
             caller.recog.add(target, name_part)
+            if old_perm and old_perm.strip().lower() != name_part.strip().lower():
+                from world.rpg.trust import migrate_trust_rename
+
+                migrate_trust_rename(caller, old_perm, name_part)
         caller.msg("You'll now see |w%s|n as |w%s|n." % (before, name_part))
 
 

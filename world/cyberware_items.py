@@ -5,12 +5,13 @@ Each item subclasses CyberwareBase and declares buff_class and/or body_mods.
 Add new chrome here; no other files need changing for purely appearance/stat mods.
 """
 
-from evennia.contrib.rpg.buffs.buff import BaseBuff, Mod
+from evennia.contrib.rpg.buffs.buff import Mod
 
 from typeclasses.cyberware import CyberwareBase
+from world.buffs import GameBuffBase
 
 
-class ChromeLegsBuff(BaseBuff):
+class ChromeLegsBuff(GameBuffBase):
     key = "chrome_legs"
     name = "Chrome Legs"
     flavor = "Your legs hum with the quiet precision of high-grade chrome."

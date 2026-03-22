@@ -25,7 +25,7 @@ class CmdStats(Command):
     def func(self):
         from world.rpg.chargen import STAT_KEYS
         from world.skills import SKILL_KEYS, SKILL_DISPLAY_NAMES
-        from world.levels import get_stat_grade, get_skill_grade
+        from world.levels import MAX_STAT_LEVEL, get_stat_grade, get_skill_grade
         from world.rpg.xp import _stat_level, _skill_level
 
         caller = self.caller
@@ -129,8 +129,13 @@ class CmdStats(Command):
                 effective_stat_display[key] = base_stat_display.get(key, 0)
 
         for key in STAT_KEYS:
-            stored = data_source.get_stat_level(key) if hasattr(data_source, "get_stat_level") else 0
-            letter = get_stat_grade(stored)
+            # Grade/adjective from effective display (buffs included), same ladder as stored 0–300.
+            eff = effective_stat_display.get(key, 0)
+            try:
+                equiv_stored = min(MAX_STAT_LEVEL, max(0, int(eff) * 2))
+            except (TypeError, ValueError):
+                equiv_stored = 0
+            letter = get_stat_grade(equiv_stored)
             adj = (
                 data_source.get_stat_grade_adjective(letter, key)
                 if hasattr(data_source, "get_stat_grade_adjective")
@@ -138,7 +143,7 @@ class CmdStats(Command):
             )
             label = key.capitalize()
             delta = effective_stat_display.get(key, 0) - base_stat_display.get(key, 0)
-            marker = " |g+|n" if delta > 0 else (" |r-|n" if delta < 0 else "")
+            marker = "|g+|n" if delta > 0 else ("|r-|n" if delta < 0 else "")
             output += "|x│|n   |w{}|n  |R[{}]|n {}{}\n".format(label.ljust(12), letter, adj, marker)
 
         output += "|x├" + fade_rule(w - 2, "─") + "|n\n"
@@ -175,7 +180,7 @@ class CmdStats(Command):
             )
             label = SKILL_DISPLAY_NAMES.get(key, key.replace("_", " ").title())
             delta = level - base_skill_levels.get(key, 0)
-            marker = " |g+|n" if delta > 0 else (" |r-|n" if delta < 0 else "")
+            marker = "|g+|n" if delta > 0 else ("|r-|n" if delta < 0 else "")
             output += "|x│|n   |w{}|n  |R[{}]|n {}{}\n".format(label.ljust(skill_label_width), letter, adj, marker)
 
         output += "|x└" + fade_rule(w - 2, "─") + "|n\n"

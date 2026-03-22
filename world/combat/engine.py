@@ -797,7 +797,12 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
                     weapon_obj=wielded_obj,
                 )
                 combat_msg(attacker, f"{main_atk} {flavor_atk}".strip())
-                pain_editor = any(type(cw).__name__ == "PainEditor" and not bool(getattr(cw.db, "malfunctioning", False)) for cw in (getattr(defender.db, "cyberware", None) or []))
+                try:
+                    from world.alchemy.effects import has_pain_suppression
+
+                    pain_editor = has_pain_suppression(defender)
+                except Exception:
+                    pain_editor = False
                 if pain_editor:
                     combat_msg(defender, f"|xDamage registered at {body_part}. You feel nothing.|n")
                 else:
