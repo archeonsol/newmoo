@@ -33,6 +33,21 @@ COMBAT_READY_DEFENDER_MSG = CC["miss"] + "You square up, getting ready to fight.
 COMBAT_READY_ROOM_MSG = CC["miss"] + "{defender} squares up, getting ready to fight.|n"
 COMBAT_READY_ATTACKER_ROOM_MSG = CC["miss"] + "{attacker} gets ready to fight {target}.|n"
 
+# Defender movement (e.g. |wgo|n queue): stop as soon as combat is initiated, before the delayed first strike.
+STAGGER_INTERRUPT_DEFENDER_COMBAT_MSG = CC["miss"] + "You stop moving — they're coming at you now.|n"
+
+
+def _interrupt_defender_walk_on_combat_start(target):
+    """Clear staggered / queued walk on the defender when an attack sequence starts (before round delay)."""
+    if not target:
+        return
+    try:
+        from world.rpg.staggered_movement import interrupt_staggered_walk
+
+        interrupt_staggered_walk(target, notify_msg=STAGGER_INTERRUPT_DEFENDER_COMBAT_MSG)
+    except Exception:
+        pass
+
 
 def ticker_id(attacker, defender):
     if not attacker or not defender:
@@ -274,6 +289,7 @@ def start_combat_ticker(attacker, target):
 
     weapon_key = _get_attacker_weapon_key(attacker)
     on_combat_start(attacker, target, weapon_key)
+    _interrupt_defender_walk_on_combat_start(target)
     ready_attacker = COMBAT_READY_ATTACKER_MSG.get(weapon_key, COMBAT_READY_ATTACKER_MSG["fists"])
     attacker_target = combat_role_name(target, attacker, role="defender")
     combat_msg(attacker, ready_attacker.format(target=attacker_target))
@@ -309,6 +325,7 @@ def schedule_staggered_first_round(attacker, target):
     """Queue the first strike + recurring ticker (same cadence as start_combat_ticker)."""
     if not attacker or not target:
         return
+    _interrupt_defender_walk_on_combat_start(target)
     sec = random.uniform(COMBAT_START_DELAY_MIN, COMBAT_START_DELAY_MAX)
     delay(sec, _start_first_round, attacker.id, target.id)
 

@@ -62,6 +62,23 @@ class MedicalMixin:
                     stealth.reveal(self, reason="damage")
             except Exception:
                 pass
+            try:
+                from world.vehicle_mounts import check_motorcycle_dismount_on_damage
+
+                check_motorcycle_dismount_on_damage(self, dmg)
+            except Exception:
+                pass
+            try:
+                from world.rpg.staggered_movement import interrupt_staggered_walk
+
+                interrupt_staggered_walk(
+                    self,
+                    notify_msg="|yThe hit breaks your stride.|n"
+                    if attacker
+                    else "|yYou stop moving.|n",
+                )
+            except Exception:
+                pass
         self.db.current_hp -= damage
         if self.db.current_hp < 0:
             self.db.current_hp = 0

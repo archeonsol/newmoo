@@ -203,7 +203,24 @@ def apply_grapple_lock(grappler, victim):
             stealth.reveal(victim, reason="combat")
     except Exception:
         pass
+    try:
+        from typeclasses.vehicles import Motorcycle
+        from world.vehicle_mounts import force_dismount
+
+        bike = getattr(victim.db, "mounted_on", None) if victim else None
+        if bike and isinstance(bike, Motorcycle):
+            force_dismount(victim, bike, reason="grappled")
+            if victim and hasattr(victim, "msg"):
+                victim.msg("|rYou're dragged off your bike!|n")
+    except Exception:
+        pass
     free_hands_for_grapple(grappler, announce=False)
+    try:
+        from world.rpg.staggered_movement import interrupt_staggered_walk
+
+        interrupt_staggered_walk(victim, notify_msg="|yYou stop moving.|n")
+    except Exception:
+        pass
     victim.db.grappled_by = grappler
     grappler.db.grappling = victim
     _apply_grappling_cmdset(grappler)
@@ -383,6 +400,12 @@ def start_grapple_third_party_attempt(third_party, victim):
     third_party.msg("" + CC["miss"] + "You lunge towards %s, trying to pull them from %s's grasp!|n" % (v_name_for_tp, g_name_for_tp))
     victim.msg("" + CC["dodge"] + "You see %s tense up!|n" % tp_name_for_v)
     victim.msg("" + CC["miss"] + "%s lunges towards you!|n" % tp_name_for_v)
+    try:
+        from world.rpg.staggered_movement import interrupt_staggered_walk
+
+        interrupt_staggered_walk(victim, notify_msg="|yYou stop moving.|n")
+    except Exception:
+        pass
     grappler.msg("" + CC["dodge"] + "You see %s tense up and lunge towards %s!|n" % (_combat_display_name(third_party, grappler), v_name_for_g))
     if loc and hasattr(loc, "contents_get"):
         for v in loc.contents_get(content_type="character"):

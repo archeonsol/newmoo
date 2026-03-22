@@ -343,7 +343,7 @@ class CmdLook(DefaultCmdLook):
 
 class CmdStopWalking(Command):
     """
-    Stop a pending staggered walk before it completes.
+    Stop a pending staggered walk and clear any queued compass steps.
 
     Usage:
       stop walking
@@ -359,14 +359,79 @@ class CmdStopWalking(Command):
         if not getattr(caller, "db", None):
             self.caller.msg("You must be in character to do that.")
             return
-        # Mark the next delayed walk to be cancelled; the delayed callback
-        # in `world.staggered_movement` will honour this flag.
-        already_set = bool(getattr(caller.db, "cancel_walking", False))
-        caller.db.cancel_walking = True
+        # Same as interrupt_staggered_walk (combat/grapple use that helper too).
+        try:
+            from world.rpg.staggered_movement import interrupt_staggered_walk
+
+            already_set = bool(getattr(caller.db, "cancel_walking", False))
+            interrupt_staggered_walk(caller, notify_msg=None)
+        except ImportError:
+            already_set = bool(getattr(caller.db, "cancel_walking", False))
+            try:
+                from world.rpg.staggered_movement import clear_stagger_walk_pending, clear_walk_queue
+
+                clear_stagger_walk_pending(caller)
+                clear_walk_queue(caller)
+            except ImportError:
+                pass
+            caller.db.cancel_walking = True
         if already_set:
             self.caller.msg("You steady yourself, keeping from walking off anywhere.")
         else:
             self.caller.msg("You stop walking.")
+
+
+class CmdGo(Command):
+    """
+    Queue multiple compass steps (same staggered pacing as using exits).
+    If a walk is already in progress, new directions are appended to the queue.
+
+    Usage:
+      go w w w
+      go north east
+    """
+
+    key = "go"
+    aliases = ["walk", "queue walk", "walkqueue"]
+    locks = "cmd:all()"
+    help_category = "Movement"
+
+    def func(self):
+        caller = _command_character(self)
+        if not getattr(caller, "db", None):
+            self.caller.msg("You must be in character to do that.")
+            return
+        try:
+            from world.rpg.staggered_movement import (
+                extend_walk_queue,
+                is_staggered_walk_pending,
+                is_valid_compass_token,
+                normalize_move_direction,
+                seed_walk_queue_and_start_first,
+            )
+        except ImportError:
+            self.caller.msg("Movement queue is unavailable.")
+            return
+        parts = (self.args or "").strip().split()
+        if not parts:
+            self.caller.msg("Usage: |wgo <direction> [<direction> ...]|n  e.g. |wgo w w w|n")
+            return
+        norms = []
+        for tok in parts:
+            if not is_valid_compass_token(tok):
+                self.caller.msg(f"Unknown direction: {tok}")
+                return
+            norms.append(normalize_move_direction(tok))
+        if is_staggered_walk_pending(caller):
+            extend_walk_queue(caller, norms)
+            self.caller.msg(
+                "You add " + ", ".join(parts) + " to your route after your current step."
+            )
+            return
+        ok, err = seed_walk_queue_and_start_first(caller, norms)
+        if not ok:
+            self.caller.msg(err or "You can't go that way.")
+            return
 
 
 class CmdExamine(Command):
