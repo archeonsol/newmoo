@@ -3,7 +3,6 @@ Death Lobby (Limbo): OOC waiting room for players who have permanently died.
 Spirit: temporary puppet so the player has somewhere to "be" and can look around the lobby.
 """
 from evennia import DefaultRoom, DefaultCharacter
-from django.utils.translation import gettext as _
 
 
 class DeathLimbo(DefaultRoom):
@@ -56,17 +55,11 @@ class Spirit(DefaultCharacter):
         return bool(getattr(acc.db, "clone_snapshot_backup", None))
 
     def at_post_puppet(self, **kwargs):
-        """Skip the default 'You become X' message; do look and room announcement only."""
+        """Skip default 'You become X' and any room 'entered the game' broadcast; look only."""
         if hasattr(self, "account") and self.account:
             self.account.db._last_puppet = self
         if self.location:
             self.msg((self.at_look(self.location), {"type": "look"}), options=None)
-            from evennia.utils import _ as _translate
-            self.location.for_contents(
-                lambda obj, from_obj: obj.msg(_("{name} has entered the game.").format(name=self.get_display_name(obj)), from_obj=from_obj),
-                exclude=[self],
-                from_obj=self,
-            )
 
     def get_cmdsets(self, caller, current, **kwargs):
         """Never return None for current so the cmdset merger does not crash."""

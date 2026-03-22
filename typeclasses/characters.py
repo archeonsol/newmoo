@@ -142,6 +142,20 @@ class _SafeBuffHandler(BuffHandler):
         return self._buffcache_dict
 
 
+def _puppet_become_and_look_no_room_broadcast(character):
+    """
+    Match Evennia DefaultCharacter.at_post_puppet (You become + look + _last_puppet) without
+    telling the room that someone has entered the game — that is noise on every @puppet switch.
+    """
+    from django.utils.translation import gettext as _
+
+    character.msg(_("\nYou become |c{name}|n.\n").format(name=character.key))
+    if character.location:
+        character.msg((character.at_look(character.location), {"type": "look"}), options=None)
+    if hasattr(character, "account") and character.account:
+        character.account.db._last_puppet = character
+
+
 class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, FurnitureMixin, DefaultCharacter):
     """
     The 'Colony' Core Engine.
@@ -265,7 +279,10 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
 
     def search(self, searchdata, **kwargs):
         """Exclude hidden characters the searcher has not spotted."""
+        skip_stealth = kwargs.pop("skip_stealth_filter", False)
         res = super().search(searchdata, **kwargs)
+        if skip_stealth:
+            return res
         if not res:
             return res
         try:
@@ -278,8 +295,12 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
                     return False
                 return True
 
+            quiet = kwargs.get("quiet", False)
+
             if isinstance(res, (list, tuple)):
                 filtered = [o for o in res if _visible(o)]
+                if quiet:
+                    return filtered
                 return filtered if filtered else None
             if not _visible(res):
                 return None
@@ -669,7 +690,7 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
     def at_post_puppet(self, **kwargs):
         # Only the go shard (clone awakening) pipeline sets this; no other puppet flow should set it.
         # When set, we skip *only* the default "You become X" message from the parent, then run
-        # our normal post-puppet logic (last_puppet, XP, wake-up). All other puppeting keeps "You become".
+        # our normal post-puppet logic (last_puppet, XP, awake line, room wake_up_message). All other puppeting keeps "You become".
         go_shard_awakening = getattr(self.db, "_suppress_become_message", False)
         if go_shard_awakening:
             try:
@@ -683,7 +704,7 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
                 self.account.db._last_puppet = self
             # Fall through to our normal logic below (no return here)
         else:
-            super().at_post_puppet(**kwargs)
+            _puppet_become_and_look_no_room_broadcast(self)
         # Never run chargen for NPCs (e.g. when staff puppet an NPC then puppet back to PC).
         if getattr(self.db, "is_npc", False):
             return
@@ -705,14 +726,12 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
             if rig.validate_and_reconnect(self):
                 return  # Successfully redirected to avatar
 
-        # Normal post-puppet: grant pending XP and wake-up message
+        # Normal post-puppet: grant pending XP, personal line, room wake-up (not Evennia's "entered the game")
         from world.rpg.xp import grant_pending_xp
         xp_granted, drops = grant_pending_xp(self)
         if xp_granted > 0 and drops > 0:
             self.msg("|gYou got {} XP.|n".format(int(xp_granted) if xp_granted == int(xp_granted) else xp_granted))
-        # Personal login message (only to the player)
         self.msg("|cYou open your eyes and return to the world, awake.|n")
-        # Wake-up message to room when logging in (not during first-time chargen)
         if self.location:
             try:
                 from world.rpg.crafting import substitute_clothing_desc

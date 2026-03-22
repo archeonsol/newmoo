@@ -177,10 +177,12 @@ class StaffOnlyPuppet(CmdIC):
                 local_matches = []
                 if session.puppet:
                     # Local search from current puppet, as in CmdIC.
+                    # skip_stealth_filter: stealth-hidden NPCs are still valid @puppet targets for staff.
+                    raw = session.puppet.search(args, quiet=True, skip_stealth_filter=True)
                     local_matches = [
                         char
-                        for char in session.puppet.search(args, quiet=True)
-                        if char.access(account, "puppet")
+                        for char in utils.make_iter(raw or [])
+                        if char and char.access(account, "puppet")
                     ]
                     character_candidates = list(local_matches) or character_candidates
 
