@@ -60,9 +60,13 @@ class CmdCyberware(Command):
         (error message already sent to caller in those cases).
         """
         caller = self.caller
-        char = caller.search(char_name, global_search=True, quiet=True)
-        if char:
-            return char
+        results = caller.search(char_name, global_search=True, quiet=True)
+        if results:
+            if len(results) == 1:
+                return results[0]
+            elif len(results) > 1:
+                caller.msg(f"Multiple matches for '{char_name}'. Use #dbref instead.")
+                return None
         try:
             from world.rp_features import RecogHandler
             recog_map = RecogHandler(caller).all()
@@ -111,7 +115,17 @@ class CmdCyberware(Command):
             return
         lines = [f"Cyberware installed on {char.key}:"]
         for obj in cyberware:
-            lines.append(f"  {obj.key} (#{obj.id}) [{type(obj).__name__}]")
+            cls_name = type(obj).__name__
+            # Show prerequisite tree using networkx dependency graph.
+            prereqs_str = ""
+            try:
+                from world.cyberware_graph import get_install_prerequisites
+                prereqs = get_install_prerequisites(cls_name)
+                if prereqs:
+                    prereqs_str = f" | requires: {', '.join(prereqs)}"
+            except Exception:
+                pass
+            lines.append(f"  {obj.key} (#{obj.id}) [{cls_name}]{prereqs_str}")
         caller.msg("\n".join(lines))
 
     def _do_install(self):

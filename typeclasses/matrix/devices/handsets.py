@@ -16,6 +16,12 @@ Key features:
 import time
 from datetime import datetime
 
+try:
+    import arrow as _arrow
+    _ARROW_AVAILABLE = True
+except ImportError:
+    _ARROW_AVAILABLE = False
+
 from typeclasses.matrix.items import NetworkedItem
 from world.matrix_accounts import get_account, set_alias, get_alias, has_alias
 from world.matrix_ids import BASE32_CHARS, ID_LENGTH
@@ -765,7 +771,10 @@ class Handset(NetworkedItem):
         for entry in log[-20:][::-1]:
             t = entry.get("t", 0)
             try:
-                ts = datetime.fromtimestamp(float(t)).strftime("%b %d %H:%M")
+                if _ARROW_AVAILABLE:
+                    ts = _arrow.get(float(t)).format("MMM DD HH:mm")
+                else:
+                    ts = datetime.fromtimestamp(float(t)).strftime("%b %d %H:%M")
             except Exception:
                 ts = "?"
             peer_disp = self.display_alias_or_id(entry.get("peer", "") or "")

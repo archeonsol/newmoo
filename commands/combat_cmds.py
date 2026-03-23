@@ -341,6 +341,10 @@ class CmdFlee(Command):
         if not getattr(caller, "db", None) or not hasattr(caller.db, "stats"):
             self.caller.msg("You must be in character to do that.")
             return
+        if not caller.cooldowns.ready("flee"):
+            secs = caller.cooldowns.time_left("flee")
+            caller.msg(f"|yYou're still catching your breath. Try again in {int(secs)}s.|n")
+            return
         if getattr(caller.db, "grappled_by", None):
             caller.msg("You're locked in someone's grasp. Use |wresist|n to break free.")
             return
@@ -407,6 +411,7 @@ class CmdFlee(Command):
         remove_both_combat_tickers(caller, opponent)
         victim = getattr(caller.db, "grappling", None)
         dir_name = (getattr(exit_obj, "key", None) or "away").strip()
+        caller.cooldowns.add("flee", 30)
         caller.move_to(dest, quiet=True)
         if victim and hasattr(victim, "move_to"):
             victim.move_to(dest)

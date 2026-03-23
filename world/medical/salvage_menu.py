@@ -128,7 +128,8 @@ def node_salvage_result(caller, raw_string, **kwargs):
     ok, err = start_extraction(caller, corpse, cw)
     if not ok:
         caller.msg(err)
-    return node_salvage_main(caller, raw_string, target=corpse)
+        return node_salvage_main(caller, raw_string, target=corpse)
+    return "node_salvage_exit"
 
 
 def node_salvage_exit(caller, raw_string, **kwargs):

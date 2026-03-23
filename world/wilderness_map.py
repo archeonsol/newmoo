@@ -27,6 +27,69 @@ from evennia import create_object
 from evennia.contrib.grid import wilderness
 from evennia.utils.search import search_object
 
+# ---------------------------------------------------------------------------
+# OpenSimplex noise for organic biome generation
+# ---------------------------------------------------------------------------
+try:
+    from opensimplex import OpenSimplex as _OpenSimplex
+    _OPENSIMPLEX_AVAILABLE = True
+except ImportError:
+    _OpenSimplex = None
+    _OPENSIMPLEX_AVAILABLE = False
+
+# Seed is loaded lazily on first use so ServerConfig is available.
+_elev_gen = None
+_moist_gen = None
+_NOISE_SEED = None
+
+
+def _get_noise_generators():
+    """Return (elev_gen, moist_gen), initialising from ServerConfig on first call."""
+    global _elev_gen, _moist_gen, _NOISE_SEED
+    if _elev_gen is not None:
+        return _elev_gen, _moist_gen
+    if not _OPENSIMPLEX_AVAILABLE:
+        return None, None
+    try:
+        from evennia.server.models import ServerConfig
+        seed = ServerConfig.objects.conf("WILDERNESS_SEED", default=42)
+        _NOISE_SEED = int(seed)
+    except Exception:
+        _NOISE_SEED = 42
+    _elev_gen = _OpenSimplex(seed=_NOISE_SEED)
+    _moist_gen = _OpenSimplex(seed=_NOISE_SEED + 1000)
+    return _elev_gen, _moist_gen
+
+
+# Whittaker-style biome lookup: [elev_band 0-2][moist_band 0-2]
+# elev: 0=low, 1=mid, 2=high  |  moist: 0=dry, 1=moderate, 2=wet
+_WHITTAKER_BIOME = [
+    # low elevation
+    ["harshlands",       "grasslands",         "grasslands"],
+    # mid elevation
+    ["harshlands",       "hills",              "hills"],
+    # high elevation
+    ["volcanic",         "ruined_settlement",  "hills"],
+]
+
+
+def _elev_band(v: float) -> int:
+    """Map noise value -1..1 to elevation band 0-2."""
+    if v < -0.2:
+        return 0
+    if v < 0.3:
+        return 1
+    return 2
+
+
+def _moist_band(v: float) -> int:
+    """Map noise value -1..1 to moisture band 0-2."""
+    if v < -0.1:
+        return 0
+    if v < 0.3:
+        return 1
+    return 2
+
 
 # Coordinate where the city gate "outside" exit drops you.
 CITY_GATE_COORD = (0, 0)
@@ -84,6 +147,32 @@ def get_city_gate_room(provider):
     return None
 
 
+def _get_biome_for_coords(x: int, y: int) -> str:
+    """
+    Return the biome string for (x, y) using OpenSimplex noise when available,
+    falling back to distance-band logic.
+    """
+    elev_gen, moist_gen = _get_noise_generators()
+    if elev_gen is not None and moist_gen is not None:
+        try:
+            elev = elev_gen.noise2(x * 0.04, y * 0.04)
+            moist = moist_gen.noise2(x * 0.04 + 500, y * 0.04 + 500)
+            return _WHITTAKER_BIOME[_elev_band(elev)][_moist_band(moist)]
+        except Exception:
+            pass
+    # Distance-band fallback
+    dist = max(abs(x), abs(y))
+    if dist <= 20:
+        return "grasslands"
+    if dist <= 40:
+        return "harshlands"
+    if dist <= 60:
+        return "hills"
+    if dist <= 80:
+        return "ruined_settlement"
+    return "volcanic"
+
+
 class ColonyWildernessRoom(wilderness.WildernessRoom):
     """
     Wilderness room that:
@@ -104,16 +193,15 @@ class ColonyWildernessRoom(wilderness.WildernessRoom):
             return "The Harshlands"
         try:
             x, y = coordinates
-            dist = max(abs(x), abs(y))
-            if dist <= 20:
-                return "Grasslands"
-            if dist <= 40:
-                return "Harshlands"
-            if dist <= 60:
-                return "Hills"
-            if dist <= 80:
-                return "Ruined Settlement"
-            return "Volcanic Wastes"
+            biome = _get_biome_for_coords(x, y)
+            labels = {
+                "grasslands": "Grasslands",
+                "harshlands": "Harshlands",
+                "hills": "Hills",
+                "ruined_settlement": "Ruined Settlement",
+                "volcanic": "Volcanic Wastes",
+            }
+            return labels.get(biome, "The Harshlands")
         except (TypeError, ValueError):
             return "The Harshlands"
 
@@ -219,39 +307,31 @@ class ColonyWildernessProvider(wilderness.WildernessMapProvider):
                 obj.move_to(dest, quiet=False)
                 return
 
-        # 2) Biome selection and description.
-        # Bands by distance from (0,0): 0-20 grasslands, 20-40 harshlands, 40-60 hills, 60-80 ruined settlement, 80-100 volcanic.
-        dist = max(abs(x), abs(y))
-        if dist <= 20:
-            biome = "grasslands"
-            desc = (
+        # 2) Biome selection and description (uses OpenSimplex noise when available).
+        biome = _get_biome_for_coords(x, y)
+        _BIOME_DESCS = {
+            "grasslands": (
                 "Patchy scrub and stubborn grasses cling to the broken earth. The wind carries "
                 "the distant hum of the city behind you and the faint stink of burned ozone."
-            )
-        elif dist <= 40:
-            biome = "harshlands"
-            desc = (
+            ),
+            "harshlands": (
                 "A grey ashfall carpets the ground, muffling your steps. Charred stumps, twisted "
                 "rebar and slag heaps jut from the waste like broken teeth."
-            )
-        elif dist <= 60:
-            biome = "hills"
-            desc = (
+            ),
+            "hills": (
                 "Low, rolling hills of cracked stone rise and fall underfoot. Rusted wreckage "
                 "and half-buried concrete ribs jut from the slopes like old bones."
-            )
-        elif dist <= 80:
-            biome = "ruined_settlement"
-            desc = (
+            ),
+            "ruined_settlement": (
                 "The skeleton of an old settlement: collapsed walls, buckled frames and rubble. "
                 "Weeds and rust claim what's left. Nothing here has answered in a long time."
-            )
-        else:
-            biome = "volcanic"
-            desc = (
+            ),
+            "volcanic": (
                 "The ground here is dark and glassy, fissured with old lava flows. Heat shimmers "
                 "from vents in the rock, and the air stinks of sulfur and scorched metal."
-            )
+            ),
+        }
+        desc = _BIOME_DESCS.get(biome, _BIOME_DESCS["harshlands"])
 
         # Always set the room description for this coordinate.
         room.db.desc = desc
@@ -269,4 +349,46 @@ class ColonyWildernessProvider(wilderness.WildernessMapProvider):
                 room.tags.add(f"scavenge_{biome}")
         except Exception:
             pass
+
+        # Register biome with the wilderness graph for region queries and routing.
+        try:
+            from world.wilderness_graph import set_coord_biome
+            set_coord_biome(coords, biome)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# APScheduler job registration
+# ---------------------------------------------------------------------------
+
+def _refresh_wilderness_scavenge_density():
+    """
+    Invalidate the wilderness graph cache so biome regions are recalculated
+    on next access. Also clears stale scavenge density caches if any exist.
+    Runs daily at 06:00 UTC via APScheduler.
+    """
+    try:
+        from world.wilderness_graph import invalidate_wilderness_graph
+        invalidate_wilderness_graph()
+    except Exception:
+        pass
+
+
+def register_wilderness_jobs(sched):
+    """
+    Register wilderness APScheduler jobs.
+    Called by world/scheduler.py register_all_jobs().
+
+    Args:
+        sched: A running APScheduler BackgroundScheduler instance.
+    """
+    sched.add_job(
+        _refresh_wilderness_scavenge_density,
+        trigger="cron",
+        hour=6,
+        minute=0,
+        id="wilderness_scavenge_density_refresh",
+        replace_existing=True,
+    )
 

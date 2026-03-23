@@ -170,9 +170,20 @@ def get_npc_template(key):
     """Return template dict (name, stats, skills) for key, or None. Randomized templates are built fresh each call."""
     k = (key or "").strip().lower()
     builder = NPC_TEMPLATE_BUILDERS.get(k)
-    if builder:
-        return builder()
-    return None
+    if not builder:
+        return None
+    raw = builder()
+    if not raw:
+        return None
+    try:
+        from world.rpg.npc_template_schema import validate_npc_template
+        return validate_npc_template(raw)
+    except Exception as exc:
+        import logging
+        logging.getLogger("evennia").warning(
+            f"[npc_templates] Template '{key}' failed schema validation: {exc}"
+        )
+        return raw
 
 
 def apply_npc_template(npc, template_key, template=None):
@@ -181,8 +192,13 @@ def apply_npc_template(npc, template_key, template=None):
         template = get_npc_template(template_key)
     if not template or not npc or not hasattr(npc, "db"):
         return False
-    npc.db.stats = dict(template["stats"])
-    npc.db.skills = dict(template["skills"])
+    _stats = dict(template["stats"])
+    _skills = dict(template["skills"])
+    npc.db.stats = _stats
+    npc.db.skills = _skills
+    from world.rpg.trait_sync import sync_stats_to_traits, sync_skills_to_traits
+    sync_stats_to_traits(npc, _stats)
+    sync_skills_to_traits(npc, _skills)
     npc.db.needs_chargen = False
     # Wake vitals so max_hp/stamina are computed
     _ = getattr(npc, "hp", None)

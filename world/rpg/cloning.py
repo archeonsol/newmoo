@@ -114,9 +114,15 @@ def apply_clone_snapshot(character, snapshot):
         return
     character.key = snapshot.get("key", character.key)
     if "stats" in snapshot:
-        character.db.stats = dict(snapshot["stats"])
+        _stats = dict(snapshot["stats"])
+        character.db.stats = _stats
+        from world.rpg.trait_sync import sync_stats_to_traits
+        sync_stats_to_traits(character, _stats)
     if "skills" in snapshot:
-        character.db.skills = dict(snapshot["skills"])
+        _skills = dict(snapshot["skills"])
+        character.db.skills = _skills
+        from world.rpg.trait_sync import sync_skills_to_traits
+        sync_skills_to_traits(character, _skills)
     if "body_descriptions" in snapshot:
         character.db.body_descriptions = dict(snapshot["body_descriptions"])
     if "race" in snapshot:

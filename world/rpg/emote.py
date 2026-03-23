@@ -1,5 +1,23 @@
-import re
+try:
+    import regex as re
+except ImportError:
+    import re
 from collections import defaultdict
+
+try:
+    import pyinflect as _pyinflect
+    _PYINFLECT_AVAILABLE = True
+except ImportError:
+    _pyinflect = None
+    _PYINFLECT_AVAILABLE = False
+
+try:
+    import inflect as _inflect_mod
+    _INFLECT_ENGINE = _inflect_mod.engine()
+    _INFLECT_AVAILABLE = True
+except ImportError:
+    _INFLECT_ENGINE = None
+    _INFLECT_AVAILABLE = False
 
 PRONOUN_MAP = {
     "male": ("he", "his", "him"),
@@ -8,19 +26,57 @@ PRONOUN_MAP = {
     "nonbinary": ("they", "their", "them"),
 }
 
+# "be" conjugation by subject pronoun for present and past tense.
+_BE_PRESENT = {"he": "is", "she": "is", "they": "are"}
+_BE_PAST    = {"he": "was", "she": "was", "they": "were"}
+
+# First-person → second-person substitutions (order matters: longer patterns first).
+# Covers contractions, auxiliaries, and bare pronouns.
 FIRST_TO_SECOND_MAP = [
-    (r"\bI'm\b", "you're"), (r"\bI am\b", "you are"),
-    (r"\bI've\b", "you've"), (r"\bI have\b", "you have"),
-    (r"\bI\b", "you"), (r"\bmy\b", "your"), (r"\bme\b", "you"),
+    # Contractions
+    (r"\bI'm\b",    "you're"),
+    (r"\bI've\b",   "you've"),
+    (r"\bI'll\b",   "you'll"),
+    (r"\bI'd\b",    "you'd"),
+    # Auxiliary phrases (order: longer first)
+    (r"\bI am\b",   "you are"),
+    (r"\bI was\b",  "you were"),
+    (r"\bI were\b", "you were"),
+    (r"\bI will\b", "you will"),
+    (r"\bI have\b", "you have"),
+    (r"\bI had\b",  "you had"),
+    (r"\bI would\b","you would"),
+    (r"\bI could\b","you could"),
+    (r"\bI should\b","you should"),
+    (r"\bI can\b",  "you can"),
+    (r"\bI did\b",  "you did"),
+    (r"\bI do\b",   "you do"),
+    # Bare pronouns (last so they don't shadow the phrases above)
+    (r"\bI\b",      "you"),
+    (r"\bmy\b",     "your"),
+    (r"\bme\b",     "you"),
     (r"\bmyself\b", "yourself"),
+    (r"\bmine\b",   "yours"),
 ]
 
+# Fast-path table for common irregular verbs; also used as fallback when
+# pyinflect is unavailable or returns no result.
 IRREGULAR_VERBS = {
-    "have": "has", "do": "does", "go": "goes", "be": "is", "am": "is", "are": "is"
+    "have": "has", "do": "does", "go": "goes", "be": "is", "am": "is", "are": "is",
+    "say": "says", "try": "tries", "fly": "flies", "buy": "buys", "lay": "lays",
+    "pay": "pays", "play": "plays", "stay": "stays", "pray": "prays",
 }
 
+# Auxiliary verbs that must never be conjugated as bare verbs.
+# These appear after pronoun substitution and should be left alone.
+_AUXILIARIES = frozenset({
+    "is", "are", "was", "were", "will", "would", "could", "should",
+    "can", "may", "might", "shall", "must", "had", "has", "have",
+    "did", "does", "do", "been", "being",
+})
 
-def first_to_second(text):
+
+def first_to_second(text: str) -> str:
     """Convert first-person text to second person for the emitter's echo (I→you, my→your, etc.)."""
     if not text:
         return text
@@ -30,36 +86,158 @@ def first_to_second(text):
     return result
 
 
-def _conjugate(word):
+def _conjugate(word: str) -> str:
+    """
+    Return the third-person singular present form of a verb (e.g. 'grin' → 'grins').
+
+    Uses pyinflect (Penn Treebank VBZ tag) when available for accurate handling of
+    irregular and edge-case verbs. Falls back to the hand-rolled suffix rules when
+    pyinflect is not installed or returns no result.
+
+    Auxiliary verbs (is, are, was, were, will, would, etc.) are returned unchanged
+    since they are already in the correct form after pronoun substitution.
+    """
+    if not word:
+        return word
     lower = word.lower()
-    if lower in IRREGULAR_VERBS: return IRREGULAR_VERBS[lower]
-    if lower.endswith(("s", "sh", "ch", "x", "z")): return word + "es"
+
+    # Auxiliaries are never conjugated — they are already correct after pronoun sub.
+    if lower in _AUXILIARIES:
+        return word
+
+    # Fast path: known irregulars (zero-import fallback, also catches 'be'/'am'/'are')
+    if lower in IRREGULAR_VERBS:
+        result = IRREGULAR_VERBS[lower]
+        return result.capitalize() if word[0].isupper() else result
+
+    # pyinflect path: VBZ = third-person singular present
+    if _PYINFLECT_AVAILABLE:
+        try:
+            inflected = _pyinflect.getInflection(lower, tag="VBZ")
+            if inflected:
+                result = inflected[0]
+                return result.capitalize() if word[0].isupper() else result
+        except Exception:
+            pass
+
+    # Fallback: hand-rolled suffix rules
+    if lower.endswith(("s", "sh", "ch", "x", "z")):
+        return word + "es"
     if lower.endswith("y") and len(lower) > 1 and lower[-2] not in "aeiou":
         return word[:-1] + "ies"
     return word + "s"
 
-def first_to_third(text, character):
+
+def _article_for(word: str) -> str:
+    """
+    Return 'a' or 'an' for the given word based on its initial sound.
+    Uses inflect.engine().a() when available.
+    """
+    if not word:
+        return "a"
+    w = str(word).strip()
+    if not w:
+        return "a"
+    if _INFLECT_AVAILABLE:
+        try:
+            result = _INFLECT_ENGINE.a(w)
+            return result.split()[0]
+        except Exception:
+            pass
+    lower = w.lower()
+    if lower[0] in "aeiou":
+        return "an"
+    return "a"
+
+
+def _possessive(name: str) -> str:
+    """
+    Return the possessive form of a name.
+    Uses inflect.engine().possessive() when available (handles 'James' → "James'",
+    'Chris' → "Chris's" per style guide). Falls back to simple "'s" append.
+    """
+    if not name:
+        return name
+    if _INFLECT_AVAILABLE:
+        try:
+            return _INFLECT_ENGINE.possessive(name)
+        except Exception:
+            pass
+    # Fallback: add 's (always — simpler and consistent)
+    return name + "'s"
+
+def first_to_third(text: str, character) -> str:
+    """
+    Convert first-person emote text to third-person for other viewers.
+
+    Handles:
+    - Pronoun substitution (I→he/she/they, my→his/her/their, me→him/her/them)
+    - Reflexive pronouns (myself→himself/herself/themself)
+    - Contractions (I'm→he's/she's/they're, I've→he's/she's/they've,
+                    I'll→he'll/she'll/they'll, I'd→he'd/she'd/they'd)
+    - Auxiliary phrases (I am→he is/she is/they are, I was→he was/she was/they were,
+                         I will→he will, I have→he has/she has/they have,
+                         I had→he had, I would→he would, I could→he could,
+                         I should→he should, I can→he can, I did→he did)
+    - Verb conjugation: first word conjugated to third-person singular present
+      unless suppressed by leading comma. Mid-string .verb syntax still works.
+    - Quote protection: text inside "..." is left verbatim.
+    """
     # 1. Quote protection: content in "..." is character speech, leave verbatim
     quotes = re.findall(r'"([^"]*)"', text)
     quote_map = {f"__Q{i}__": f'"{q}"' for i, q in enumerate(quotes)}
     for placeholder, original in quote_map.items():
         text = text.replace(original, placeholder)
 
-    # 2. Pronoun Conversion
+    # 2. Pronoun setup
     key = (getattr(character.db, "pronoun", "neutral") or "neutral").lower()
     sub, poss, obj = PRONOUN_MAP.get(key, PRONOUN_MAP["neutral"])
     reflexive = {"he": "himself", "she": "herself", "they": "themself"}.get(sub, "themself")
-    # "I'm" -> "he's" / "she's" / "they're" (not "they's")
+
+    # Derive "be" forms for this subject
+    be_present = _BE_PRESENT.get(sub, "is")   # "is" / "are"
+    be_past    = _BE_PAST.get(sub, "was")      # "was" / "were"
+
+    # "have" present: "has" for he/she, "have" for they
+    have_present = "have" if sub == "they" else "has"
+
+    # 2a. Contractions (order: longer/more specific first)
+    # I'm → he's / she's / they're
     im_contraction = f"{sub}'re" if sub == "they" else f"{sub}'s"
     text = re.sub(r"\bI'm\b", im_contraction, text, flags=re.IGNORECASE)
+    # I've → he's / she's / they've  (present perfect contraction)
+    ive_contraction = f"{sub}'ve" if sub == "they" else f"{sub}'s"
+    text = re.sub(r"\bI've\b", ive_contraction, text, flags=re.IGNORECASE)
+    # I'll → he'll / she'll / they'll
+    text = re.sub(r"\bI'll\b", f"{sub}'ll", text, flags=re.IGNORECASE)
+    # I'd → he'd / she'd / they'd
+    text = re.sub(r"\bI'd\b", f"{sub}'d", text, flags=re.IGNORECASE)
+
+    # 2b. Auxiliary phrases (longer patterns first to avoid partial matches)
+    text = re.sub(r"\bI am\b",     f"{sub} {be_present}",   text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI was\b",    f"{sub} {be_past}",      text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI were\b",   f"{sub} {be_past}",      text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI will\b",   f"{sub} will",           text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI have\b",   f"{sub} {have_present}", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI had\b",    f"{sub} had",            text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI would\b",  f"{sub} would",          text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI could\b",  f"{sub} could",          text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI should\b", f"{sub} should",         text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI can\b",    f"{sub} can",            text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI did\b",    f"{sub} did",            text, flags=re.IGNORECASE)
+    text = re.sub(r"\bI do\b",     f"{sub} does" if sub != "they" else f"{sub} do",
+                  text, flags=re.IGNORECASE)
+
+    # 2c. Bare pronouns (last — must come after auxiliary phrases)
     text = re.sub(r"\bI\b", sub, text, flags=re.IGNORECASE)
     text = re.sub(r"\bmy\b", poss, text, flags=re.IGNORECASE)
     text = re.sub(r"\bme\b", obj, text, flags=re.IGNORECASE)
-    # Reflexive pronoun: "myself" -> character-appropriate reflexive.
-    # Also prevents the later first-word conjugation step from mangling it.
+    text = re.sub(r"\bmine\b", f"{poss}s" if poss not in ("their",) else "theirs",
+                  text, flags=re.IGNORECASE)
+    # Reflexive: "myself" → "himself" / "herself" / "themself"
     text = re.sub(
         r"\bmyself\b",
-        lambda m: reflexive.capitalize() if m.group(0) and m.group(0)[0].isupper() else reflexive,
+        lambda m: reflexive.capitalize() if m.group(0)[0].isupper() else reflexive,
         text,
         flags=re.IGNORECASE,
     )
@@ -69,24 +247,30 @@ def first_to_third(text, character):
     if text.lstrip().startswith(","):
         text = text.lstrip()[1:].lstrip()
         skip_first_conjugate = True
-    # Leading ".word" (dot-verb): strip the dot so first-word conjugation runs; handles ".grin" -> "grins"
+    # Leading ".word" (dot-verb): strip the dot so first-word conjugation runs
     if not skip_first_conjugate and text.lstrip().startswith("."):
         text = text.lstrip().lstrip(".").lstrip()
+
+    # Mid-string " .verb" → conjugated verb (space-dot-word)
     def conjugate_dot_verb(match):
         return " " + _conjugate(match.group(1))
     text = re.sub(r" \.\s*(\w+)", conjugate_dot_verb, text)
-    # Mid-string ".word" already handled above; leading was stripped so first word gets conjugated below
+
+    # First-word conjugation (unless suppressed by comma)
     words = text.split()
-    pronouns = {sub, poss, obj, "they", "their", "them", reflexive, "himself", "herself", "themself"}
+    pronouns = {sub, poss, obj, "they", "their", "them", reflexive,
+                "himself", "herself", "themself", "theirs"}
     if not skip_first_conjugate and words:
         first = words[0]
-        # First token may have trailing punctuation (e.g. "grin," from ".grin, looking at Bob")
         alpha_part = first.rstrip(".,;:!?") or first
-        if alpha_part and alpha_part.isalpha() and "__Q" not in alpha_part and alpha_part.lower() not in pronouns:
+        if (alpha_part
+                and alpha_part.isalpha()
+                and "__Q" not in alpha_part
+                and alpha_part.lower() not in pronouns):
             words[0] = _conjugate(alpha_part) + first[len(alpha_part):]
     text = " ".join(words)
 
-    # 4. Restore Quotes
+    # 4. Restore quotes
     for placeholder, original in quote_map.items():
         text = text.replace(placeholder, original)
     return text
@@ -364,7 +548,7 @@ def build_emote_for_viewer(text, viewer, targets):
     except ImportError:
         get_display_name_for_viewer = lambda c, v: getattr(c, "key", str(c))
         format_ic_character_name = lambda c, v, p: p
-        format_ic_character_name_possessive = lambda c, v, p: (p or "") + "'s"
+        format_ic_character_name_possessive = lambda c, v, p: _possessive(p or "")
     # Use (?<!\w)(?!\w) instead of \b so "1-average" etc. are replaced correctly (Python \b + digits+hyphen is unreliable)
     for matched_name, char in sorted(targets, key=lambda t: -len(t[0])):
         if char == viewer:
@@ -374,6 +558,7 @@ def build_emote_for_viewer(text, viewer, targets):
         else:
             plain = get_display_name_for_viewer(char, viewer)
             replacement = format_ic_character_name(char, viewer, plain)
+            # Use inflect-backed possessive: "James" → "James'", "Chris" → "Chris's"
             repl_poss = format_ic_character_name_possessive(char, viewer, plain)
             text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", repl_poss, text, flags=re.IGNORECASE)
             text = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, text, flags=re.IGNORECASE)

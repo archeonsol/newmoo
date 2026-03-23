@@ -130,11 +130,9 @@ def run_bioscan(character, exit_obj):
     if staff_bypass(character):
         return True, "Staff override accepted."
 
-    now = time.time()
-    last = getattr(character.ndb, "_last_bioscan", 0) or 0
-    if now - last < 3:
+    if not character.cooldowns.ready("bioscan"):
         return False, "Scanner cycling. Wait."
-    character.ndb._last_bioscan = now
+    character.cooldowns.add("bioscan", 3)
 
     scan_type = getattr(exit_obj.db, "bioscan_type", None) or "faction"
 

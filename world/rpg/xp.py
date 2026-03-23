@@ -11,6 +11,26 @@ import time
 from world.constants import SKILL_XP_CURVE_LATE
 from world.levels import MAX_LEVEL, MAX_STAT_LEVEL, letter_to_level_range
 
+try:
+    from boltons.mathutils import clamp as _clamp
+except ImportError:
+    def _clamp(val, lower=None, upper=None):
+        if lower is not None:
+            val = max(lower, val)
+        if upper is not None:
+            val = min(upper, val)
+        return val
+
+try:
+    from boltons.cacheutils import LRU as _LRU
+    _stat_level_cache = _LRU(max_size=256)
+    _skill_level_cache = _LRU(max_size=256)
+    _LRU_AVAILABLE = True
+except ImportError:
+    _stat_level_cache = None
+    _skill_level_cache = None
+    _LRU_AVAILABLE = False
+
 
 # Time-based drip: 2 XP per 6-hour window, max 4 drops per 24h = 8 XP/day
 DROP_XP = 2
@@ -92,15 +112,22 @@ def total_xp_for_stat(stored_level):
 # Character helpers (stored levels; display = stored // 2 for stats)
 # -----------------------------------------------------------------------------
 def _stat_level(character, stat_key):
-    """Return stored stat level 0-300."""
+    """Return stored stat level 0-300. Reads from TraitHandler first, falls back to db.stats dict."""
     from world.rpg.chargen import STAT_KEYS
     if stat_key not in STAT_KEYS:
         return 0
+    # Traits path (post-migration): trait_stats handler stores base 0-300
+    handler = getattr(character, "trait_stats", None)
+    if handler is not None:
+        trait = handler.get(stat_key)
+        if trait is not None:
+            return _clamp(int(trait.base or 0), 0, MAX_STAT_LEVEL)
+    # Legacy fallback: raw db.stats dict
     stats = getattr(character.db, "stats", None) or {}
     val = stats.get(stat_key, 0)
     if isinstance(val, int):
         # Stored in DB is always 0-300; no legacy scale conversion (would double new writes).
-        return max(0, min(MAX_STAT_LEVEL, val))
+        return _clamp(val, 0, MAX_STAT_LEVEL)
     lo, hi = letter_to_level_range(str(val).upper() if val else "U", MAX_STAT_LEVEL)
     return (lo + hi) // 2
 
@@ -113,25 +140,39 @@ def _stat_display_level(character, stat_key):
 
 
 def _skill_level(character, skill_key):
-    """Return current skill level 0-150 (stored = display)."""
+    """Return current skill level 0-150 (stored = display). Reads from TraitHandler first, falls back to db.skills dict."""
     from world.skills import SKILL_KEYS
     if skill_key not in SKILL_KEYS:
         return 0
+    # Traits path (post-migration): trait_skills handler stores base 0-150
+    handler = getattr(character, "trait_skills", None)
+    if handler is not None:
+        trait = handler.get(skill_key)
+        if trait is not None:
+            return _clamp(int(trait.base or 0), 0, MAX_LEVEL)
+    # Legacy fallback: raw db.skills dict
     skills = getattr(character.db, "skills", None) or {}
     val = skills.get(skill_key, 0)
     if isinstance(val, int):
-        return max(0, min(MAX_LEVEL, val))
+        return _clamp(val, 0, MAX_LEVEL)
     lo, hi = letter_to_level_range(str(val).upper() if val else "U", MAX_LEVEL)
     return (lo + hi) // 2
 
 
 def _stat_cap_level(character, stat_key):
-    """Return stat cap as stored 0-300."""
+    """Return stat cap as stored 0-300. Reads from TraitHandler first, falls back to db.stat_caps dict."""
+    # Traits path (post-migration): cap stored as "cap_<stat_key>" in trait_stats handler
+    handler = getattr(character, "trait_stats", None)
+    if handler is not None:
+        trait = handler.get(f"cap_{stat_key}")
+        if trait is not None:
+            return _clamp(int(trait.base or MAX_STAT_LEVEL), 0, MAX_STAT_LEVEL)
+    # Legacy fallback: raw db.stat_caps dict
     caps = getattr(character.db, "stat_caps", None) or {}
     val = caps.get(stat_key, MAX_STAT_LEVEL)
     if isinstance(val, int):
         # Cap in DB is always 0-300; no legacy scale conversion.
-        return max(0, min(MAX_STAT_LEVEL, val))
+        return _clamp(val, 0, MAX_STAT_LEVEL)
     lo, hi = letter_to_level_range(str(val).upper() if val else "A", MAX_STAT_LEVEL)
     return hi
 
@@ -215,3 +256,46 @@ def grant_pending_xp(character):
     character.db.xp_drop_window_ids = drop_window_ids
     character.db.xp = xp + total_grant
     return total_grant, drops_used
+
+
+# ---------------------------------------------------------------------------
+# APScheduler job registration
+# ---------------------------------------------------------------------------
+
+def _daily_xp_catchup():
+    """
+    Grant catch-up XP to all online characters who missed drops while offline.
+    Runs daily at midnight UTC via APScheduler.
+    """
+    try:
+        from evennia import SESSION_HANDLER
+        for session in SESSION_HANDLER.get_sessions():
+            try:
+                char = session.get_puppet()
+                if not char:
+                    continue
+                granted, _ = grant_pending_xp(char)
+                if granted:
+                    char.msg(f"|g[XP] Daily catch-up: +{granted} XP.|n")
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def register_xp_jobs(sched):
+    """
+    Register XP APScheduler jobs.
+    Called by world/scheduler.py register_all_jobs().
+
+    Args:
+        sched: A running APScheduler BackgroundScheduler instance.
+    """
+    sched.add_job(
+        _daily_xp_catchup,
+        trigger="cron",
+        hour=0,
+        minute=5,
+        id="xp_daily_catchup",
+        replace_existing=True,
+    )

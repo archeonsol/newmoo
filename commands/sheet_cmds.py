@@ -5,7 +5,7 @@ Character sheet-style commands available to all players.
 from commands.base_cmds import Command
 from evennia.utils import logger
 from evennia.utils.utils import inherits_from
-from world.ui_utils import fade_rule
+from world.ui_utils import fade_rule, display_ljust, naturaltime
 
 
 class CmdStats(Command):
@@ -76,14 +76,14 @@ class CmdStats(Command):
 
                 ts = snapshot["fragmented_at"]
                 dt = datetime.utcfromtimestamp(ts) if isinstance(ts, (int, float)) else ts
-                fragmented_str = dt.strftime("%Y-%m-%d %H:%M") + " UTC"
+                fragmented_str = naturaltime(dt)
             except Exception as e:
                 logger.log_trace("sheet_cmds.CmdStats fragmented_at format: %s" % e)
 
         w = 50
         output = "|x┌" + fade_rule(w - 2, "─") + "|n\n"
-        output += "|x│|n |R■|n |wSOUL READOUT|n  |x—|n  " + display_name.ljust(18) + "\n"
-        output += "|x│|n   |wRace|n " + race_line.ljust(w - 12) + "\n"
+        output += "|x│|n |R■|n |wSOUL READOUT|n  |x—|n  " + display_ljust(display_name, 18) + "\n"
+        output += "|x│|n   |wRace|n " + display_ljust(race_line, w - 12) + "\n"
         try:
             age_y = getattr(_db, "age_years", None)
             if age_y is not None:
@@ -98,9 +98,9 @@ class CmdStats(Command):
         except Exception as e:
             logger.log_trace("sheet_cmds.CmdStats height/weight: %s" % e)
         output += "|x├" + fade_rule(w - 2, "─") + "|n\n"
-        output += "|x│|n |wXP|n " + str(xp).ljust(w - 10) + "\n"
+        output += "|x│|n |wXP|n " + display_ljust(str(xp), w - 10) + "\n"
         if fragmented_str:
-            output += "|x│|n |wLast fragmented|n " + fragmented_str.ljust(w - 21) + "\n"
+            output += "|x│|n |wLast fragmented|n " + display_ljust(fragmented_str, w - 21) + "\n"
         try:
             if hasattr(data_source, "get_faction_display"):
                 output += "|x│|n |wFactions|n " + str(data_source.get_faction_display()) + "\n"

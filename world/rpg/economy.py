@@ -21,6 +21,14 @@ Transaction log entry shape:
 
 import time
 
+try:
+    from num2words import num2words as _n2w
+    _NUM2WORDS_AVAILABLE = True
+except ImportError:
+    _NUM2WORDS_AVAILABLE = False
+
+from world.ui_utils import naturaltime as _format_relative_time
+
 # ---------------------------------------------------------------------------
 # IC currency name — change this single constant to rename the currency.
 # ---------------------------------------------------------------------------
@@ -52,12 +60,35 @@ def format_currency_plain(amount):
     return format_currency(amount, color=False)
 
 
+def format_currency_words(amount: int) -> str:
+    """
+    Return a narrative/IC prose string for an amount of currency.
+    e.g. format_currency_words(1500) -> "fifteen hundred script"
+    Used only for IC narrative messages, never for bank/UI displays.
+    """
+    if _NUM2WORDS_AVAILABLE:
+        try:
+            return f"{_n2w(int(amount))} {CURRENCY_NAME}"
+        except Exception:
+            pass
+    return f"{int(amount)} {CURRENCY_NAME}"
+
+
 # ---------------------------------------------------------------------------
 # Transaction log
 # ---------------------------------------------------------------------------
 
 def _append_transaction(character, entry):
-    """Append a transaction entry to the character's rolling log."""
+    """Append a transaction entry to the character's rolling log.
+    Validates via cattrs if available; always stores as plain dict."""
+    # Validate via cattrs structure/unstructure — falls back silently.
+    try:
+        from world.structs import structure_transaction, unstructure_transaction
+        typed = structure_transaction(entry)
+        if typed is not None:
+            entry = unstructure_transaction(typed)
+    except Exception:
+        pass
     log = list(character.db.transaction_log or [])
     log.append(entry)
     if len(log) > TRANSACTION_LOG_SIZE:
@@ -192,7 +223,7 @@ def format_transaction_log(character, limit=TRANSACTION_LOG_SIZE):
         _box_line("─"),
     ]
     for entry in reversed(log[-limit:]):
-        t = time.strftime("%m/%d %H:%M", time.localtime(entry.get("time", 0)))
+        t = _format_relative_time(entry.get("time", 0))
         label = _TX_TYPE_LABELS.get(entry.get("type", ""), f"  {entry.get('type','?'):<8}")
         amt = format_currency(entry.get("amount", 0))
         party = entry.get("party", "")

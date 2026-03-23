@@ -158,18 +158,29 @@ def _text_has_markup(text):
 
 
 def format_ic_character_name_possessive(character, viewer, plain_name):
-    """Like format_ic_character_name but for possessive (Name's)."""
+    """
+    Like format_ic_character_name but for possessive (Name's / James' / Chris's).
+    Uses inflect.engine().possessive() for correct apostrophe placement.
+    """
     if not plain_name:
         return plain_name or ""
-    poss = f"{plain_name}'s"
+    # Build the possessive suffix via inflect when available
+    try:
+        import inflect as _inflect_mod
+        _eng = _inflect_mod.engine()
+        poss_plain = _eng.possessive(plain_name)
+    except Exception:
+        poss_plain = f"{plain_name}'s"
     if viewer is None or viewer == character:
-        return poss
+        return poss_plain
     if _text_has_markup(plain_name):
-        return poss
+        return poss_plain
+    # Strip the bare name from the possessive to get just the suffix (e.g. "'s" or "'")
+    suffix = poss_plain[len(plain_name):]
     skin = getattr(character.db, "skin_tone_code", None) if hasattr(character, "db") else None
     if skin:
-        return f"{skin}{plain_name}'s|n"
-    return f"{DEFAULT_IC_NAME_COLOR}{plain_name}'s|n"
+        return f"{skin}{plain_name}|n{suffix}"
+    return f"{DEFAULT_IC_NAME_COLOR}{plain_name}|n{suffix}"
 
 
 def format_ic_character_name(character, viewer, plain_name):

@@ -49,6 +49,16 @@ RANK_TABLES = {
     },
 }
 
+# Validate all rank tables at import time via pydantic.
+try:
+    from world.rpg.factions.schemas import validate_rank_tables as _validate_rank_tables
+    RANK_TABLES = _validate_rank_tables(RANK_TABLES)
+except Exception as _rank_schema_exc:
+    import logging as _logging
+    _logging.getLogger("evennia").warning(
+        f"[factions] Rank table schema validation failed, using raw RANK_TABLES: {_rank_schema_exc}"
+    )
+
 
 def get_rank_table(table_key):
     """Return the rank table dict for a faction type."""
@@ -71,6 +81,27 @@ def get_max_rank(table_key):
     """Return the highest rank number in a table."""
     table = get_rank_table(table_key)
     return max(table.keys()) if table else 1
+
+
+try:
+    from num2words import num2words as _n2w
+    _NUM2WORDS_AVAILABLE = True
+except ImportError:
+    _NUM2WORDS_AVAILABLE = False
+
+
+def get_rank_ordinal(rank_number: int) -> str:
+    """Return an ordinal word for a rank number, e.g. 3 -> 'third rank'."""
+    if _NUM2WORDS_AVAILABLE:
+        try:
+            return f"{_n2w(int(rank_number), to='ordinal')} rank"
+        except Exception:
+            pass
+    suffixes = {1: "st", 2: "nd", 3: "rd"}
+    suffix = suffixes.get(rank_number % 10, "th")
+    if 11 <= (rank_number % 100) <= 13:
+        suffix = "th"
+    return f"{rank_number}{suffix} rank"
 
 
 def get_rank_name(table_key, rank_number):

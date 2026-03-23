@@ -39,18 +39,20 @@ def can_collect_pay(character, faction_key):
     if pay_amount <= 0:
         return False, "Your rank does not include pay.", 0
 
-    joined = (character.db.faction_joined or {}).get(fdata["key"])
-    if joined and (time.time() - joined) < FIRST_PAY_DELAY_SECONDS:
-        remaining_hours = int((FIRST_PAY_DELAY_SECONDS - (time.time() - joined)) / 3600)
+    # First-pay delay: new members must wait before collecting.
+    first_cd_key = f"pay_first_{fdata['key']}"
+    if not character.cooldowns.ready(first_cd_key):
+        remaining = character.cooldowns.time_left(first_cd_key)
+        remaining_hours = int(remaining / 3600)
         return False, f"New member. First pay available in {remaining_hours}h.", 0
 
-    last_collected = (character.db.faction_pay_collected or {}).get(fdata["key"])
-    if last_collected:
-        elapsed = time.time() - last_collected
-        if elapsed < PAY_COOLDOWN_SECONDS:
-            remaining_days = int((PAY_COOLDOWN_SECONDS - elapsed) / 86400)
-            remaining_hours = int(((PAY_COOLDOWN_SECONDS - elapsed) % 86400) / 3600)
-            return False, f"Next pay in {remaining_days}d {remaining_hours}h.", 0
+    # Weekly pay cooldown gate (CooldownHandler is authoritative; db.faction_pay_collected kept for display).
+    pay_cd_key = f"pay_{fdata['key']}"
+    if not character.cooldowns.ready(pay_cd_key):
+        remaining = character.cooldowns.time_left(pay_cd_key)
+        remaining_days = int(remaining / 86400)
+        remaining_hours = int((remaining % 86400) / 3600)
+        return False, f"Next pay in {remaining_days}d {remaining_hours}h.", 0
 
     return True, "Pay available.", pay_amount
 
@@ -72,6 +74,10 @@ def collect_pay(character, faction_key):
     from world.rpg.economy import add_funds
     add_funds(character, amount, party=fdata["name"], reason="faction pay")
 
+    # Set weekly cooldown (authoritative gate).
+    character.cooldowns.add(f"pay_{fdata['key']}", PAY_COOLDOWN_SECONDS)
+
+    # Keep db.faction_pay_collected for display purposes (terminal shows last pay date).
     pay_times = character.db.faction_pay_collected or {}
     pay_times[fdata["key"]] = time.time()
     character.db.faction_pay_collected = pay_times
@@ -84,3 +90,77 @@ def collect_pay(character, faction_key):
     )
 
     return True, f"Collected {amount} from {fdata['name']}.", amount
+
+
+# ---------------------------------------------------------------------------
+# APScheduler job registration
+# ---------------------------------------------------------------------------
+
+def _weekly_faction_pay_announcement():
+    """
+    Broadcast weekly pay availability to all online faction members.
+    Runs once per week via APScheduler (registered in world/scheduler.py).
+    """
+    try:
+        from evennia import SESSION_HANDLER
+        from world.rpg.factions import get_character_factions
+        for session in SESSION_HANDLER.get_sessions():
+            try:
+                char = session.get_puppet()
+                if not char:
+                    continue
+                factions = get_character_factions(char)
+                if factions:
+                    char.msg("|g[FACTION] Weekly pay is now available at your faction terminal.|n")
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def _weekly_faction_economy_log_flush():
+    """
+    Flush/archive faction economy log entries older than 30 days.
+    Runs once per day via APScheduler.
+    """
+    import time as _time
+    cutoff = _time.time() - (30 * 24 * 3600)
+    try:
+        from typeclasses.characters import Character
+        for char in Character.objects.all():
+            try:
+                log = getattr(char.db, "faction_log", None)
+                if not log:
+                    continue
+                trimmed = [e for e in log if e.get("timestamp", 0) >= cutoff]
+                if len(trimmed) != len(log):
+                    char.db.faction_log = trimmed
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def register_pay_jobs(sched):
+    """
+    Register faction pay APScheduler jobs.
+    Called by world/scheduler.py register_all_jobs().
+
+    Args:
+        sched: A running APScheduler BackgroundScheduler instance.
+    """
+    sched.add_job(
+        _weekly_faction_pay_announcement,
+        trigger="interval",
+        weeks=1,
+        id="faction_pay_weekly_announcement",
+        replace_existing=True,
+    )
+    sched.add_job(
+        _weekly_faction_economy_log_flush,
+        trigger="cron",
+        hour=1,
+        minute=0,
+        id="faction_economy_log_flush",
+        replace_existing=True,
+    )

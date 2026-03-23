@@ -10,18 +10,37 @@ from evennia.utils import logger
 _VOID_UNSET = object()
 _void_room_id_cache = _VOID_UNSET
 
+_VOID_CACHE_KEY = "exit_traversal:void_room_id"
+
 
 def _get_void_room_id():
-    """Return the void room id (int or None), caching after the first DB read."""
+    """Return the void room id (int or None), caching after the first DB read.
+    Checks diskcache first so the value survives server reloads."""
     global _void_room_id_cache
     if _void_room_id_cache is not _VOID_UNSET:
         return _void_room_id_cache
+    # Try diskcache first
+    try:
+        from world.cache import get as _cache_get
+        cached = _cache_get(_VOID_CACHE_KEY, default=_VOID_UNSET)
+        if cached is not _VOID_UNSET:
+            _void_room_id_cache = cached
+            return _void_room_id_cache
+    except Exception:
+        pass
+    # Fall back to DB read
     try:
         from evennia.server.models import ServerConfig
         val = ServerConfig.objects.conf("VOID_ROOM_ID", default=None)
         _void_room_id_cache = int(val) if val is not None else None
     except Exception:
         _void_room_id_cache = None
+    # Persist to diskcache for future reloads
+    try:
+        from world.cache import set as _cache_set
+        _cache_set(_VOID_CACHE_KEY, _void_room_id_cache)
+    except Exception:
+        pass
     return _void_room_id_cache
 
 
@@ -29,6 +48,11 @@ def invalidate_void_room_id_cache():
     """Call this whenever VOID_ROOM_ID is changed in ServerConfig."""
     global _void_room_id_cache
     _void_room_id_cache = _VOID_UNSET
+    try:
+        from world.cache import delete as _cache_delete
+        _cache_delete(_VOID_CACHE_KEY)
+    except Exception:
+        pass
 
 
 def precheck_exit_traversal(exit_obj, traversing_object, destination):

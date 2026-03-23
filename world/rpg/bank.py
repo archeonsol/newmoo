@@ -20,6 +20,14 @@ EvMenu entry point: start_bank_menu(caller, terminal)
 
 import time
 
+from evennia.utils.ansi import ANSIString
+
+try:
+    import arrow as _arrow
+    _ARROW_AVAILABLE = True
+except ImportError:
+    _ARROW_AVAILABLE = False
+
 from world.rpg.economy import (
     CURRENCY_NAME,
     TRANSACTION_LOG_SIZE,
@@ -28,6 +36,7 @@ from world.rpg.economy import (
     get_balance,
     _log_transaction,
 )
+from world.ui_utils import fade_rule
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -37,13 +46,15 @@ WIRE_FEE_PERCENT = 1          # 1% fee on wire transfers
 WIRE_MIN_FEE = 1              # Minimum fee in currency units
 WIRE_MAX_AMOUNT = 999_999     # Safety cap per single wire
 
-_W = 54                       # Box width (visible chars)
+_W = 68                       # Panel width (visible chars, matches terminal width)
 _N = "|n"
 _DIM = "|x"
 _LABEL = "|w"
 _ACCENT = "|c"               # Cyan accent for bank UI
+_GOLD = "|y"
 _WARN = "|y"
 _ERR = "|r"
+_OK = "|g"
 
 # ---------------------------------------------------------------------------
 # Account helpers
@@ -210,56 +221,98 @@ def _resolve_wire_recipient(network_id):
 
 
 # ---------------------------------------------------------------------------
-# UI helpers
+# UI helpers  (open-right-border pattern — no right ║ to avoid ANSI misalign)
 # ---------------------------------------------------------------------------
 
-def _hline(char="═"):
-    return f"{_ACCENT}{'═' * _W}{_N}"
+def _rule(ch="─", color=_DIM):
+    """Full-width horizontal rule."""
+    return f"{color}{ch * _W}{_N}"
 
 
-def _hline_thin():
-    return f"{_DIM}{'─' * _W}{_N}"
+def _fade(ch="─", color=_DIM):
+    """Left-solid, right-fading rule."""
+    return f"{color}{fade_rule(_W, ch)}{_N}"
 
 
-def _row(text, fill=" "):
-    from evennia.utils.ansi import strip_ansi
-    visible = len(strip_ansi(text))
-    pad = max(0, _W - 2 - visible)
-    return f"{_ACCENT}║{_N} {text}{fill * pad} {_ACCENT}║{_N}"
+def _panel_line(content="", indent=2):
+    """
+    Single panel row: left border + content, no right border.
+    Uses ANSIString so visible-length is measured correctly.
+    """
+    padded = ANSIString(f"{' ' * indent}{content}").ljust(_W - 1)
+    return f"{_ACCENT}│{_N}{padded}"
 
 
-def _header(title):
-    from evennia.utils.ansi import strip_ansi
-    visible = len(strip_ansi(title))
-    pad_total = max(0, _W - 2 - visible)
-    pad_l = pad_total // 2
-    pad_r = pad_total - pad_l
-    return (
-        f"{_hline()}\n"
-        f"{_ACCENT}║{_N}{' ' * pad_l}{title}{' ' * pad_r}{_ACCENT}║{_N}\n"
-        f"{_hline()}"
+def _panel_header(title, subtitle=None):
+    """
+    Decorative header block:
+      ╔══[ TITLE ]══ fading ──
+      ║  subtitle
+      ╟── fading ──
+    """
+    raw_title = f" {title} "
+    title_len = len(ANSIString(raw_title))
+    left_fill = 3
+    right_width = max(4, _W - 1 - left_fill - title_len)
+
+    top = (
+        f"{_ACCENT}╔{'═' * left_fill}"
+        f"[{_GOLD}{title}{_ACCENT}]"
+        f"{_DIM}{fade_rule(right_width, '═')}{_N}"
     )
+    lines = [top]
+
+    if subtitle:
+        lines.append(_panel_line(f"{_DIM}{subtitle}{_N}"))
+
+    lines.append(f"{_ACCENT}╟{_DIM}{fade_rule(_W - 1, '─')}{_N}")
+    return "\n".join(lines)
+
+
+def _panel_section(label):
+    """A dim in-panel section divider with a label."""
+    raw = f"── {label} "
+    raw_len = len(raw)
+    rest = max(0, _W - 1 - raw_len)
+    return f"{_DIM}{raw}{fade_rule(rest, '─')}{_N}"
+
+
+def _panel_kv(key, value, key_w=14):
+    """Key-value row inside a panel."""
+    key_str = f"{_LABEL}{key}{_N}"
+    return _panel_line(f"{key_str}{'.' * max(1, key_w - len(key))} {value}")
+
+
+def _panel_close():
+    return f"{_ACCENT}╚{_DIM}{fade_rule(_W - 1, '─')}{_N}"
 
 
 def _format_balance_panel(character):
     wallet = get_balance(character)
     bank = get_bank_balance(character) if has_account(character) else None
     opened = getattr(character.db, "bank_account_opened", None)
-    opened_str = time.strftime("%Y-%m-%d", time.localtime(opened)) if opened else "—"
+    if opened:
+        if _ARROW_AVAILABLE:
+            opened_str = _arrow.get(opened).format("YYYY-MM-DD")
+        else:
+            opened_str = time.strftime("%Y-%m-%d", time.localtime(opened))
+    else:
+        opened_str = "—"
 
     lines = [
-        _header(f"{_ACCENT}BANK OF THE FRAME{_N}"),
-        _row(""),
-        _row(f"{_LABEL}Account Holder:{_N}  {character.key}"),
-        _row(f"{_LABEL}Opened:{_N}          {_DIM}{opened_str}{_N}"),
-        _row(""),
-        _hline_thin(),
-        _row(f"{_LABEL}On Hand:{_N}   {format_currency(wallet)}"),
+        _panel_header("BANK OF THE FRAME", subtitle="Frame Financial Network  //  Secure Terminal"),
+        _panel_line(),
+        _panel_kv("Holder", character.key),
+        _panel_kv("Opened", f"{_DIM}{opened_str}{_N}"),
+        _panel_line(),
+        _panel_section("BALANCE"),
+        _panel_kv("On Hand", format_currency(wallet)),
     ]
     if bank is not None:
-        lines.append(_row(f"{_LABEL}Bank:{_N}      {format_currency(bank)}"))
-        lines.append(_row(f"{_LABEL}Total:{_N}     {format_currency(wallet + bank)}"))
-    lines.append(_hline_thin())
+        lines.append(_panel_kv("In Bank", format_currency(bank)))
+        lines.append(_panel_kv("Total", f"{_GOLD}{format_currency(wallet + bank, color=False)}{_N}"))
+    lines.append(_panel_line())
+    lines.append(_panel_close())
     return "\n".join(lines)
 
 
@@ -296,29 +349,33 @@ def node_bank_main(caller, raw_string, **kwargs):
     terminal = _get_terminal(caller, kwargs)
 
     if not has_account(caller):
-        text = (
-            f"{_header(f'{_ACCENT}BANK OF THE FRAME{_N}')}\n\n"
-            f"  {_DIM}No account found for {caller.key}.{_N}\n\n"
-            f"  Open a new account to access banking services.\n\n"
-            f"{_hline_thin()}"
-        )
+        text = "\n".join([
+            _panel_header("BANK OF THE FRAME", subtitle="No account on file for this identity."),
+            _panel_line(),
+            _panel_line(f"Identity {_LABEL}{caller.key}{_N} is not registered with the"),
+            _panel_line("Frame Financial Network."),
+            _panel_line(),
+            _panel_line(f"{_GOLD}Open an account to access deposits, withdrawals,{_N}"),
+            _panel_line(f"{_GOLD}and secure wire transfers.{_N}"),
+            _panel_line(),
+            _panel_close(),
+        ])
         options = [
-            {"key": "1", "desc": "Open account", "goto": ("node_open_account", {"terminal": terminal})},
-            {"key": "q", "desc": "Exit terminal", "goto": "node_bank_exit"},
+            {"key": "1", "desc": f"{_GOLD}Open account{_N}", "goto": ("node_open_account", {"terminal": terminal})},
+            {"key": "q", "desc": f"{_DIM}Disconnect{_N}",    "goto": "node_bank_exit"},
         ]
         return text, options
 
-    text = (
-        f"{_format_balance_panel(caller)}\n\n"
-        f"{_hline_thin()}"
-    )
+    text = "\n".join([
+        _format_balance_panel(caller),
+    ])
     options = [
-        {"key": "1", "desc": "Check balance",    "goto": ("node_balance",     {"terminal": terminal})},
-        {"key": "2", "desc": "Deposit funds",    "goto": ("node_deposit",     {"terminal": terminal})},
-        {"key": "3", "desc": "Withdraw funds",   "goto": ("node_withdraw",    {"terminal": terminal})},
-        {"key": "4", "desc": "Wire transfer",    "goto": ("node_wire",        {"terminal": terminal})},
-        {"key": "5", "desc": "Transaction log",  "goto": ("node_txlog",       {"terminal": terminal})},
-        {"key": "q", "desc": "Exit terminal",    "goto": "node_bank_exit"},
+        {"key": "1", "desc": "Check balance",           "goto": ("node_balance",  {"terminal": terminal})},
+        {"key": "2", "desc": f"{_OK}Deposit funds{_N}", "goto": ("node_deposit",  {"terminal": terminal})},
+        {"key": "3", "desc": f"{_GOLD}Withdraw funds{_N}", "goto": ("node_withdraw", {"terminal": terminal})},
+        {"key": "4", "desc": f"{_ACCENT}Wire transfer{_N}", "goto": ("node_wire",    {"terminal": terminal})},
+        {"key": "5", "desc": "Transaction log",          "goto": ("node_txlog",    {"terminal": terminal})},
+        {"key": "q", "desc": f"{_DIM}Disconnect{_N}",   "goto": "node_bank_exit"},
     ]
     return text, options
 
@@ -329,45 +386,50 @@ def node_open_account(caller, raw_string, **kwargs):
     if raw_string.strip().lower() in ("yes", "y", "1"):
         ok, msg = open_account(caller)
         if ok:
-            text = (
-                f"{_header(f'{_ACCENT}ACCOUNT OPENED{_N}')}\n\n"
-                f"  {_LABEL}Welcome, {caller.key}.{_N}\n\n"
-                f"  Your account has been created and linked to your\n"
-                f"  Matrix identity. You may now deposit, withdraw,\n"
-                f"  and wire funds securely.\n\n"
-                f"{_hline_thin()}"
-            )
+            text = "\n".join([
+                _panel_header("ACCOUNT OPENED", subtitle="Registration successful."),
+                _panel_line(),
+                _panel_line(f"{_OK}Welcome, {caller.key}.{_N}"),
+                _panel_line(),
+                _panel_line("Your account has been created and linked to your"),
+                _panel_line("Matrix identity. You may now deposit, withdraw,"),
+                _panel_line("and wire funds securely."),
+                _panel_line(),
+                _panel_close(),
+            ])
         else:
-            text = (
-                f"{_header(f'{_ACCENT}BANK OF THE FRAME{_N}')}\n\n"
-                f"  {_ERR}{msg}{_N}\n\n"
-                f"{_hline_thin()}"
-            )
+            text = "\n".join([
+                _panel_header("BANK OF THE FRAME", subtitle="Registration failed."),
+                _panel_line(),
+                _panel_line(f"{_ERR}{msg}{_N}"),
+                _panel_line(),
+                _panel_close(),
+            ])
         return text, [{"key": "1", "desc": "Continue", "goto": ("node_bank_main", {"terminal": terminal})}]
 
-    text = (
-        f"{_header(f'{_ACCENT}OPEN NEW ACCOUNT{_N}')}\n\n"
-        f"  Opening an account links your identity to the\n"
-        f"  Frame banking network. Deposits are secured and\n"
-        f"  accessible from any registered terminal.\n\n"
-        f"  {_WARN}One account per identity. This cannot be undone.{_N}\n\n"
-        f"{_hline_thin()}"
-    )
+    text = "\n".join([
+        _panel_header("OPEN NEW ACCOUNT", subtitle="Frame Financial Network registration."),
+        _panel_line(),
+        _panel_line("Opening an account links your identity to the"),
+        _panel_line("Frame banking network. Deposits are secured and"),
+        _panel_line("accessible from any registered terminal."),
+        _panel_line(),
+        _panel_line(f"{_WARN}One account per identity. This cannot be undone.{_N}"),
+        _panel_line(),
+        _panel_close(),
+    ])
     options = [
-        {"key": "yes", "desc": "Confirm — open account", "goto": ("node_open_account", {"terminal": terminal})},
-        {"key": "q",   "desc": "Cancel",                 "goto": ("node_bank_main",    {"terminal": terminal})},
+        {"key": "yes", "desc": f"{_OK}Confirm — open account{_N}", "goto": ("node_open_account", {"terminal": terminal})},
+        {"key": "q",   "desc": f"{_DIM}Cancel{_N}",                "goto": ("node_bank_main",    {"terminal": terminal})},
     ]
     return text, options
 
 
 def node_balance(caller, raw_string, **kwargs):
     terminal = _get_terminal(caller, kwargs)
-    text = (
-        f"{_format_balance_panel(caller)}\n\n"
-        f"{_hline_thin()}"
-    )
+    text = _format_balance_panel(caller)
     options = [
-        {"key": "q", "desc": "Back", "goto": ("node_bank_main", {"terminal": terminal})},
+        {"key": "q", "desc": f"{_DIM}Back{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
     ]
     return text, options
 
@@ -380,40 +442,50 @@ def node_deposit(caller, raw_string, **kwargs):
         try:
             amount = int(raw.replace(",", ""))
         except ValueError:
-            text = (
-                f"{_header(f'{_ACCENT}DEPOSIT{_N}')}\n\n"
-                f"  {_ERR}Invalid amount. Enter a number.{_N}\n\n"
-                f"{_hline_thin()}"
-            )
+            text = "\n".join([
+                _panel_header("DEPOSIT", subtitle="Invalid input."),
+                _panel_line(),
+                _panel_line(f"{_ERR}Enter a numeric amount.{_N}"),
+                _panel_line(),
+                _panel_close(),
+            ])
             return text, [
-                {"key": "q", "desc": "Back", "goto": ("node_bank_main", {"terminal": terminal})},
+                {"key": "q", "desc": f"{_DIM}Back{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
             ]
 
         ok, msg = bank_deposit(caller, amount)
-        result_color = "|g" if ok else _ERR
-        text = (
-            f"{_header(f'{_ACCENT}DEPOSIT{_N}')}\n\n"
-            f"  {result_color}{msg}{_N}\n\n"
-            f"{_format_balance_panel(caller)}\n\n"
-            f"{_hline_thin()}"
-        )
+        status = f"{_OK}{msg}{_N}" if ok else f"{_ERR}{msg}{_N}"
+        text = "\n".join([
+            _panel_header("DEPOSIT", subtitle="Transaction processed." if ok else "Transaction failed."),
+            _panel_line(),
+            _panel_line(status),
+            _panel_line(),
+            _panel_section("UPDATED BALANCE"),
+            _panel_kv("On Hand", format_currency(get_balance(caller))),
+            _panel_kv("In Bank", format_currency(get_bank_balance(caller))),
+            _panel_line(),
+            _panel_close(),
+        ])
         options = [
-            {"key": "1", "desc": "Deposit more",   "goto": ("node_deposit",  {"terminal": terminal})},
-            {"key": "q", "desc": "Back to menu",   "goto": ("node_bank_main",{"terminal": terminal})},
+            {"key": "1", "desc": f"{_OK}Deposit more{_N}",  "goto": ("node_deposit",   {"terminal": terminal})},
+            {"key": "q", "desc": f"{_DIM}Back to menu{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
         ]
         return text, options
 
     wallet = get_balance(caller)
-    text = (
-        f"{_header(f'{_ACCENT}DEPOSIT{_N}')}\n\n"
-        f"  {_LABEL}On hand:{_N}  {format_currency(wallet)}\n"
-        f"  {_LABEL}In bank:{_N}  {format_currency(get_bank_balance(caller))}\n\n"
-        f"  Enter the amount to deposit, or {_DIM}q{_N} to cancel.\n\n"
-        f"{_hline_thin()}"
-    )
+    text = "\n".join([
+        _panel_header("DEPOSIT", subtitle="Transfer on-hand cash into your account."),
+        _panel_line(),
+        _panel_kv("On Hand", format_currency(wallet)),
+        _panel_kv("In Bank", format_currency(get_bank_balance(caller))),
+        _panel_line(),
+        _panel_line(f"Enter the amount to deposit, or {_DIM}q{_N} to cancel."),
+        _panel_line(),
+        _panel_close(),
+    ])
     options = [
         {"key": "_default", "goto": ("node_deposit", {"terminal": terminal})},
-        {"key": "q", "desc": "Cancel", "goto": ("node_bank_main", {"terminal": terminal})},
+        {"key": "q", "desc": f"{_DIM}Cancel{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
     ]
     return text, options
 
@@ -426,39 +498,49 @@ def node_withdraw(caller, raw_string, **kwargs):
         try:
             amount = int(raw.replace(",", ""))
         except ValueError:
-            text = (
-                f"{_header(f'{_ACCENT}WITHDRAW{_N}')}\n\n"
-                f"  {_ERR}Invalid amount. Enter a number.{_N}\n\n"
-                f"{_hline_thin()}"
-            )
+            text = "\n".join([
+                _panel_header("WITHDRAW", subtitle="Invalid input."),
+                _panel_line(),
+                _panel_line(f"{_ERR}Enter a numeric amount.{_N}"),
+                _panel_line(),
+                _panel_close(),
+            ])
             return text, [
-                {"key": "q", "desc": "Back", "goto": ("node_bank_main", {"terminal": terminal})},
+                {"key": "q", "desc": f"{_DIM}Back{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
             ]
 
         ok, msg = bank_withdraw(caller, amount)
-        result_color = "|g" if ok else _ERR
-        text = (
-            f"{_header(f'{_ACCENT}WITHDRAW{_N}')}\n\n"
-            f"  {result_color}{msg}{_N}\n\n"
-            f"{_format_balance_panel(caller)}\n\n"
-            f"{_hline_thin()}"
-        )
+        status = f"{_OK}{msg}{_N}" if ok else f"{_ERR}{msg}{_N}"
+        text = "\n".join([
+            _panel_header("WITHDRAW", subtitle="Transaction processed." if ok else "Transaction failed."),
+            _panel_line(),
+            _panel_line(status),
+            _panel_line(),
+            _panel_section("UPDATED BALANCE"),
+            _panel_kv("On Hand", format_currency(get_balance(caller))),
+            _panel_kv("In Bank", format_currency(get_bank_balance(caller))),
+            _panel_line(),
+            _panel_close(),
+        ])
         options = [
-            {"key": "1", "desc": "Withdraw more",  "goto": ("node_withdraw", {"terminal": terminal})},
-            {"key": "q", "desc": "Back to menu",   "goto": ("node_bank_main",{"terminal": terminal})},
+            {"key": "1", "desc": f"{_GOLD}Withdraw more{_N}", "goto": ("node_withdraw",  {"terminal": terminal})},
+            {"key": "q", "desc": f"{_DIM}Back to menu{_N}",   "goto": ("node_bank_main", {"terminal": terminal})},
         ]
         return text, options
 
     bank_bal = get_bank_balance(caller)
-    text = (
-        f"{_header(f'{_ACCENT}WITHDRAW{_N}')}\n\n"
-        f"  {_LABEL}Available:{_N}  {format_currency(bank_bal)}\n\n"
-        f"  Enter the amount to withdraw, or {_DIM}q{_N} to cancel.\n\n"
-        f"{_hline_thin()}"
-    )
+    text = "\n".join([
+        _panel_header("WITHDRAW", subtitle="Transfer funds from account to on-hand cash."),
+        _panel_line(),
+        _panel_kv("Available", format_currency(bank_bal)),
+        _panel_line(),
+        _panel_line(f"Enter the amount to withdraw, or {_DIM}q{_N} to cancel."),
+        _panel_line(),
+        _panel_close(),
+    ])
     options = [
         {"key": "_default", "goto": ("node_withdraw", {"terminal": terminal})},
-        {"key": "q", "desc": "Cancel", "goto": ("node_bank_main", {"terminal": terminal})},
+        {"key": "q", "desc": f"{_DIM}Cancel{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
     ]
     return text, options
 
@@ -469,21 +551,22 @@ def node_wire(caller, raw_string, **kwargs):
     raw = raw_string.strip()
 
     if raw and raw.lower() not in ("wire transfer", "4"):
-        # Store recipient and move to amount entry
         return node_wire_amount(caller, "", terminal=terminal, recipient_id=raw)
 
-    text = (
-        f"{_header(f'{_ACCENT}WIRE TRANSFER{_N}')}\n\n"
-        f"  Send funds directly to another account via the\n"
-        f"  Matrix network. A {WIRE_FEE_PERCENT}% fee applies.\n\n"
-        f"  {_LABEL}Your bank balance:{_N}  {format_currency(get_bank_balance(caller))}\n\n"
-        f"  Enter the recipient's {_LABEL}@alias{_N} or {_LABEL}^MatrixID{_N},\n"
-        f"  or {_DIM}q{_N} to cancel.\n\n"
-        f"{_hline_thin()}"
-    )
+    text = "\n".join([
+        _panel_header("WIRE TRANSFER", subtitle="Matrix-routed bank-to-bank transfer."),
+        _panel_line(),
+        _panel_kv("Your Bank", format_currency(get_bank_balance(caller))),
+        _panel_kv("Fee", f"{WIRE_FEE_PERCENT}% of amount"),
+        _panel_line(),
+        _panel_line(f"Enter recipient {_LABEL}@alias{_N} or {_LABEL}^MatrixID{_N}."),
+        _panel_line(f"{_WARN}Requires active Matrix signal to complete.{_N}"),
+        _panel_line(),
+        _panel_close(),
+    ])
     options = [
         {"key": "_default", "goto": ("node_wire", {"terminal": terminal})},
-        {"key": "q", "desc": "Cancel", "goto": ("node_bank_main", {"terminal": terminal})},
+        {"key": "q", "desc": f"{_DIM}Cancel{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
     ]
     return text, options
 
@@ -498,25 +581,31 @@ def node_wire_amount(caller, raw_string, **kwargs):
         try:
             amount = int(raw.replace(",", ""))
         except ValueError:
-            text = (
-                f"{_header(f'{_ACCENT}WIRE TRANSFER{_N}')}\n\n"
-                f"  {_ERR}Invalid amount.{_N}\n\n"
-                f"{_hline_thin()}"
-            )
+            text = "\n".join([
+                _panel_header("WIRE TRANSFER", subtitle="Invalid amount."),
+                _panel_line(),
+                _panel_line(f"{_ERR}Enter a numeric amount.{_N}"),
+                _panel_line(),
+                _panel_close(),
+            ])
             return text, [
-                {"key": "q", "desc": "Back", "goto": ("node_wire", {"terminal": terminal})},
+                {"key": "q", "desc": f"{_DIM}Back{_N}", "goto": ("node_wire", {"terminal": terminal})},
             ]
         return node_wire_confirm(caller, "", terminal=terminal, recipient_id=recipient_id, amount=amount)
 
-    text = (
-        f"{_header(f'{_ACCENT}WIRE TRANSFER{_N}')}\n\n"
-        f"  {_LABEL}Recipient:{_N}  {recipient_id}\n\n"
-        f"  Enter the amount to wire, or {_DIM}q{_N} to cancel.\n\n"
-        f"{_hline_thin()}"
-    )
+    text = "\n".join([
+        _panel_header("WIRE TRANSFER", subtitle="Step 2 of 3 — enter amount."),
+        _panel_line(),
+        _panel_kv("Recipient", f"{_ACCENT}{recipient_id}{_N}"),
+        _panel_kv("Your Bank", format_currency(get_bank_balance(caller))),
+        _panel_line(),
+        _panel_line(f"Enter the amount to wire, or {_DIM}q{_N} to cancel."),
+        _panel_line(),
+        _panel_close(),
+    ])
     options = [
         {"key": "_default", "goto": ("node_wire_amount", {"terminal": terminal, "recipient_id": recipient_id})},
-        {"key": "q", "desc": "Cancel", "goto": ("node_bank_main", {"terminal": terminal})},
+        {"key": "q", "desc": f"{_DIM}Cancel{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
     ]
     return text, options
 
@@ -529,60 +618,70 @@ def node_wire_confirm(caller, raw_string, **kwargs):
     raw = raw_string.strip().lower()
 
     if raw in ("yes", "y", "confirm", "1"):
-        # Check signal coverage
         from world.utils import get_containing_room, room_has_network_coverage
         room = get_containing_room(caller)
         if not room_has_network_coverage(room, include_matrix_nodes=True):
-            text = (
-                f"{_header(f'{_ACCENT}WIRE TRANSFER{_N}')}\n\n"
-                f"  {_ERR}No Matrix signal. Wire transfer requires network coverage.{_N}\n\n"
-                f"{_hline_thin()}"
-            )
+            text = "\n".join([
+                _panel_header("WIRE TRANSFER", subtitle="Signal lost."),
+                _panel_line(),
+                _panel_line(f"{_ERR}No Matrix signal detected.{_N}"),
+                _panel_line("Wire transfers require active network coverage."),
+                _panel_line(),
+                _panel_close(),
+            ])
             return text, [
-                {"key": "q", "desc": "Back to menu", "goto": ("node_bank_main", {"terminal": terminal})},
+                {"key": "q", "desc": f"{_DIM}Back to menu{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
             ]
 
         ok, msg, recip_name, fee = bank_wire(caller, recipient_id, amount)
         if ok:
-            text = (
-                f"{_header(f'{_ACCENT}TRANSFER COMPLETE{_N}')}\n\n"
-                f"  {_LABEL}Sent:{_N}      {format_currency(amount)}\n"
-                f"  {_LABEL}Fee:{_N}       {format_currency(fee)}\n"
-                f"  {_LABEL}Recipient:{_N} {recip_name}\n\n"
-                f"  {_DIM}Transfer logged.{_N}\n\n"
-                f"{_hline_thin()}"
-            )
+            text = "\n".join([
+                _panel_header("TRANSFER COMPLETE", subtitle="Funds dispatched via Matrix routing."),
+                _panel_line(),
+                _panel_kv("Sent",      f"{_OK}{format_currency(amount, color=False)}{_N}"),
+                _panel_kv("Fee",       format_currency(fee)),
+                _panel_kv("Recipient", f"{_ACCENT}{recip_name}{_N}"),
+                _panel_line(),
+                _panel_section("UPDATED BALANCE"),
+                _panel_kv("In Bank", format_currency(get_bank_balance(caller))),
+                _panel_line(),
+                _panel_line(f"{_DIM}Transfer logged to your transaction history.{_N}"),
+                _panel_line(),
+                _panel_close(),
+            ])
         else:
-            text = (
-                f"{_header(f'{_ACCENT}TRANSFER FAILED{_N}')}\n\n"
-                f"  {_ERR}{msg}{_N}\n\n"
-                f"{_hline_thin()}"
-            )
+            text = "\n".join([
+                _panel_header("TRANSFER FAILED", subtitle="Transaction could not be completed."),
+                _panel_line(),
+                _panel_line(f"{_ERR}{msg}{_N}"),
+                _panel_line(),
+                _panel_close(),
+            ])
         return text, [
-            {"key": "q", "desc": "Back to menu", "goto": ("node_bank_main", {"terminal": terminal})},
+            {"key": "q", "desc": f"{_DIM}Back to menu{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
         ]
-
-    if raw and raw not in ("wire transfer", "4", recipient_id, str(amount)):
-        # Unrecognized input — re-show confirmation
-        pass
 
     fee = _compute_wire_fee(amount)
     total = amount + fee
-    text = (
-        f"{_header(f'{_ACCENT}CONFIRM WIRE TRANSFER{_N}')}\n\n"
-        f"  {_LABEL}To:{_N}       {recipient_id}\n"
-        f"  {_LABEL}Amount:{_N}   {format_currency(amount)}\n"
-        f"  {_LABEL}Fee:{_N}      {format_currency(fee)}  ({WIRE_FEE_PERCENT}%)\n"
-        f"  {_LABEL}Total:{_N}    {format_currency(total)}\n\n"
-        f"  {_WARN}Funds are deducted from your bank account.{_N}\n"
-        f"  Requires active Matrix signal to complete.\n\n"
-        f"  Type {_LABEL}yes{_N} to confirm.\n\n"
-        f"{_hline_thin()}"
-    )
+    text = "\n".join([
+        _panel_header("CONFIRM WIRE TRANSFER", subtitle="Step 3 of 3 — review and confirm."),
+        _panel_line(),
+        _panel_kv("To",     f"{_ACCENT}{recipient_id}{_N}"),
+        _panel_kv("Amount", format_currency(amount)),
+        _panel_kv("Fee",    f"{format_currency(fee)}  {_DIM}({WIRE_FEE_PERCENT}%){_N}"),
+        _panel_kv("Total",  f"{_GOLD}{format_currency(total, color=False)}{_N}"),
+        _panel_line(),
+        _panel_line(f"{_WARN}Deducted from your bank account.{_N}"),
+        _panel_line(f"{_WARN}Requires active Matrix signal.{_N}"),
+        _panel_line(),
+        _panel_line(f"Type {_LABEL}yes{_N} to confirm."),
+        _panel_line(),
+        _panel_close(),
+    ])
     options = [
-        {"key": "yes",     "desc": "Confirm transfer",
+        {"key": "yes", "desc": f"{_OK}Confirm transfer{_N}",
          "goto": ("node_wire_confirm", {"terminal": terminal, "recipient_id": recipient_id, "amount": amount})},
-        {"key": "q",       "desc": "Cancel",
+        {"key": "q",   "desc": f"{_DIM}Cancel{_N}",
          "goto": ("node_bank_main", {"terminal": terminal})},
         {"key": "_default",
          "goto": ("node_wire_confirm", {"terminal": terminal, "recipient_id": recipient_id, "amount": amount})},
@@ -594,7 +693,7 @@ def node_txlog(caller, raw_string, **kwargs):
     terminal = _get_terminal(caller, kwargs)
     text = format_transaction_log(caller)
     options = [
-        {"key": "q", "desc": "Back", "goto": ("node_bank_main", {"terminal": terminal})},
+        {"key": "q", "desc": f"{_DIM}Back{_N}", "goto": ("node_bank_main", {"terminal": terminal})},
     ]
     return text, options
 

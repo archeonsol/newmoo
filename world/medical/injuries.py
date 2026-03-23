@@ -4,6 +4,16 @@ Injury-state helpers split from world.medical.__init__.
 import time
 import uuid
 
+try:
+    from boltons.mathutils import clamp as _clamp
+except ImportError:
+    def _clamp(val, lower=None, upper=None):
+        if lower is not None:
+            val = max(lower, val)
+        if upper is not None:
+            val = min(upper, val)
+        return val
+
 BLEED_DAMPENING_FACTOR = 0.45
 BLEED_RATE_TO_LEVEL = (
     (0.5, 0),
@@ -17,7 +27,7 @@ BLEED_RATE_TO_LEVEL = (
 def _set_injury_treatment_quality(injury, quality):
     if not injury:
         return
-    q = max(0, min(3, int(quality or 0)))
+    q = _clamp(int(quality or 0), 0, 3)
     cur = int(injury.get("treatment_quality", 0) or 0)
     if q > cur:
         injury["treatment_quality"] = q
@@ -33,6 +43,19 @@ def _set_injury_treatment_quality(injury, quality):
 def ensure_injury_schema(injury):
     if not isinstance(injury, dict):
         return None
+    # Validate via cattrs structure/unstructure to catch type mismatches early.
+    # Falls back silently — the setdefault logic below is always authoritative.
+    try:
+        from world.structs import structure_injury, unstructure_injury
+        entry = structure_injury(injury)
+        if entry is not None:
+            validated = unstructure_injury(entry)
+            # Merge validated values back, preserving any extra keys not in the schema.
+            for k, v in validated.items():
+                if k not in injury:
+                    injury[k] = v
+    except Exception:
+        pass
     injury.setdefault("injury_id", str(uuid.uuid4()))
     injury.setdefault("hp_occupied", int(injury.get("hp_occupied", 0) or 0))
     injury.setdefault("severity", int(injury.get("severity", 1) or 1))
@@ -64,13 +87,13 @@ def ensure_injury_schema(injury):
     if not isinstance(injury.get("pill_last_dose"), dict):
         injury["pill_last_dose"] = {}
     injury["hp_occupied"] = max(0, int(injury.get("hp_occupied", 0) or 0))
-    injury["severity"] = max(1, min(4, int(injury.get("severity", 1) or 1)))
+    injury["severity"] = _clamp(int(injury.get("severity", 1) or 1), 1, 4)
     injury["bleed_rate"] = max(0.0, float(injury.get("bleed_rate", 0.0) or 0.0))
     if not isinstance(injury.get("organ_damage"), dict):
         injury["organ_damage"] = {}
     if not isinstance(injury.get("limb_damage"), dict):
         injury["limb_damage"] = {}
-    injury["treatment_quality"] = max(0, min(3, int(injury.get("treatment_quality", 0) or 0)))
+    injury["treatment_quality"] = _clamp(int(injury.get("treatment_quality", 0) or 0), 0, 3)
     return injury
 
 

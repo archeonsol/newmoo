@@ -30,6 +30,26 @@ class BulkheadRoom(CityRoom):
         self.db.seal_warning_sent = False
         self.db.seal_log = []
 
+        # Default look-details for the bulkhead room
+        self.add_detail(
+            "blast door",
+            "A reinforced steel blast door, floor to ceiling. Three locking bolts run "
+            "through the frame. When sealed, the door is rated to withstand explosive "
+            "decompression. Scorch marks and dents suggest it has been tested before.",
+        )
+        self.add_detail(
+            "hydraulic rams",
+            "Heavy hydraulic rams are mounted on either side of the blast door frame. "
+            "When active, they drive the door bolts home with several tonnes of force. "
+            "The rams hiss faintly even at rest — always under pressure.",
+        )
+        self.add_detail(
+            "warning lights",
+            "Red warning lights are recessed into the frame at intervals. They pulse "
+            "slowly when the door is unsealed, and strobe rapidly during a seal sequence. "
+            "The bulbs are behind thick glass — they have never needed replacing.",
+        )
+
     def return_appearance(self, looker, **kwargs):
         name = self.db.bulkhead_id or "bulkhead"
         sealed = bool(self.db.sealed)

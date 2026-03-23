@@ -13,6 +13,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+try:
+    import arrow as _arrow
+    _ARROW_AVAILABLE = True
+except ImportError:
+    _ARROW_AVAILABLE = False
+
 # Must match GlobalClimateScript.key / at_server_start
 GLOBAL_CLIMATE_KEY = "global_climate"
 
@@ -29,7 +35,10 @@ def utc_time_phase(dt: Optional[datetime] = None) -> str:
       night 22–05, morning 06–11, afternoon 12–16, dusk 17–19, evening 20–21
     """
     if dt is None:
-        dt = datetime.now(timezone.utc)
+        if _ARROW_AVAILABLE:
+            dt = _arrow.utcnow().datetime
+        else:
+            dt = datetime.now(timezone.utc)
     elif dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     else:

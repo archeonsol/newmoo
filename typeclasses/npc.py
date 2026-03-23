@@ -8,10 +8,19 @@ class NPC(Character):
         super().at_object_creation()
         self.db.is_npc = True
         # Stats 0-300, skills 0-150: random low-mid range
-        for stat in self.db.stats:
-            self.db.stats[stat] = random.randint(30, 140)
-        for skill in self.db.skills:
-            self.db.skills[skill] = random.randint(15, 70)
+        _stats = dict(self.db.stats or {})
+        for stat in _stats:
+            _stats[stat] = random.randint(30, 140)
+        self.db.stats = _stats
+
+        _skills = dict(self.db.skills or {})
+        for skill in _skills:
+            _skills[skill] = random.randint(15, 70)
+        self.db.skills = _skills
+
+        from world.rpg.trait_sync import sync_stats_to_traits, sync_skills_to_traits
+        sync_stats_to_traits(self, _stats)
+        sync_skills_to_traits(self, _skills)
         self.db.needs_chargen = False 
         self.db.combat_stance = "balanced"
         

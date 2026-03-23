@@ -6,7 +6,9 @@ for a sword). weapon_key determines which skill is rolled and which moves/damage
 Damage type (slashing/impact/penetrating/magical) drives trauma and injury; set db.damage_type
 to override the default for this weapon class. Ranged weapons use world.ammo and require loading.
 """
+from evennia.contrib.base_systems.components import ComponentHolderMixin, ComponentProperty
 from typeclasses.objects import Object
+from world.vehicle_components import AmmoComponent
 
 
 # Keys must exist in world.combat.WEAPON_DATA and world.skills.WEAPON_KEY_TO_SKILL
@@ -63,14 +65,58 @@ def _is_ranged_weapon_key(weapon_key):
         return False
 
 
-class CombatWeapon(Object):
+class CombatWeapon(ComponentHolderMixin, Object):
     """
     Base typeclass for all combat weapons. Set db.weapon_key to a key in
     world.combat.WEAPON_DATA (e.g. "knife", "long_blade"). Subclasses set a
     default weapon_key so you can create custom weapons by choosing the right
     template and renaming/describing the object.
-    Ranged weapons also have db.ammo_type, db.ammo_capacity, db.ammo_current.
+    Ranged weapons also have db.ammo_type, db.ammo_capacity, db.ammo_current
+    (legacy) and an AmmoComponent (component-backed, post-migration).
     """
+
+    ammo = ComponentProperty("ammo")
+
+    # ------------------------------------------------------------------
+    # Ammo compatibility shims — existing code uses weapon.db.ammo_current
+    # ------------------------------------------------------------------
+
+    @property
+    def ammo_current(self):
+        if self.ammo:
+            return int(self.ammo.current or 0)
+        return int(self.db.ammo_current or 0)
+
+    @ammo_current.setter
+    def ammo_current(self, value):
+        if self.ammo:
+            self.ammo.current = int(value)
+        self.db.ammo_current = int(value)
+
+    @property
+    def ammo_capacity(self):
+        if self.ammo:
+            return int(self.ammo.capacity or 0)
+        return int(self.db.ammo_capacity or 0)
+
+    @ammo_capacity.setter
+    def ammo_capacity(self, value):
+        if self.ammo:
+            self.ammo.capacity = int(value)
+        self.db.ammo_capacity = int(value)
+
+    @property
+    def ammo_type(self):
+        if self.ammo:
+            return self.ammo.type
+        return self.db.ammo_type
+
+    @ammo_type.setter
+    def ammo_type(self, value):
+        if self.ammo:
+            self.ammo.type = str(value)
+        self.db.ammo_type = str(value)
+
     def at_object_creation(self):
         super().at_object_creation()
         self.db.weapon_key = WEAPON_KEY_UNARMED
@@ -114,13 +160,13 @@ class CombatWeapon(Object):
         """True if this weapon is ranged and has at least one round loaded."""
         if not _is_ranged_weapon_key(self.db.weapon_key):
             return True
-        return (self.db.ammo_current or 0) > 0
+        return self.ammo_current > 0
 
     def rounds_remaining(self):
-        """Current rounds in magazine; 0 for melee or unloaded ranged."""
+        """Current rounds in magazine; None for melee, int for ranged."""
         if not _is_ranged_weapon_key(self.db.weapon_key):
             return None  # N/A
-        return int(self.db.ammo_current or 0)
+        return self.ammo_current
 
 
 # --- Template classes: one per weapon skill ---
@@ -195,6 +241,13 @@ class _RangedWeaponMixin:
         self.db.ammo_type = ammo_type
         self.db.ammo_capacity = default_capacity
         self.db.ammo_current = 0
+        # Initialize AmmoComponent (ComponentHolderMixin is on CombatWeapon base)
+        self.components.add(AmmoComponent.create(
+            self,
+            type=ammo_type,
+            capacity=int(default_capacity),
+            current=0,
+        ))
 
 
 class SidearmWeapon(CombatWeapon, _RangedWeaponMixin):

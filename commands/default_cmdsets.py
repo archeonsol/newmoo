@@ -25,7 +25,7 @@ from evennia.commands.default.account import (
 )
 from evennia.utils import search, utils, logger
 
-from commands.base_cmds import CmdGo
+from commands.base_cmds import CmdGo, Command as _BaseCommand
 
 
 class SplinterPodCmdSet(CmdSet):
@@ -141,6 +141,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         """
         super().at_cmdset_creation()
 
+        # ExtendedRoom detail/state commands: `look <detail>`, `detail`, `roomdesc`, `roomstate`, `gametime`
+        from evennia.contrib.grid.extended_room.extended_room import ExtendedRoomCmdSet
+        self.add(ExtendedRoomCmdSet)
+
         from commands.base_cmds import CmdLook, CmdExamine, CmdGet, CmdPut, CmdStopWalking
         from commands.stealth_cmds import CmdHide, CmdSneak, CmdSearch, CmdUnhide
         from commands.matrix_cmds import CmdMacl
@@ -233,7 +237,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdSpawnCreature, CmdCreatureSet, CmdDespawn, CmdNpc, CmdMakeNpc, CmdNpcSet, CmdSpawnPerfume, CmdBadSmellRoom,
             CmdGoto, CmdGotoRoom, CmdSummon, CmdSetVoid, CmdVoid, CmdRelease, CmdBoot, CmdFind, CmdAnnounce, CmdRestore, CmdDebugKill,
             CmdSpawnSeat, CmdSpawnBed, CmdSpawnPod, CmdSpawnDiveRig, CmdSpawnCamera, CmdSpawnTelevision,
-            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling, CmdBuffDebug, CmdClimate
+            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling, CmdBuffDebug, CmdClimate,
+            CmdMigrateTraits,
         )
         from commands.staff_vehicle_cmds import (
             CmdVmod,
@@ -485,6 +490,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdStaffSheet())
         self.add(CmdStaffSetStat())
         self.add(CmdStaffSetSkill())
+        self.add(CmdMigrateTraits())
         self.add(CmdMakeNpc())
         self.add(CmdNpcSet())
         self.add(CmdGoto())
@@ -524,6 +530,45 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdUnseal())
         self.add(CmdBulkheadStatus())
         self.add(CmdBulkheadAdmin())
+        # Whoosh-powered full-text help search
+        self.add(CmdHelpSearch())
+
+
+class CmdHelpSearch(_BaseCommand):
+    """
+    Search help entries using full-text matching.
+
+    Usage:
+      helpsearch <query>
+      hs <query>
+
+    Returns ranked help topics that match the query, even if
+    the exact command name is not known.
+    """
+    key = "helpsearch"
+    aliases = ["hs"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        query = (self.args or "").strip()
+        if not query:
+            self.caller.msg("Usage: helpsearch <query>")
+            return
+        try:
+            from world.help_search import search_help
+            results = search_help(query, limit=7)
+        except Exception:
+            results = []
+        if not results:
+            self.caller.msg(f"No help entries found for '{query}'.")
+            return
+        lines = [f"|wHelp search results for:|n {query}"]
+        for hit in results:
+            lines.append(f"  |w{hit['key']}|n ({hit['category']})")
+        lines.append("\nUse |whelp <topic>|n to read an entry.")
+        self.caller.msg("\n".join(lines))
+
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
     """

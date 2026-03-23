@@ -12,14 +12,43 @@ import random
 
 from world.theme_colors import COMBAT_COLORS as CC
 
+try:
+    from num2words import num2words as _n2w
+    _NUM2WORDS_AVAILABLE = True
+except ImportError:
+    _NUM2WORDS_AVAILABLE = False
+
+try:
+    from slugify import slugify as _slugify_lib
+    _SLUGIFY_AVAILABLE = True
+except ImportError:
+    _SLUGIFY_AVAILABLE = False
+
+
+def damage_word(n: int) -> str:
+    """
+    Return a narrative word for small damage numbers (1-20); raw int for larger.
+    e.g. damage_word(3) -> "three", damage_word(25) -> "25"
+    """
+    n = int(n)
+    if _NUM2WORDS_AVAILABLE and 1 <= n <= 20:
+        try:
+            return _n2w(n)
+        except Exception:
+            pass
+    return str(n)
+
 
 def _slugify_template(name: str) -> str:
     """
     Turn a weapon template display name into a safe, lowercase key.
     Example: "Executioner's Blade" -> "executioners_blade".
+    Uses python-slugify for Unicode/diacritic/smart-quote handling when available.
     """
     if not name:
         return ""
+    if _SLUGIFY_AVAILABLE:
+        return _slugify_lib(name, separator="_")
     out = name.strip().lower()
     for ch in ("'", '"'):
         out = out.replace(ch, "")

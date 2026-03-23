@@ -1,6 +1,7 @@
 """
 Addiction levels, withdrawal, and long-term recovery ticks.
 """
+import logging
 import random
 import time
 
@@ -8,6 +9,12 @@ from evennia.utils import logger
 
 from world.alchemy import ADDICTION_RECOVERY_DAYS, DRUGS, WITHDRAWAL_ONSET_HOURS
 from world.buffs import build_drug_buff_class
+
+try:
+    from world.gamelog import get_logger as _get_gamelog
+    _log = _get_gamelog(__name__)
+except Exception:
+    _log = logging.getLogger("evennia")
 
 
 def _character_has_buff_key(character, buff_key):

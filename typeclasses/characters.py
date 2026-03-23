@@ -1,7 +1,9 @@
 from collections.abc import Mapping
 
 from evennia import DefaultCharacter
+from evennia.contrib.game_systems.cooldowns import CooldownHandler
 from evennia.contrib.rpg.buffs.buff import BuffHandler
+from evennia.contrib.rpg.traits import TraitHandler
 from evennia.utils import logger
 from evennia.utils.utils import compress_whitespace, dbref, lazy_property
 
@@ -178,6 +180,37 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
     # Stats 0-300, skills 0-150; letter tiers from world.levels (21 letters U–A)
 
     @lazy_property
+    def trait_stats(self):
+        """
+        TraitHandler for stats (0-300 stored) and stat caps.
+        Key: db_attribute_key="trait_stats" avoids collision with legacy db.stats dict.
+        Read via character.trait_stats["strength"].base (stored 0-300).
+        Effective display value still flows through get_display_stat() -> xp._stat_level().
+        """
+        return TraitHandler(self, db_attribute_key="trait_stats", db_attribute_category="traits")
+
+    @lazy_property
+    def trait_skills(self):
+        """
+        TraitHandler for skills (0-150 stored = display).
+        Key: db_attribute_key="trait_skills" avoids collision with legacy db.skills dict.
+        Read via character.trait_skills["unarmed"].base (stored 0-150).
+        Effective value still flows through get_skill_level() -> xp._skill_level().
+        """
+        return TraitHandler(self, db_attribute_key="trait_skills", db_attribute_category="traits")
+
+    @lazy_property
+    def cooldowns(self):
+        """
+        Rate-limiting handler for actions (bioscan, flee, pay, etc.).
+        Backed by Evennia's CooldownHandler; persists across reboots.
+        Usage: character.cooldowns.add("action_name", seconds)
+               character.cooldowns.ready("action_name")  -> bool
+               character.cooldowns.time_left("action_name")  -> float seconds
+        """
+        return CooldownHandler(self, db_attribute="cooldowns")
+
+    @lazy_property
     def buffs(self):
         """
         Timed/permanent modifiers (perfume, bad smells, cybernetics, traits).
@@ -186,6 +219,19 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         """
         # Use a dedicated dbkey so buffs live on character.db.buffs.
         return _SafeBuffHandler(self, dbkey="buffs", autopause=True)
+
+    @property
+    def death_fsm(self):
+        """
+        Return the DeathStateMachine for this character (created on first access).
+        Stored in ndb._death_fsm (non-persistent; recreated on reload).
+        Use this to trigger validated death state transitions:
+            self.death_fsm.go_flatline()
+            self.death_fsm.revive()
+            self.death_fsm.go_permanent()
+        """
+        from world.death import get_death_fsm
+        return get_death_fsm(self)
 
     def at_object_creation(self):
         """Called only once, when the character is first created."""
@@ -205,6 +251,17 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         # --- SKILLS: levels 0-150; canonical list in world.skills
         from world.skills import SKILL_KEYS
         self.db.skills = {sk: 0 for sk in SKILL_KEYS}
+
+        # --- TRAIT MIRRORS: authoritative storage post-migration; xp.py reads these first.
+        # Stats: static traits, base=0-300, cap traits stored alongside as "cap_<key>".
+        # Skills: static traits, base=0-150.
+        from world.rpg.chargen import STAT_KEYS
+        from world.levels import MAX_STAT_LEVEL, MAX_LEVEL
+        for _sk in STAT_KEYS:
+            self.trait_stats.add(_sk, _sk.title(), trait_type="static", base=0)
+            self.trait_stats.add(f"cap_{_sk}", f"{_sk.title()} Cap", trait_type="static", base=MAX_STAT_LEVEL)
+        for _sk in SKILL_KEYS:
+            self.trait_skills.add(_sk, _sk.replace("_", " ").title(), trait_type="static", base=0)
 
         self.db.current_hp = None
         self.db.current_stamina = None

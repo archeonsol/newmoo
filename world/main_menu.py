@@ -9,7 +9,7 @@ from evennia.utils.evmenu import EvMenu
 from evennia.utils.create import create_object
 from evennia.utils.ansi import ANSIString
 from evennia.utils.utils import wrap
-from world.ui_utils import fade_rule
+from world.ui_utils import fade_rule, figlet_banner
 
 # ══════════════════════════════════════════════════════════════════════════════
 # UI HELPERS (Bureaucratic Terminal Aesthetic)
@@ -75,6 +75,7 @@ def node_start(caller, raw_string, **kwargs):
     if _is_blocked_menu_escape(raw_string):
         caller.msg("\n|r[!] Sign-out is only available via the menu option.|n\n")
     
+    _banner = figlet_banner("UNDERSPIRE", font="small", width=_UI_WIDTH - 4, color="|r", center=True)
     text_body = (
         "|wNo body. No pain. Just you and the terminal.|n "
         "The same soft light, the same hum.\n\n"
@@ -82,8 +83,8 @@ def node_start(caller, raw_string, **kwargs):
         "|xPLEASE WAIT. A REPRESENTATIVE WILL ASSIST YOU SHORTLY.|n\n\n"
         "Nobody has ever seen a representative. You have time."
     )
-    
-    text = _registry_panel("SOUL REGISTRY", text_body, status="SYSTEM IDLE. AWAITING INPUT.")
+
+    text = _banner + "\n" + _registry_panel("SOUL REGISTRY", text_body, status="SYSTEM IDLE. AWAITING INPUT.")
     
     chars = list(caller.characters.all()) if hasattr(caller, "characters") else []
     options = []

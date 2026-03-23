@@ -13,10 +13,17 @@ Vendors can restrict sales with db.faction_required and db.faction_required_rank
 is_faction_member() and get_member_rank() from this module.
 """
 
+import logging
 import time
 
 from world.rpg.factions import get_faction, get_character_factions
 from world.rpg.factions.ranks import get_rank_info, get_max_rank, get_rank_name, get_rank_permission
+
+try:
+    from world.gamelog import get_logger as _get_gamelog
+    _log = _get_gamelog(__name__)
+except Exception:
+    _log = logging.getLogger("evennia")
 
 
 def _is_roster_eligible(obj):
@@ -79,6 +86,10 @@ def enlist(character, faction_key, rank=None, enlisted_by=None):
     joined = character.db.faction_joined or {}
     joined[fdata["key"]] = time.time()
     character.db.faction_joined = joined
+
+    # Set first-pay delay cooldown so new members can't immediately collect pay.
+    from world.rpg.factions.pay import FIRST_PAY_DELAY_SECONDS
+    character.cooldowns.add(f"pay_first_{fdata['key']}", FIRST_PAY_DELAY_SECONDS)
 
     _log_faction_event(
         character,
@@ -339,6 +350,16 @@ def _check_faction_conflict(character, new_faction_key):
 
 def _log_faction_event(character, faction_key, event_type, details=""):
     """Append a faction event to db.faction_log; capped at 50 entries."""
+    try:
+        _log.info(
+            "faction.event",
+            char=getattr(character, "key", "?"),
+            faction=faction_key,
+            event=event_type,
+            details=details,
+        )
+    except Exception:
+        pass
     log = character.db.faction_log or []
     log.append(
         {

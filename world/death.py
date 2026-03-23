@@ -2,13 +2,145 @@
 Death and dying: flatlined (can be defibbed) vs permanent (corpse).
 When HP reaches 0, character enters flatlined state. After a duration (endurance-based, min 5 min)
 or if executed by another, they become permanently dead and turn into a corpse.
+
+The DeathStateMachine is a non-persistent FSM helper (transitions library) that
+validates state transitions and can attach on_enter_* callbacks for cmdset swaps.
+It is attached as character.ndb._death_fsm on first access via get_death_fsm().
+
+States:   alive → flatlined → alive (revive) or flatlined → permanent
+db.death_state remains authoritative; the FSM is advisory/validating only.
 """
+import logging
 import time
+
+from transitions import Machine
+
 from evennia.utils import delay
+
+try:
+    from world.gamelog import get_logger as _get_gamelog
+    log = _get_gamelog(__name__)
+except Exception:
+    log = logging.getLogger("evennia")
+logger = logging.getLogger("evennia")
 
 DEATH_STATE_ALIVE = None
 DEATH_STATE_FLATLINED = "flatlined"
 DEATH_STATE_PERMANENT = "permanent"
+
+# ---------------------------------------------------------------------------
+# Death FSM
+# ---------------------------------------------------------------------------
+
+DEATH_STATES = ["alive", "flatlined", "permanent"]
+
+DEATH_TRANSITIONS = [
+    {
+        "trigger": "go_flatline",
+        "source": "alive",
+        "dest": "flatlined",
+    },
+    {
+        "trigger": "revive",
+        "source": "flatlined",
+        "dest": "alive",
+    },
+    {
+        "trigger": "go_permanent",
+        "source": "flatlined",
+        "dest": "permanent",
+    },
+]
+
+_VALID_DEATH_STATES = {"alive", "flatlined", "permanent"}
+
+
+def _infer_death_state(character) -> str:
+    """Infer FSM initial state from db.death_state."""
+    raw = getattr(character.db, "death_state", None)
+    if raw == DEATH_STATE_FLATLINED:
+        return "flatlined"
+    if raw == DEATH_STATE_PERMANENT:
+        return "permanent"
+    return "alive"
+
+
+class DeathStateMachine:
+    """
+    Non-persistent FSM helper for a character's death state.
+
+    Attach to character.ndb._death_fsm via get_death_fsm().
+    db.death_state remains authoritative; this machine validates transitions
+    and fires after-callbacks for cmdset management.
+
+    Usage:
+        fsm = get_death_fsm(character)
+        fsm.go_flatline()    # alive → flatlined
+        fsm.revive()         # flatlined → alive
+        fsm.go_permanent()   # flatlined → permanent
+        print(fsm.state)     # "permanent"
+    """
+
+    def __init__(self, character):
+        self.character = character
+        initial = _infer_death_state(character)
+        self.machine = Machine(
+            model=self,
+            states=DEATH_STATES,
+            transitions=DEATH_TRANSITIONS,
+            initial=initial,
+            ignore_invalid_triggers=True,
+            after_state_change="_sync_db_state",
+        )
+
+    def _sync_db_state(self):
+        """Write the current FSM state back to db.death_state."""
+        try:
+            state = self.state
+            if state == "alive":
+                self.character.db.death_state = DEATH_STATE_ALIVE
+            elif state == "flatlined":
+                self.character.db.death_state = DEATH_STATE_FLATLINED
+            elif state == "permanent":
+                self.character.db.death_state = DEATH_STATE_PERMANENT
+        except Exception as exc:
+            logger.warning(f"[DeathStateMachine] db sync failed for {self.character}: {exc}")
+
+    def on_enter_flatlined(self):
+        """Called when entering flatlined state — swap to spirit cmdset if needed."""
+        try:
+            from commands.spirit_cmdset import SpiritCmdSet
+            if not self.character.cmdset.has(SpiritCmdSet):
+                self.character.cmdset.add(SpiritCmdSet, persistent=True)
+        except Exception:
+            pass
+
+    def on_enter_alive(self):
+        """Called when entering alive state — remove spirit cmdset if present."""
+        try:
+            from commands.spirit_cmdset import SpiritCmdSet
+            if self.character.cmdset.has(SpiritCmdSet):
+                self.character.cmdset.remove(SpiritCmdSet)
+        except Exception:
+            pass
+
+
+def get_death_fsm(character) -> DeathStateMachine:
+    """
+    Return the DeathStateMachine for a character, creating it if needed.
+    Stored in character.ndb._death_fsm (non-persistent; recreated on reload).
+
+    Args:
+        character: An Evennia Character instance.
+
+    Returns:
+        DeathStateMachine: The FSM helper for this character.
+    """
+    fsm = getattr(character.ndb, "_death_fsm", None)
+    if fsm is None or not isinstance(fsm, DeathStateMachine):
+        fsm = DeathStateMachine(character)
+        character.ndb._death_fsm = fsm
+    return fsm
 
 # Minimum time in flatline before permanent death (seconds)
 FLATLINE_MIN_SECONDS = 300  # 5 minutes
@@ -235,6 +367,15 @@ def make_flatlined(character, attacker):
         return
     if is_flatlined(character) or is_permanently_dead(character):
         return
+    try:
+        log.info(
+            "death.flatline",
+            char=getattr(character, "key", "?"),
+            char_id=getattr(character, "id", None),
+            attacker=getattr(attacker, "key", None) if attacker else None,
+        )
+    except Exception:
+        pass
     character.db.death_state = DEATH_STATE_FLATLINED
     character.db.flatline_at = time.time()
     character.db.combat_ended = True
@@ -584,6 +725,16 @@ def make_permanent_death(character, attacker=None, reason="executed"):
         return
     if is_permanently_dead(character):
         return
+    try:
+        log.info(
+            "death.permanent",
+            char=getattr(character, "key", "?"),
+            char_id=getattr(character, "id", None),
+            attacker=getattr(attacker, "key", None) if attacker else None,
+            reason=reason,
+        )
+    except Exception:
+        pass
     character.db.death_state = DEATH_STATE_PERMANENT
     loc = character.location
     name = character.name

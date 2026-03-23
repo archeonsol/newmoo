@@ -131,6 +131,8 @@ class CmdStaffSetStat(Command):
         if not target.db.stats:
             target.db.stats = {}
         target.db.stats[stat_key] = value
+        from world.rpg.trait_sync import sync_single_stat
+        sync_single_stat(target, stat_key, value)
         caller.msg("|g{}'s {} set to {}.|n".format(target.name, stat_key, value))
         try:
             _ = target.max_hp
@@ -176,6 +178,8 @@ class CmdStaffSetSkill(Command):
         if not target.db.skills:
             target.db.skills = {}
         target.db.skills[skill_key] = value
+        from world.rpg.trait_sync import sync_single_skill
+        sync_single_skill(target, skill_key, value)
         label = SKILL_DISPLAY_NAMES.get(skill_key, skill_key)
         caller.msg("|g{}'s {} set to {}.|n".format(target.name, label, value))
 
@@ -1504,12 +1508,22 @@ class CmdNpc(Command):
     def _do_summon(self, caller, rest):
         from world.rpg.npc_templates import create_npc_from_template, get_npc_template
         name = None
-        if "=" in rest:
-            template_part, name = rest.split("=", 1)
-            template_key = template_part.strip().lower()
-            name = name.strip()
-        else:
-            template_key = rest.strip().lower()
+        # Try lark grammar parser first; fall back to manual split.
+        try:
+            from world.command_grammars import parse_npc_summon
+            parsed = parse_npc_summon(rest)
+            if parsed:
+                template_key = parsed["template"].strip().lower()
+                name = parsed["name"].strip() or None
+            else:
+                raise ValueError("lark parse returned None")
+        except Exception:
+            if "=" in rest:
+                template_part, name = rest.split("=", 1)
+                template_key = template_part.strip().lower()
+                name = name.strip()
+            else:
+                template_key = rest.strip().lower()
         if not template_key:
             caller.msg("Usage: @npc/summon <template> or @npc/summon <template>=<name>")
             return
@@ -1628,17 +1642,79 @@ class CmdNpc(Command):
         if attr in STAT_KEYS:
             if not hasattr(target.db, "stats") or target.db.stats is None:
                 target.db.stats = {}
-            target.db.stats[attr] = max(0, min(300, value))
+            clamped_stat = max(0, min(300, value))
+            target.db.stats[attr] = clamped_stat
+            from world.rpg.trait_sync import sync_single_stat
+            sync_single_stat(target, attr, clamped_stat)
             caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, target.db.stats[attr]))
             return
         if attr in SKILL_KEYS:
             if not hasattr(target.db, "skills") or target.db.skills is None:
                 from world.skills import SKILL_KEYS as SK
                 target.db.skills = {k: 0 for k in SK}
-            target.db.skills[attr] = max(0, min(150, value))
+            clamped_skill = max(0, min(150, value))
+            target.db.skills[attr] = clamped_skill
+            from world.rpg.trait_sync import sync_single_skill
+            sync_single_skill(target, attr, clamped_skill)
             caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, target.db.skills[attr]))
             return
         caller.msg("|rUnknown attribute. Use a stat (%s) or skill (e.g. evasion, medicine).|n" % ", ".join(STAT_KEYS))
+
+
+class CmdMigrateTraits(Command):
+    """
+    Backfill Evennia TraitHandler mirrors for all existing characters. Admin only.
+
+    Reads each character's db.stats, db.skills, and db.stat_caps and writes them
+    into the trait_stats / trait_skills TraitHandlers. Safe to run multiple times.
+
+    Usage:
+      @migratetraits          - migrate all Character objects
+      @migratetraits #dbref   - migrate a single character by dbref
+    """
+
+    key = "@migratetraits"
+    locks = "cmd:perm(Admin)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        from evennia.objects.models import ObjectDB
+        from world.rpg.trait_sync import sync_stats_to_traits, sync_skills_to_traits
+
+        target_dbref = (self.args or "").strip()
+        if target_dbref:
+            from evennia.utils.search import search_object
+            results = search_object(target_dbref)
+            if not results:
+                caller.msg(f"|rNo object found for {target_dbref}.|n")
+                return
+            targets = results
+        else:
+            from typeclasses.characters import Character
+            targets = Character.objects.all()
+
+        count = 0
+        errors = 0
+        for char in targets:
+            try:
+                stats = getattr(char.db, "stats", None) or {}
+                caps  = getattr(char.db, "stat_caps", None) or {}
+                skills = getattr(char.db, "skills", None) or {}
+                if stats:
+                    sync_stats_to_traits(char, stats, caps if caps else None)
+                if skills:
+                    sync_skills_to_traits(char, skills)
+                count += 1
+            except Exception as exc:
+                logger.log_err(f"@migratetraits: error on {char} ({char.dbref}): {exc}")
+                errors += 1
+
+        caller.msg(
+            f"|gTrait migration complete: {count} character(s) updated"
+            + (f", {errors} error(s) — check server log." if errors else ".")
+            + "|n"
+        )
 
 
 class CmdSpawnPerfume(Command):
@@ -2515,12 +2591,16 @@ class CmdClimate(Command):
 
         raw = (self.args or "").strip()
         if not raw:
-            from datetime import datetime, timezone
+            try:
+                import arrow as _arrow
+                now = _arrow.utcnow().datetime
+            except ImportError:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
 
             w = gc.get_global_weather()
             t = gc.get_global_time_of_day()
             auto = gc.get_time_auto_utc()
-            now = datetime.now(timezone.utc)
             auto_str = "|gON|n (UTC)" if auto else "|rOFF|n (manual)"
             self.caller.msg(
                 f"Global climate: |wweather|n={w}  |wtime|n={t}  |wUTC auto|n={auto_str}\n"

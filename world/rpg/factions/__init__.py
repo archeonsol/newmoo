@@ -168,6 +168,17 @@ FACTIONS = {
     },
 }
 
+# Validate all faction definitions at import time via pydantic.
+# model_dump() returns plain dicts so all fdata["key"] call sites are unchanged.
+try:
+    from world.rpg.factions.schemas import validate_factions as _validate_factions
+    FACTIONS = _validate_factions(FACTIONS)
+except Exception as _faction_schema_exc:
+    import logging as _logging
+    _logging.getLogger("evennia").warning(
+        f"[factions] Schema validation failed, using raw FACTIONS dict: {_faction_schema_exc}"
+    )
+
 _TAG_TO_FACTION = {fdata["tag"].lower(): fdata for fdata in FACTIONS.values()}
 
 

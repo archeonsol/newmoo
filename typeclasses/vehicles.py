@@ -7,11 +7,13 @@ Each enclosed vehicle has exactly ONE persistent interior. Items dropped inside 
 """
 import re
 
+from evennia.contrib.base_systems.components import ComponentHolderMixin, ComponentProperty
 from typeclasses.matrix.mixins.matrix_id import MatrixIdMixin
 from typeclasses.objects import Object
 from evennia.utils.create import create_object
 from evennia.utils.search import search_tag, search_object
 from evennia.objects.objects import DefaultExit
+from world.vehicle_components import DriveComponent, FuelComponent, WearComponent
 
 # Tag used to find an interior by vehicle id (category = str(vehicle.id)).
 VEHICLE_INTERIOR_TAG = "vehicle_interior"
@@ -645,15 +647,75 @@ class VehicleInterior(Room):
         return f"{_ic_room_char_name(char, looker, **kwargs)} is sitting in {place}."
 
 
-class Vehicle(MatrixIdMixin, Object):
+class Vehicle(ComponentHolderMixin, MatrixIdMixin, Object):
     """
     Base class for all vehicles. Subclassed by enclosed ground vehicles, motorcycles, and aerial vehicles.
 
     db.vehicle_type: ground | motorcycle | aerial
     db.has_interior: enclosed types True; motorcycles False
+
+    Components (Evennia base_systems.components):
+        vehicle.fuel  — FuelComponent (level, capacity, type, heat, overheat)
+        vehicle.wear  — WearComponent (level, max)
+        vehicle.drive — DriveComponent (driver, passengers, running, speed_class, skill)
+
+    Backward-compatibility shims keep db.fuel_level, db.driver, db.engine_running etc.
+    working so all existing call sites need no changes.
     """
 
     has_interior_default = True
+
+    fuel  = ComponentProperty("fuel")
+    wear  = ComponentProperty("wear")
+    drive = ComponentProperty("drive")
+
+    # ------------------------------------------------------------------
+    # Fuel compatibility shims — existing code uses vehicle.db.fuel_level
+    # ------------------------------------------------------------------
+
+    @property
+    def fuel_level(self):
+        return self.fuel.level if self.fuel else self.db.fuel_level
+
+    @fuel_level.setter
+    def fuel_level(self, value):
+        if self.fuel:
+            self.fuel.level = float(value)
+        self.db.fuel_level = float(value)
+
+    @property
+    def fuel_capacity(self):
+        return self.fuel.capacity if self.fuel else self.db.fuel_capacity
+
+    @fuel_capacity.setter
+    def fuel_capacity(self, value):
+        if self.fuel:
+            self.fuel.capacity = float(value)
+        self.db.fuel_capacity = float(value)
+
+    @property
+    def fuel_type(self):
+        return self.fuel.type if self.fuel else self.db.fuel_type
+
+    @fuel_type.setter
+    def fuel_type(self, value):
+        if self.fuel:
+            self.fuel.type = str(value)
+        self.db.fuel_type = str(value)
+
+    # ------------------------------------------------------------------
+    # Drive compatibility shims — existing code uses vehicle.db.driver etc.
+    # ------------------------------------------------------------------
+
+    @property
+    def current_driver(self):
+        return self.drive.driver if self.drive else self.db.driver
+
+    @current_driver.setter
+    def current_driver(self, value):
+        if self.drive:
+            self.drive.driver = value
+        self.db.driver = value
 
     def at_object_creation(self):
         super().at_object_creation()
@@ -674,6 +736,22 @@ class Vehicle(MatrixIdMixin, Object):
         self.db.fuel_type = getattr(self.db, "fuel_type", None) or "standard"
         self.db.heat_level = float(getattr(self.db, "heat_level", None) or 0)
         self.db.overheat_threshold = float(getattr(self.db, "overheat_threshold", None) or 100)
+
+        # --- Components: initialize with values already set above ---
+        self.components.add(FuelComponent.create(
+            self,
+            level=self.db.fuel_level,
+            capacity=self.db.fuel_capacity,
+            type=self.db.fuel_type,
+            heat=self.db.heat_level,
+            overheat=self.db.overheat_threshold,
+        ))
+        self.components.add(WearComponent.default_create(self))
+        self.components.add(DriveComponent.create(
+            self,
+            speed_class=self.db.speed_class,
+            skill=self.db.driving_skill,
+        ))
         self.db.security_tier = int(getattr(self.db, "security_tier", None) or 1)
         self.db.security_owner = getattr(self.db, "security_owner", None)
         self.db.security_authorizations = getattr(self.db, "security_authorizations", None) or {}
@@ -927,6 +1005,18 @@ class Vehicle(MatrixIdMixin, Object):
     @property
     def engine_running(self):
         return bool(self.db.engine_running)
+
+    @property
+    def state_machine(self):
+        """
+        Return the VehicleStateMachine for this vehicle (created on first access).
+        Stored in ndb._state_machine (non-persistent; recreated on reload).
+        Use this to trigger validated state transitions:
+            self.state_machine.start_engine()
+            self.state_machine.engage_autopilot()
+        """
+        from world.vehicle_states import get_vehicle_fsm
+        return get_vehicle_fsm(self)
 
     def get_part_condition(self, part_id):
         return _get_part_condition(self, part_id)

@@ -130,6 +130,22 @@ def at_server_start():
     if not ScriptDB.objects.filter(db_key="profiling").first():
         create_script("world.profiling.ProfilingScript", key="profiling", persistent=True)
 
+    # APScheduler: start global scheduler and register recurring jobs
+    try:
+        from world.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as _sched_exc:
+        import logging as _logging
+        _logging.getLogger("evennia").warning(f"[at_server_start] APScheduler failed to start: {_sched_exc}")
+
+    # Whoosh: build/rebuild help search index
+    try:
+        from world.help_search import build_help_index
+        build_help_index()
+    except Exception as _help_exc:
+        import logging as _logging
+        _logging.getLogger("evennia").warning(f"[at_server_start] Help index build failed: {_help_exc}")
+
     # Set ndb baselines (always rebuild — ndb is cleared on every reload)
     try:
         import time
@@ -154,7 +170,11 @@ def at_server_stop():
     This is called just before the server is shut down, regardless
     of it is for a reload, reset or shutdown.
     """
-    pass
+    try:
+        from world.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
 
 
 def at_server_reload_start():

@@ -573,8 +573,12 @@ def node_apply_priority_order(caller, raw_string, **kwargs):
         return node_priority_intro(caller)
 
     caller.db.stat_priority_order = order
-    caller.db.stat_caps           = _compute_stat_caps(order)
-    caller.db.stats               = _randomize_stats(order)
+    _caps  = _compute_stat_caps(order)
+    _stats = _randomize_stats(order)
+    caller.db.stat_caps = _caps
+    caller.db.stats     = _stats
+    from world.rpg.trait_sync import sync_stats_to_traits
+    sync_stats_to_traits(caller, _stats, _caps)
 
     text_body = (
         "|xSequence accepted. The blood has settled.|n\n\n"
@@ -693,6 +697,8 @@ def node_apply_mark(caller, raw_string="", **kwargs):
 
     skills[skill_key] = tier_level
     caller.db.skills = skills
+    from world.rpg.trait_sync import sync_single_skill
+    sync_single_skill(caller, skill_key, tier_level)
     caller.db.chargen_mark_tier_picks_left = picks_left - 1
     return node_skills(caller, raw_string, **kwargs)
 

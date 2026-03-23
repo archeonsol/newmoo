@@ -7,9 +7,12 @@ Look output: room name (colored), desc, "You see a X, a Y and a Z.", character p
 
 import random
 import re
+from evennia import FuncParser
 from evennia.objects.objects import DefaultRoom, DefaultExit
+from evennia.typeclasses.attributes import AttributeProperty
 from evennia.utils import delay
 from evennia.utils.utils import compress_whitespace, iter_to_str
+from evennia.contrib.grid.extended_room.extended_room import func_state
 from evennia.contrib.grid.xyzgrid.xyzroom import XYZRoom
 
 from world.theme_colors import ROOM_COLORS
@@ -54,6 +57,119 @@ def _article_word(name):
     if not n:
         return "a"
     return "an" if n[0].lower() in "aeiou" else "a"
+
+
+try:
+    import inflect as _inflect_mod
+    _INFLECT_ENGINE = _inflect_mod.engine()
+    _INFLECT_AVAILABLE = True
+except ImportError:
+    _INFLECT_ENGINE = None
+    _INFLECT_AVAILABLE = False
+
+
+def _plural_noun(phrase: str) -> str:
+    """
+    Return the plural of a noun phrase using inflect.
+
+    Handles trailing parentheticals like "chrome arm (left)" by stripping the
+    suffix, pluralising the base, then reattaching: "chrome arms (left)".
+
+    If the base word is already plural (e.g. "lungs", "wastes"), inflect would
+    double-pluralise it; we detect this and return the phrase unchanged.
+    Falls back to naive +s if inflect is unavailable.
+    """
+    if not phrase:
+        return phrase
+    # Detect trailing parenthetical: "chrome arm (left)" → base="chrome arm", suffix=" (left)"
+    paren_match = re.search(r"\s*(\([^)]*\))\s*$", phrase)
+    if paren_match:
+        base = phrase[:paren_match.start()].strip()
+        suffix = " " + paren_match.group(1)
+    else:
+        base = phrase
+        suffix = ""
+    if _INFLECT_AVAILABLE:
+        try:
+            singular = _INFLECT_ENGINE.singular_noun(base)
+            # singular_noun returns False when the word is already singular.
+            # It returns the singular string when the word IS plural — but only
+            # treat it as already-plural when the returned singular differs from
+            # the input (avoids false positives like "bolt of cloth" → "bolt of cloth").
+            if singular is not False and singular != base:
+                return base + suffix
+            result = _INFLECT_ENGINE.plural_noun(base)
+            if result:
+                return result + suffix
+        except Exception:
+            pass
+    return base + "s" + suffix
+
+
+def _number_word(n: int) -> str:
+    """Return the English word for a small number (two, three … ten), else the digit string."""
+    if _INFLECT_AVAILABLE:
+        try:
+            return _INFLECT_ENGINE.number_to_words(n)
+        except Exception:
+            pass
+    _WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
+              7: "seven", 8: "eight", 9: "nine", 10: "ten"}
+    return _WORDS.get(n, str(n))
+
+
+def _article_for_room(word: str) -> str:
+    """Return 'a' or 'an' using inflect when available."""
+    if _INFLECT_AVAILABLE:
+        try:
+            return _INFLECT_ENGINE.a(word).split()[0]
+        except Exception:
+            pass
+    return "an" if (word or " ")[0].lower() in "aeiou" else "a"
+
+
+def _group_see_items(items: list[tuple[str, str]]) -> list[str]:
+    """
+    Collapse duplicate objects in the "You see" list.
+
+    Args:
+        items: list of (bare_name, color_code) tuples built by get_display_things.
+               bare_name is the object name with no article and no color markup.
+               color_code is the Evennia color tag to wrap the name in (e.g. "|w").
+
+    Returns:
+        list of formatted strings ready for iter_to_str, e.g.:
+            "a |wtoxin filter|n"          (×1)
+            "two |wtoxin filters|n"       (×2)
+            "a |wRelic of the First Expedition|n"  (unique)
+    """
+    from collections import Counter
+    counts: Counter = Counter()
+    # Preserve insertion order for stable display
+    order: list[str] = []
+    for bare, _color in items:
+        key = bare.lower()
+        if key not in counts:
+            order.append(bare)  # first-seen capitalisation
+        counts[key] += 1
+
+    color = ROOM_DESC_OBJECT_NAME_COLOR
+    result = []
+    for canonical in order:
+        key = canonical.lower()
+        n = counts[key]
+        if n == 1:
+            article = _article_for_room(canonical)
+            result.append(f"{article} {color}{canonical}|n")
+        else:
+            # Pluralise the last word of the name (handles "toxin filter" → "toxin filters",
+            # "bolt of cloth" → "bolts of cloth" via inflect, "chrome arm (left)" → best effort)
+            words = canonical.split()
+            # For multi-word names inflect pluralises the whole phrase
+            plural = _plural_noun(canonical) if _INFLECT_AVAILABLE else (canonical + "s")
+            num_word = _number_word(n)
+            result.append(f"{num_word} {color}{plural}|n")
+    return result
 
 
 def _bike_phrase_for_riding(bike):
@@ -512,7 +628,10 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
             pass
         # Corpses are objects, not character poses; show them in "You see" line only
         characters = [c for c in characters if not _is_corpse(c)]
-        see_items = []
+        # raw_see_items: (bare_name, is_motorcycle_sentence) tuples for grouping.
+        # Motorcycle riding sentences and corpses are kept verbatim (not grouped).
+        raw_see_items = []   # (bare_name_str,) for groupable plain objects
+        verbatim_items = []  # pre-formatted strings that bypass grouping (motorcycles)
         set_place_objects = []
         vehicle_poses = []  # (obj, "is parked here." / "is idling here.")
         for obj in self.contents:
@@ -523,8 +642,7 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
             if _is_corpse(obj):
                 name = obj.get_display_name(looker, **kwargs)
                 short = self._name_for_you_see(name).strip()
-                article = self._article(short)
-                see_items.append((f"{article} {ROOM_DESC_OBJECT_NAME_COLOR}{short}|n").strip())
+                raw_see_items.append(short)
                 continue
             if _is_vehicle(obj):
                 if _is_motorcycle_vehicle(obj):
@@ -533,7 +651,7 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                         rider is looker
                         or self.filter_visible([rider], looker, **kwargs)
                     ):
-                        see_items.append(
+                        verbatim_items.append(
                             _riding_on_motorcycle_sentence(rider, obj, looker, **kwargs)
                         )
                         continue
@@ -554,11 +672,15 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
                     continue
             name = obj.get_display_name(looker, **kwargs)
             short = self._name_for_you_see(name).strip()
-            article = self._article(short)
-            see_items.append((f"{article} {ROOM_DESC_OBJECT_NAME_COLOR}{short}|n").strip())
+            raw_see_items.append(short)
+
+        # Group duplicates: "a toxin filter, a toxin filter" → "two toxin filters"
+        grouped = _group_see_items([(s, ROOM_DESC_OBJECT_NAME_COLOR) for s in raw_see_items])
+        see_items = verbatim_items + grouped
+
         you_see = ""
         if see_items:
-            # Use sep="," so iter_to_str doesn't add extra space (sep in punctuation); result: "A, B and C"
+            # Use sep="," so iter_to_str doesn't add extra space; result: "A, B and C"
             you_see = "You see " + iter_to_str(see_items, sep=",", endsep=" and") + "."
         object_pose_parts = []
         for obj, pose in set_place_objects:
@@ -892,9 +1014,109 @@ class CityRoom(XYZRoom, Room):
     """
     Base room for city grid cells. Inherits XYZ coordinate tags from the contrib
     and full IC appearance from Room.
+
+    Extended detail/state support (mixed in from ExtendedRoom contrib):
+      - room.details: dict of {key: description} for `look <detail>` targets.
+      - room.add_detail(key, desc) / room.get_detail(key) / room.remove_detail(key)
+      - room.room_states: list of active state tags (category "room_state").
+      - room.add_room_state(*states) / room.remove_room_state(*states)
+      - Descriptions may use $state(roomstate, text) FuncParser markup.
+      - room.room_messages: list of ambient strings; room.room_message_rate > 0 enables random repeats.
     """
 
     map_display = False
+
+    # look-targets without database objects (ExtendedRoom detail system)
+    details = AttributeProperty(dict, autocreate=False)
+
+    # tag category for room states (e.g. "on_fire", "flooded")
+    room_state_tag_category = "room_state"
+
+    # Random ambient messages (set room_message_rate > 0 to enable)
+    room_message_rate = 0
+    room_messages = AttributeProperty(list, autocreate=False)
+
+    def _get_funcparser(self, looker):
+        """Return a FuncParser that supports $state() markup in descriptions."""
+        return FuncParser(
+            {"state": func_state},
+            looker=looker,
+            room=self,
+        )
+
+    @property
+    def room_states(self):
+        """All room-state tags currently set on this room."""
+        return list(sorted(self.tags.get(category=self.room_state_tag_category, return_list=True)))
+
+    def add_room_state(self, *room_states):
+        """Set one or more room states (tags with category 'room_state')."""
+        self.tags.batch_add(*((state, self.room_state_tag_category) for state in room_states))
+
+    def remove_room_state(self, *room_states):
+        """Remove one or more room states."""
+        for state in room_states:
+            self.tags.remove(state, category=self.room_state_tag_category)
+
+    def add_detail(self, key, description):
+        """
+        Add a look-detail to the room.
+
+        Args:
+            key (str): The detail identifier (case-insensitive).
+            description (str): Text shown when looking at this detail.
+                May include $state() FuncParser markup.
+        """
+        details = self.details or {}
+        details[key.lower()] = description
+        self.details = details
+
+    set_detail = add_detail
+
+    def remove_detail(self, key, *args):
+        """Remove a detail by key (case-insensitive). Silent if not found."""
+        details = self.details or {}
+        details.pop(key.lower(), None)
+        self.details = details
+
+    del_detail = remove_detail
+
+    def get_detail(self, key, looker=None):
+        """
+        Look up a detail by key. Exact match first, then startswith.
+
+        Args:
+            key (str): The detail to look up.
+            looker (Object, optional): The looker (passed to FuncParser).
+
+        Returns:
+            str or None: The detail text (parsed), or None if not found.
+        """
+        key = key.lower()
+        details = self.details or {}
+        detail_keys = tuple(details.keys())
+
+        detail = None
+        if key in detail_keys:
+            detail = details[key]
+        else:
+            lkey = len(key)
+            startswith_matches = sorted(
+                (
+                    (dk, abs(lkey - len(dk)))
+                    for dk in detail_keys
+                    if dk.startswith(key)
+                ),
+                key=lambda tup: tup[1],
+            )
+            if startswith_matches:
+                detail = details[startswith_matches[0][0]]
+
+        if detail:
+            detail = self._get_funcparser(looker).parse(detail)
+        return detail
+
+    return_detail = get_detail
 
     def at_object_creation(self):
         super().at_object_creation()

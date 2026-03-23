@@ -103,6 +103,18 @@ def _check_cyberware_conflicts(target, cyberware_obj):
     if any(type(c) is type(cyberware_obj) for c in installed):
         return f"{type(cyberware_obj).__name__} is already installed."
     installed_types = {type(c).__name__ for c in installed}
+    new_type = type(cyberware_obj).__name__
+
+    # networkx dependency graph validation: check the full proposed set for cycles.
+    try:
+        from world.cyberware_graph import validate_install_order
+        proposed = list(installed_types) + [new_type]
+        ok, result = validate_install_order(proposed)
+        if not ok:
+            return f"Dependency conflict: {result}"
+    except Exception:
+        pass
+
     for conflict_name in (getattr(cyberware_obj, "conflicts_with", None) or []):
         if conflict_name in installed_types:
             return f"Conflicts with installed {conflict_name}."
@@ -142,10 +154,10 @@ def _room_msg(caller, target, table, txt=None):
 
 def _select_complication(phase):
     pool = _COMPLICATION_WEIGHTS.get(phase, _COMPLICATION_WEIGHTS["integration"])
-    weighted = []
-    for key, wt in pool:
-        weighted.extend([key] * max(1, int(wt)))
-    return random.choice(weighted) if weighted else None
+    if not pool:
+        return None
+    keys, weights = zip(*pool)
+    return random.choices(keys, weights=weights, k=1)[0]
 
 
 def _apply_complication(state, phase):

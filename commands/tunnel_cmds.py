@@ -44,7 +44,8 @@ class CmdAutopilot(Command):
             caller.msg("AVs don't use tunnels. Fly through the shaft.")
             return
 
-        args = (self.args or "").strip().lower()
+        raw_args = (self.args or "").strip()
+        args = raw_args.lower()
 
         if args in ("stop", "off", "cancel"):
             if getattr(vehicle.db, "autopilot_active", False):
@@ -77,6 +78,16 @@ class CmdAutopilot(Command):
             caller.msg("You're not driving.")
             return
 
-        ok, msg = tun.start_autopilot(vehicle, caller, args)
+        # Try lark grammar parser for structured argument extraction.
+        sector = args
+        try:
+            from world.command_grammars import parse_autopilot
+            parsed = parse_autopilot(raw_args)
+            if parsed and parsed.get("sector"):
+                sector = parsed["sector"].lower()
+        except Exception:
+            pass
+
+        ok, msg = tun.start_autopilot(vehicle, caller, sector)
         if not ok and msg:
             caller.msg(f"|r{msg}|n")

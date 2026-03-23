@@ -3,6 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 
 import re
+
+try:
+    import arrow as _arrow
+    _ARROW_AVAILABLE = True
+except ImportError:
+    _ARROW_AVAILABLE = False
 import shlex
 
 from commands.base_cmds import Command
@@ -17,10 +23,14 @@ from world.handset_call_utils import (
 
 
 def _ts():
+    if _ARROW_AVAILABLE:
+        return _arrow.now().format("MMM DD HH:mm")
     return datetime.now().strftime("%b %d %H:%M")
 
 
 def _clock():
+    if _ARROW_AVAILABLE:
+        return _arrow.now().format("HH:mm")
     return datetime.now().strftime("%H:%M")
 
 

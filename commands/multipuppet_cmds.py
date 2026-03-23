@@ -154,16 +154,16 @@ def _multi_puppet_list(account, session=None):
     npc_ids = _npc_puppet_ids(account)
     main = _main_puppet(account, session)
     if main and getattr(main, "id", None) is not None:
-        # Safety: if the main character somehow ended up in the NPC list, remove it.
         pid = main.id
+        # Safety: if the main character is in the NPC list, exclude it from the
+        # returned list but do NOT write to account.db.multi_puppets here.
+        # _multi_puppet_list is called from many read paths (including during
+        # temporary session.puppet swaps for p2/p3 relay) and a side-effect write
+        # would corrupt the list when session.puppet is temporarily an NPC.
+        # Actual DB cleanup happens only in _prune_dead_puppets and explicit
+        # prune calls (e.g. StaffOnlyPuppet, CmdAddPuppet).
         if pid in npc_ids:
             npc_ids = [oid for oid in npc_ids if oid != pid]
-            account.db.multi_puppets = npc_ids
-            obj = _get_object_by_id(pid)
-            if obj:
-                _clear_attr(obj, "_multi_puppet_account_id")
-                _clear_attr(obj, "_multi_puppet_slot")
-                _clear_relay_cache(obj)
         return [pid] + npc_ids
     return npc_ids
 
@@ -188,17 +188,19 @@ def _resolve_multi_puppet(account, index, session=None):
     Return (Character or None, 0-based index).
     index 0 = main character (session.puppet, p1)
     index 1+ = NPC puppets from db list
+
+    Uses _multi_puppet_list so the main character is never treated as an NPC
+    slot even if it was accidentally stored in account.db.multi_puppets.
     """
+    ids = _multi_puppet_list(account, session=session)
+    if index < 0 or index >= len(ids):
+        return None, index
     if index == 0:
         char = _main_puppet(account, session)
         return char, 0
-    npc_ids = _npc_puppet_ids(account)
-    npc_index = index - 1  # p2 -> npc_ids[0], p3 -> npc_ids[1], ...
-    if npc_index < 0 or npc_index >= len(npc_ids):
-        return None, index
     from evennia.utils.search import search_object
     try:
-        ref = "#%s" % int(npc_ids[npc_index])
+        ref = "#%s" % int(ids[index])
         result = search_object(ref)
         return (result[0] if result else None), index
     except (TypeError, ValueError):
@@ -593,6 +595,8 @@ class CmdPuppetSlot(BaseCommand):
         if not session:
             self.msg("No session.")
             return
+        # Renumber NPC relay slots so _multi_puppet_slot values are always current.
+        _ensure_current_puppet_in_list(account, session=session)
         # Parse slot from cmdstring: p1 -> 0, p2 -> 1, ...
         raw = (self.cmdstring or "").strip().lower()
         if raw.startswith("p") and len(raw) >= 2 and raw[1:].isdigit():
@@ -614,6 +618,7 @@ class CmdPuppetSlot(BaseCommand):
 
         old_puppet = getattr(session, "puppet", None)
         session.puppet = char
+
         try:
             d = char.execute_cmd(sub_cmd, session=session)
             if d is not None and hasattr(d, "addBoth"):

@@ -3,6 +3,113 @@ Shared UI rendering helpers for text menus/panels.
 """
 import random
 
+# ---------------------------------------------------------------------------
+# wcwidth — display-accurate column alignment for double-width characters
+# ---------------------------------------------------------------------------
+try:
+    from wcwidth import wcswidth as _wcswidth
+    _WCWIDTH_AVAILABLE = True
+except ImportError:
+    _WCWIDTH_AVAILABLE = False
+
+
+def display_ljust(text: str, width: int) -> str:
+    """Left-justify text to display width, accounting for double-width characters."""
+    if _WCWIDTH_AVAILABLE:
+        try:
+            dw = _wcswidth(text)
+            if dw >= 0:
+                pad = max(0, width - dw)
+                return text + " " * pad
+        except Exception:
+            pass
+    return text.ljust(width)
+
+
+# ---------------------------------------------------------------------------
+# pyfiglet — ASCII art title headers
+# ---------------------------------------------------------------------------
+try:
+    import pyfiglet as _pyfiglet
+    _PYFIGLET_AVAILABLE = True
+except ImportError:
+    _PYFIGLET_AVAILABLE = False
+
+
+def figlet_banner(text: str, font: str = "small", width: int = 52, color: str = "|w", center: bool = False) -> str:
+    """
+    Render text as FIGlet ASCII art, cropped to width.
+    Returns a colored multi-line string. Falls back to plain text if pyfiglet unavailable.
+
+    If center=True, each line is padded with leading spaces to center it within `width`.
+
+    Color is applied as a single prefix on each line so Evennia parses it correctly
+    without double-processing from ANSIString wrappers in panel renderers.
+    """
+    if not _PYFIGLET_AVAILABLE:
+        return f"{color}{text}|n"
+    try:
+        rendered = _pyfiglet.figlet_format(text, font=font, width=width)
+        lines = rendered.rstrip("\n").split("\n")
+
+        # Measure the natural art width before any escaping (plain ASCII, so len() is accurate).
+        art_width = max((len(line) for line in lines if line.strip()), default=0)
+
+        colored = []
+        for line in lines:
+            if line.strip():
+                # FIGlet art contains raw | and \ characters. Evennia uses |
+                # as its color-code prefix (|r, |n, etc.) and treats \| as an
+                # escaped literal pipe. We must escape all pipes in the art as
+                # || (Evennia's literal-pipe escape) before wrapping with color
+                # tags, otherwise art characters get misread as color codes.
+                safe = line.replace("|", "||")
+                if center:
+                    pad = max(0, (width - art_width) // 2)
+                    safe = " " * pad + safe
+                colored.append(f"{color}{safe}|n")
+            else:
+                colored.append("")
+        return "\n".join(colored)
+    except Exception:
+        return f"{color}{text}|n"
+
+
+# ---------------------------------------------------------------------------
+# humanize — natural-language number and timestamp formatting
+# ---------------------------------------------------------------------------
+try:
+    import humanize as _humanize
+    _HUMANIZE_AVAILABLE = True
+except ImportError:
+    _HUMANIZE_AVAILABLE = False
+
+
+def naturaltime(dt) -> str:
+    """Return a human-readable relative time string, e.g. '3 minutes ago'."""
+    if _HUMANIZE_AVAILABLE:
+        try:
+            return _humanize.naturaltime(dt)
+        except Exception:
+            pass
+    import datetime as _datetime
+    if isinstance(dt, (int, float)):
+        dt = _datetime.datetime.fromtimestamp(dt)
+    try:
+        return dt.strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        return str(dt)
+
+
+def intword(n: int) -> str:
+    """Return a formatted number string, e.g. '1.2 million' or '3,400'."""
+    if _HUMANIZE_AVAILABLE:
+        try:
+            return _humanize.intword(n) if n >= 1_000_000 else _humanize.intcomma(n)
+        except Exception:
+            pass
+    return f"{n:,}"
+
 
 def fade_rule(
     width: int,

@@ -7,13 +7,17 @@ Tunnel rooms use tags only (see module docstring in repo / builder docs):
 - tunnel_endpoint: slum_exit, guild_exit, etc. — marks each end
 """
 
-from collections import deque
-
 from evennia.utils import delay
 from evennia.utils.search import search_object, search_tag
 from evennia.objects.objects import DefaultExit
 
 from world.vehicle_movement import _after_vehicle_move_hook, execute_vehicle_move
+from world.movement.tunnel_graph import (
+    find_tunnel_route as _nx_find_tunnel_route,
+    get_valid_destinations as _nx_get_valid_destinations,
+    get_eta_seconds as _nx_get_eta_seconds,
+    invalidate_tunnel_graph,
+)
 
 # Maps a sector name to the endpoint tag to reach when autopiloting TO that sector.
 SECTOR_TO_ENDPOINT = {
@@ -71,80 +75,19 @@ def _get_valid_destinations(room):
     """
     From this room, what sectors can you autopilot to?
     Returns a list of sector name strings, or empty list if not in a tunnel or no valid hop.
+    Delegates to the networkx-backed tunnel_graph module.
     """
-    network = _get_tunnel_network(room)
-    if not network:
-        return []
-
-    endpoints = _get_tunnel_endpoints(network)
-    if not endpoints:
-        return []
-
-    try:
-        current_ep_tags = room.tags.get(category="tunnel_endpoint", return_list=True) or []
-    except TypeError:
-        current_ep_tags = []
-
-    destinations = []
-    for ep_tag, ep_room in endpoints.items():
-        sector = ENDPOINT_TO_SECTOR.get(ep_tag)
-        if not sector:
-            continue
-        if ep_tag in current_ep_tags:
-            continue
-        destinations.append(sector)
-    return destinations
+    return _nx_get_valid_destinations(room)
 
 
 def _find_tunnel_route(start_room, destination_sector):
     """
-    BFS from start_room to the endpoint room for destination_sector.
-    Only traverses rooms in the same tunnel network.
-    Returns a list of room objects (the path, excluding start), or None.
+    Find the shortest route from start_room to the endpoint for destination_sector.
+    Returns a list of room IDs (excluding start), or None if no route.
+    Delegates to the networkx-backed tunnel_graph module (cached DiGraph).
     """
-    if not start_room:
-        return None
-
-    network = _get_tunnel_network(start_room)
-    if not network:
-        return None
-
     dest_sector = (destination_sector or "").strip().lower()
-    target_ep_tag = SECTOR_TO_ENDPOINT.get(dest_sector)
-    if not target_ep_tag:
-        return None
-
-    endpoints = _get_tunnel_endpoints(network)
-    target_room = endpoints.get(target_ep_tag)
-    if not target_room:
-        return None
-
-    visited = {start_room.id}
-    queue = deque([(start_room, [])])
-
-    while queue:
-        current, path = queue.popleft()
-
-        for obj in current.contents:
-            if not isinstance(obj, DefaultExit) or not getattr(obj, "destination", None):
-                continue
-            dest = obj.destination
-            if dest.id in visited:
-                continue
-
-            visited.add(dest.id)
-            new_path = path + [dest]
-
-            if dest.id == target_room.id:
-                return new_path
-
-            dest_network = _get_tunnel_network(dest)
-            if dest_network != network:
-                continue
-
-            queue.append((dest, new_path))
-
-    return None
+    return _nx_find_tunnel_route(start_room, dest_sector)
 
 
 def cancel_autopilot(vehicle, reason=""):
@@ -199,18 +142,20 @@ def start_autopilot(vehicle, driver, destination_sector):
         cancel_autopilot(vehicle, reason="Rerouting.")
 
     vehicle.db.autopilot_active = True
-    vehicle.db.autopilot_route = [r.id for r in route]
+    # _find_tunnel_route now returns a list of room IDs directly (networkx-backed)
+    vehicle.db.autopilot_route = route
     vehicle.db.autopilot_step = 0
     vehicle.db.autopilot_driver = getattr(driver, "id", None)
     vehicle.db.autopilot_destination = destination_sector
 
     speed = vehicle.db.speed_class or "normal"
     step_delay = AUTOPILOT_STEP_DELAY.get(speed, 4)
+    eta = _nx_get_eta_seconds(current_room, destination_sector, speed) or (len(route) * step_delay)
 
     if driver:
         driver.msg(
             f"|g[AUTOPILOT] Engaged. Heading to {destination_sector}: {len(route)} segments. "
-            f"ETA ~{len(route) * step_delay}s.|n"
+            f"ETA ~{eta}s.|n"
         )
     _msg_vehicle_occupants(vehicle, driver, "|x[AUTOPILOT] Route set. Hold on.|n")
 

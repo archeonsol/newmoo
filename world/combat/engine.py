@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import logging
 import random
 import time
 from evennia.utils import logger
+
+try:
+    from world.gamelog import get_logger as _get_gamelog
+    _log = _get_gamelog(__name__)
+except Exception:
+    _log = logging.getLogger("evennia")
 
 from world.theme_colors import COMBAT_COLORS as CC
 from world.medical import BODY_PARTS, apply_trauma, get_brutal_hit_flavor
@@ -874,6 +881,18 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
         if absorbed_fully and damage <= 0:
             _emit_soak(attacker, defender, effective_defender, body_part, weapon_key, wielded_obj, move_name, hit_shield)
         else:
+            try:
+                _log.info(
+                    "combat.hit",
+                    attacker=getattr(attacker, "key", "?"),
+                    target=getattr(effective_defender, "key", "?"),
+                    damage=damage,
+                    weapon=weapon_key,
+                    body_part=body_part,
+                    critical=is_critical,
+                )
+            except Exception:
+                pass
             trauma_result = apply_trauma(
                 effective_defender,
                 body_part,

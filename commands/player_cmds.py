@@ -98,7 +98,7 @@ class CmdXp(Command):
                 LANGUAGE_MAX_PERCENT,
             )
 
-            output += "\n|wLanguages|n (you can invest XP here; details are obscured in-world):\n"
+            output += "\n|wLanguages|n:\n"
             max_slots = max_other_languages(caller)
             learned = [k for k in LEARNABLE_LANGUAGE_KEYS if get_language_percent(caller, k) > 0]
             slots_used = len(learned)
@@ -199,6 +199,14 @@ class CmdXp(Command):
 
                         # Force the database to save
                         setattr(caller.db, db_key, db_dict)
+
+                        # Mirror to TraitHandler
+                        if sub == "stat":
+                            from world.rpg.trait_sync import sync_single_stat
+                            sync_single_stat(caller, attr_key, stored_new)
+                        elif sub == "skill":
+                            from world.rpg.trait_sync import sync_single_skill
+                            sync_single_skill(caller, attr_key, stored_new)
 
                         # Deduct XP
                         caller.db.xp = xp_now - total_spent

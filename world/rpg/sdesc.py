@@ -209,16 +209,50 @@ def get_gender_term(character):
     return _gender_term(getattr(character.db, "gender", None) or getattr(character.db, "pronoun", None))
 
 
-def _article_for(word):
-    """Return 'a' or 'an' for the given word (e.g. adjective before man/woman/person)."""
+try:
+    import inflect as _inflect_mod
+    _INFLECT_ENGINE = _inflect_mod.engine()
+    _INFLECT_AVAILABLE = True
+except ImportError:
+    _INFLECT_ENGINE = None
+    _INFLECT_AVAILABLE = False
+
+
+def _article_for(word: str) -> str:
+    """
+    Return 'a' or 'an' for the given word based on its initial sound.
+
+    Uses inflect.engine().a() when available (handles edge cases like
+    'honest' → 'an honest', 'uniform' → 'a uniform', 'hour' → 'an hour').
+    Falls back to a vowel-start heuristic with a curated exception list.
+    """
     if not word:
         return "a"
-    w = str(word).strip().lower()
+    w = str(word).strip()
     if not w:
         return "a"
-    # Words that take 'an': vowel sound at start
-    an_words = ("average", "amazonian", "elegant", "eastern", "honorable", "honest", "individual", "entity")
-    if w in an_words or w.startswith(("a", "e", "i", "o", "u")):
+    if _INFLECT_AVAILABLE:
+        try:
+            # inflect.a("average man") → "an average man"; we only want the article
+            result = _INFLECT_ENGINE.a(w)
+            # result is e.g. "an average" or "a rangy" — take the first token
+            return result.split()[0]
+        except Exception:
+            pass
+    # Fallback: vowel-start heuristic with curated exceptions for silent/consonant-sound vowels
+    lower = w.lower()
+    # Words that start with a vowel letter but have a consonant sound → 'a'
+    consonant_sound_exceptions = ("uniform", "unique", "unit", "union", "university",
+                                  "universal", "use", "used", "user", "usual", "utility",
+                                  "european", "euphemism", "ewe", "one", "once")
+    if lower.startswith(consonant_sound_exceptions):
+        return "a"
+    # Words that start with a consonant letter but have a vowel sound → 'an'
+    vowel_sound_exceptions = ("honest", "honour", "honor", "hour", "heir", "heirloom",
+                              "herb")  # 'herb' is 'an herb' in American English
+    if lower.startswith(vowel_sound_exceptions):
+        return "an"
+    if lower[0] in "aeiou":
         return "an"
     return "a"
 

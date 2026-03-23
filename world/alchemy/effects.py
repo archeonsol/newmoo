@@ -7,6 +7,16 @@ import time
 from evennia.utils import delay
 from evennia.utils import logger
 
+try:
+    from boltons.mathutils import clamp as _clamp
+except ImportError:
+    def _clamp(val, lower=None, upper=None):
+        if lower is not None:
+            val = max(lower, val)
+        if upper is not None:
+            val = min(upper, val)
+        return val
+
 from world.alchemy import DRUGS
 from world.alchemy.crafting import potency_multiplier, tolerance_multiplier
 from world.buffs import build_drug_buff_class
@@ -31,7 +41,7 @@ def _scale_stat_value(base_value, potency_mult):
 
 def _modify_psychosis(character, delta):
     cur = int(getattr(character.db, "cyberpsychosis_score", 0) or 0)
-    character.db.cyberpsychosis_score = max(0, min(200, cur + int(delta)))
+    character.db.cyberpsychosis_score = _clamp(cur + int(delta), 0, 200)
 
 
 def _flush_alcohol(character):
@@ -335,7 +345,7 @@ def apply_drug(character, drug_key, quality=50, suspicious=False, administrator=
     if "tolerance_buildup_fast" in (drug.get("effects", {}).get("special") or []):
         tol_rate *= 2.0
     tol_mult = tolerance_multiplier(level, tol_rate)
-    qual = max(0, min(100, int(quality)))
+    qual = _clamp(int(quality), 0, 100)
     potency_mult = potency_multiplier(qual) * tol_mult
 
     eff = drug.get("effects", {}) or {}

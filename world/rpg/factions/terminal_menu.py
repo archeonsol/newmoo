@@ -2,10 +2,16 @@
 EvMenu for faction registry terminals. IC terminal aesthetic; staff bypass.
 """
 
-import time
-from datetime import datetime
-
 from evennia.utils.ansi import strip_ansi
+from world.ui_utils import display_ljust, figlet_banner, naturaltime, intword
+
+try:
+    from more_itertools import chunked as _chunked
+except ImportError:
+    def _chunked(iterable, n):
+        lst = list(iterable)
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
 from evennia.utils.search import search_object
 
 from world.rpg.factions import get_faction, is_faction_member
@@ -59,19 +65,15 @@ def _format_joined_ago(character, faction_key):
     joined = (character.db.faction_joined or {}).get(faction_key)
     if not joined:
         return "—"
-    delta = time.time() - joined
-    days = int(delta / 86400)
-    if days < 1:
-        return "<1d"
-    return f"{days}d"
+    return naturaltime(joined)
 
 
 def _pay_status_line(caller, fdata):
     can, reason, amount = can_collect_pay(caller, fdata["key"])
     if can:
-        return f"{amount}/week (available)"
+        return f"{intword(amount)}/week (available)"
     weekly = get_rank_pay(fdata["ranks"], get_member_rank(caller, fdata["key"]))
-    return f"{weekly}/week ({reason})"
+    return f"{intword(weekly)}/week ({reason})"
 
 
 def _get_terminal(caller, kwargs):
@@ -142,7 +144,6 @@ def node_terminal_main(caller, raw_string, **kwargs):
     perm = get_member_permission(caller, fdata["key"])
     rank = get_member_rank(caller, fdata["key"])
     rname = get_rank_name(fdata["ranks"], rank) if rank else "—"
-
     text = (
         f"{_faction_line(fdata)}\n"
         f"  {fdata['color']}{fdata['name'].upper()} — REGISTRY TERMINAL{_N}\n"
@@ -218,8 +219,8 @@ def node_view_roster(caller, raw_string, **kwargs):
 
     roster = get_faction_roster(fdata["key"], limit=50)
     total = len(roster)
-    start = page * ROSTER_PAGE_SIZE
-    chunk = roster[start : start + ROSTER_PAGE_SIZE]
+    pages = list(_chunked(roster, ROSTER_PAGE_SIZE))
+    chunk = pages[page] if page < len(pages) else []
 
     lines = [
         f"{_faction_line(fdata, '-')}",
@@ -229,15 +230,15 @@ def node_view_roster(caller, raw_string, **kwargs):
     for char, rnk in chunk:
         rname = get_rank_name(fdata["ranks"], rnk)
         joined = _format_joined_ago(char, fdata["key"])
-        lines.append(
-            f"  {str(char.key)[:22].ljust(22)} [{rnk}] {rname[:16].ljust(16)} {joined:>5}"
-        )
+        name_col = display_ljust(str(char.key)[:22], 22)
+        rank_col = display_ljust(rname[:16], 16)
+        lines.append(f"  {name_col} [{rnk}] {rank_col} {joined:>5}")
     lines.append(f"{_faction_line(fdata, '-')}")
     lines.append(f"  {total} member(s). (page {page + 1})")
 
     text = "\n".join(lines) + "\n"
     options = [{"key": "q", "desc": "Back", "goto": ("node_terminal_main", {"terminal": terminal})}]
-    if start > 0:
+    if page > 0:
         options.insert(
             0,
             {
@@ -249,7 +250,7 @@ def node_view_roster(caller, raw_string, **kwargs):
                 ),
             },
         )
-    if start + ROSTER_PAGE_SIZE < total:
+    if (page + 1) * ROSTER_PAGE_SIZE < total:
         options.insert(
             0,
             {
@@ -277,7 +278,7 @@ def node_own_record(caller, raw_string, **kwargs):
     last_pay = (caller.db.faction_pay_collected or {}).get(fdata["key"])
     pay_s = "Never"
     if last_pay:
-        pay_s = datetime.utcfromtimestamp(last_pay).strftime("%Y-%m-%d %H:%M UTC")
+        pay_s = naturaltime(last_pay)
 
     log = caller.db.faction_log or []
     log_lines = [e for e in log if e.get("faction") == fdata["key"]][-10:]

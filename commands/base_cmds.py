@@ -65,6 +65,12 @@ class Command(BaseCommand):
     def parse(self):
         """Extract switches and args from raw_string. Sets self.switches (list) and self.args (str)."""
         raw = self.raw_string or ""
+        try:
+            import ftfy
+            raw = ftfy.fix_text(raw)
+            self.raw_string = raw
+        except Exception:
+            pass
         self.switches = []
         parts = raw.split(None, 1)
         if parts:

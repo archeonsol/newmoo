@@ -35,47 +35,78 @@ from world.rpg.bank import has_account, get_bank_balance
 from world.rpg.shop import find_vendor_in_room, format_shop_listing, buy_item
 
 # ---------------------------------------------------------------------------
-# Shared UI helpers
+# Shared UI helpers  (open-right-border, ANSIString-safe)
 # ---------------------------------------------------------------------------
 
-_BOX_W = 44
+_W = 60
 _N = "|n"
 _DIM = "|x"
 _LABEL = "|w"
 _ACCENT = "|c"
+_GOLD = "|y"
 _ERR = "|r"
 _OK = "|g"
 
 
-def _hline(char="═"):
-    return f"{_ACCENT}{'═' * _BOX_W}{_N}"
+def _pline(content="", indent=2):
+    """Panel row: left border + content, no right border (ANSI-safe)."""
+    from evennia.utils.ansi import ANSIString
+    padded = ANSIString(f"{' ' * indent}{content}").ljust(_W - 1)
+    return f"{_ACCENT}│{_N}{padded}"
 
 
-def _hline_thin():
-    return f"{_DIM}{'─' * _BOX_W}{_N}"
+def _pheader(title, subtitle=None):
+    """Decorative open-right panel header."""
+    from evennia.utils.ansi import ANSIString
+    from world.ui_utils import fade_rule
+    title_len = len(ANSIString(title))
+    left_fill = 3
+    right_w = max(4, _W - 1 - left_fill - title_len - 2)
+    top = (
+        f"{_ACCENT}╔{'═' * left_fill}"
+        f"[{_GOLD}{title}{_ACCENT}]"
+        f"{_DIM}{fade_rule(right_w, '═')}{_N}"
+    )
+    lines = [top]
+    if subtitle:
+        lines.append(_pline(f"{_DIM}{subtitle}{_N}"))
+    from world.ui_utils import fade_rule as _fr
+    lines.append(f"{_ACCENT}╟{_DIM}{_fr(_W - 1, '─')}{_N}")
+    return "\n".join(lines)
 
 
-def _row(text, fill=" "):
-    from evennia.utils.ansi import strip_ansi
-    visible = len(strip_ansi(text))
-    pad = max(0, _BOX_W - 2 - visible)
-    return f"{_ACCENT}║{_N} {text}{fill * pad} {_ACCENT}║{_N}"
+def _psection(label):
+    """In-panel section label with fading rule."""
+    from world.ui_utils import fade_rule
+    raw = f"── {label} "
+    rest = max(0, _W - 1 - len(raw))
+    return f"{_DIM}{raw}{fade_rule(rest, '─')}{_N}"
+
+
+def _pkv(key, value, key_w=12):
+    """Key · · · value row."""
+    dots = "." * max(1, key_w - len(key))
+    return _pline(f"{_LABEL}{key}{_N}{_DIM}{dots}{_N} {value}")
+
+
+def _pclose():
+    from world.ui_utils import fade_rule
+    return f"{_ACCENT}╚{_DIM}{fade_rule(_W - 1, '─')}{_N}"
 
 
 def _receipt(vendor_name, items_desc, total, remaining_wallet):
-    """Return a styled purchase receipt block."""
-    lines = [
-        _hline(),
-        _row(f"{_ACCENT}RECEIPT{_N}"),
-        _hline_thin(),
-        _row(f"{_LABEL}Vendor:{_N}   {vendor_name}"),
-        _row(f"{_LABEL}Item:{_N}     {items_desc}"),
-        _hline_thin(),
-        _row(f"{_LABEL}Paid:{_N}     {format_currency(total)}"),
-        _row(f"{_DIM}Remaining:{_N} {format_currency(remaining_wallet)}"),
-        _hline(),
-    ]
-    return "\n".join(lines)
+    """Return a styled purchase receipt."""
+    return "\n".join([
+        _pheader("RECEIPT"),
+        _pkv("Vendor",    vendor_name),
+        _pkv("Item",      items_desc),
+        _pline(),
+        _psection("PAYMENT"),
+        _pkv("Paid",      format_currency(total)),
+        _pkv("On Hand",   format_currency(remaining_wallet)),
+        _pline(),
+        _pclose(),
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -662,17 +693,18 @@ class CmdWire(Command):
         bank_bal = get_bank_balance(caller)
 
         lines = [
-            _hline(),
-            _row(f"{_ACCENT}WIRE TRANSFER{_N}"),
-            _hline_thin(),
-            _row(f"{_LABEL}To:{_N}       {network_id}  {_DIM}({recipient.key}){_N}"),
-            _row(f"{_LABEL}Amount:{_N}   {format_currency(amount)}"),
-            _row(f"{_LABEL}Fee:{_N}      {format_currency(fee)}  ({_DIM}1%{_N})"),
-            _row(f"{_LABEL}Total:{_N}    {format_currency(total)}"),
-            _hline_thin(),
-            _row(f"{_DIM}Bank balance: {format_currency(bank_bal)}{_N}"),
-            _hline(),
-            f"  Type {_LABEL}yes{_N} to confirm, or anything else to cancel.",
+            _pheader("WIRE TRANSFER", subtitle="Review before confirming."),
+            _pkv("To",      f"{_ACCENT}{network_id}{_N}  {_DIM}({recipient.key}){_N}"),
+            _pkv("Amount",  format_currency(amount)),
+            _pkv("Fee",     f"{format_currency(fee)}  {_DIM}(1%){_N}"),
+            _pkv("Total",   f"{_GOLD}{format_currency(total, color=False)}{_N}"),
+            _pline(),
+            _psection("ACCOUNT"),
+            _pkv("Bank Bal", format_currency(bank_bal)),
+            _pline(),
+            _pline(f"Type {_LABEL}yes{_N} to confirm, or anything else to cancel."),
+            _pline(),
+            _pclose(),
         ]
         caller.msg("\n".join(lines))
 
@@ -727,15 +759,15 @@ class CmdWireConfirm(Command):
 
         if ok:
             lines = [
-                _hline(),
-                _row(f"{_OK}TRANSFER COMPLETE{_N}"),
-                _hline_thin(),
-                _row(f"{_LABEL}Sent:{_N}      {format_currency(amount)}"),
-                _row(f"{_LABEL}Fee:{_N}       {format_currency(fee)}"),
-                _row(f"{_LABEL}Recipient:{_N} {recip_name}"),
-                _hline_thin(),
-                _row(f"{_DIM}Bank balance: {format_currency(get_bank_balance(caller))}{_N}"),
-                _hline(),
+                _pheader("TRANSFER COMPLETE", subtitle="Funds dispatched via Matrix routing."),
+                _pkv("Sent",      f"{_OK}{format_currency(amount, color=False)}{_N}"),
+                _pkv("Fee",       format_currency(fee)),
+                _pkv("Recipient", f"{_ACCENT}{recip_name}{_N}"),
+                _pline(),
+                _psection("ACCOUNT"),
+                _pkv("Bank Bal",  format_currency(get_bank_balance(caller))),
+                _pline(),
+                _pclose(),
             ]
             caller.msg("\n".join(lines))
 
