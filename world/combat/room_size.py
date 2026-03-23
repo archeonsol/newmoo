@@ -80,7 +80,8 @@ def get_smoke_attack_penalty(room, weapon_key: str) -> int:
     try:
         from world.ammo import is_ranged_weapon
     except ImportError:
-        is_ranged_weapon = lambda k: k in ("sidearm", "longarm", "automatic")
+        # Fallback uses the same plural key names as ROOM_SIZE_MODIFIERS.
+        is_ranged_weapon = lambda k: k in ("sidearms", "longarms", "automatics")
     if is_ranged_weapon(weapon_key):
         return -15
     return 0

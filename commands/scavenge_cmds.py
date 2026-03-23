@@ -2,6 +2,9 @@
 Scavenge/loot commands: CmdScavenge, CmdLoot, CmdSkin, CmdButcher, CmdSever, _loot_finish.
 """
 
+import random
+import time
+
 from evennia.utils import logger
 from commands.base_cmds import Command, _command_character
 from commands.inventory_cmds import _update_primary_wielded
@@ -30,10 +33,9 @@ def _loot_finish(caller_id, corpse_id):
     if caller.location != corpse.location:
         caller.msg("You are no longer next to the corpse.")
         return
-    looted_by = list(corpse.db.looted_by or [])
-    if caller.id not in looted_by:
-        looted_by.append(caller.id)
-        corpse.db.looted_by = looted_by
+    looted_by = set(corpse.db.looted_by or [])
+    looted_by.add(caller.id)
+    corpse.db.looted_by = list(looted_by)
     worn_objs = set(get_worn_items(corpse))
     contents = [o for o in corpse.contents if o != caller and o not in worn_objs]
     cname = corpse.get_display_name(caller)
@@ -86,8 +88,21 @@ class CmdScavenge(Command):
             caller.msg("There is nothing here to scavenge.")
             return
 
+        # Per-location cooldown (8 hours). Check BEFORE burning a daily charge so a
+        # cooldown block doesn't cost the player a use.
+        location_key = tuple(loc.coordinates) if getattr(loc, "coordinates", None) is not None else getattr(loc, "id", None)
+        if location_key is not None:
+            now = time.time()
+            cooldowns = dict(getattr(caller.db, "scavenge_location_cooldowns", None) or {})
+            # Prune expired entries while we have the dict open.
+            cooldowns = {k: v for k, v in cooldowns.items() if now - v < 8 * 3600}
+            if cooldowns.get(location_key) and (now - cooldowns[location_key]) < 8 * 3600:
+                caller.msg("You've already looked here.")
+                return
+            # Save pruned dict (cooldown for this location recorded after the search completes).
+            caller.db.scavenge_location_cooldowns = cooldowns
+
         # Global daily limit (resets at server midnight UTC); depends on scavenging skill level.
-        import time
         today = get_server_date_key()
         daily = getattr(caller.db, "scavenge_daily", None) or {}
         if daily.get("date") != today:
@@ -99,19 +114,6 @@ class CmdScavenge(Command):
             return
         daily["count"] = (daily.get("count") or 0) + 1
         caller.db.scavenge_daily = daily
-
-        # Per-location cooldown (8 hours). Use room coordinates for wilderness (rooms cycle).
-        location_key = tuple(loc.coordinates) if getattr(loc, "coordinates", None) is not None else getattr(loc, "id", None)
-        if location_key is not None:
-            now = time.time()
-            cooldowns = dict(getattr(caller.db, "scavenge_location_cooldowns", None) or {})
-            # Prune expired entries
-            cooldowns = {k: v for k, v in cooldowns.items() if now - v < 8 * 3600}
-            if cooldowns.get(location_key) and (now - cooldowns[location_key]) < 8 * 3600:
-                caller.msg("You've already looked here.")
-                return
-            # Keep pruned dict for next time we save
-            caller.db.scavenge_location_cooldowns = cooldowns
 
         if getattr(caller.ndb, "is_scavenging", False):
             caller.msg("You are already picking through this place.")
@@ -125,8 +127,6 @@ class CmdScavenge(Command):
         level, final_roll = caller.roll_check(stats, "scavenging", modifier=luck_bonus)
 
         # Narrative: 10–15s of searching flavor, then resolve.
-        import random
-
         env_text = "the concrete and rust" if env == "urban" else "the scrub and twisted growth"
         caller.msg(f"You start picking through {env_text}, eyes and hands working for anything useful...")
         if loc:
@@ -142,12 +142,8 @@ class CmdScavenge(Command):
             if not room:
                 return
 
-            obj = perform_scavenge(caller, room, final_roll)
-            if not obj:
-                caller.msg("You come up empty-handed this time.")
-                return
-
-            # Record 8-hour cooldown for this location (use starting loc so wilderness coords are correct)
+            # Record 8-hour cooldown regardless of outcome — the player searched the area
+            # whether or not they found anything. Use starting loc so wilderness coords are correct.
             try:
                 loc_key = tuple(loc.coordinates) if getattr(loc, "coordinates", None) is not None else getattr(loc, "id", None)
                 if loc_key is not None:
@@ -156,6 +152,11 @@ class CmdScavenge(Command):
                     caller.db.scavenge_location_cooldowns = cooldowns
             except Exception as e:
                 logger.log_trace("scavenge_cmds.CmdScavenge record cooldown: %s" % e)
+
+            obj = perform_scavenge(caller, room, final_roll)
+            if not obj:
+                caller.msg("You come up empty-handed this time.")
+                return
 
             name = obj.get_display_name(caller) if hasattr(obj, "get_display_name") else obj.key
             caller.msg(f"|gYou find|n {name}|g while scavenging.|n")
@@ -237,8 +238,6 @@ class CmdSkin(Command):
                 f"{caller.get_display_name(caller.location)} kneels by {corpse_name}, knife working in slow, deliberate strokes.",
                 exclude=caller,
             )
-
-        import random
 
         def _finish_skin():
             try:
@@ -352,8 +351,6 @@ class CmdButcher(Command):
                 f"{caller.get_display_name(caller.location)} leans over {corpse_name}, cutting it open and working both hands deep into the cavity.",
                 exclude=caller,
             )
-
-        import random
 
         # Organ difficulties (relative to base_roll). Optional third element: alchemy specimen key.
         organs = [
@@ -494,6 +491,10 @@ class CmdSever(Command):
         if not target:
             return
 
+        if getattr(caller, "location", None) != getattr(target, "location", None):
+            caller.msg("They are not here.")
+            return
+
         # Resolve body part (reuse same rules as @body).
         raw = part_raw.strip().lower()
         full = raw
@@ -595,8 +596,8 @@ class CmdSever(Command):
             severed = create_object("typeclasses.items.Item", key=item_key, location=caller)
             severed.db.desc = item_desc
             severed.tags.add("severed_limb")
-        except Exception:
-            severed = None
+        except Exception as e:
+            logger.log_trace("scavenge_cmds.CmdSever create_object severed: %s" % e)
 
         # Mark missing parts on target so the same part cannot be severed again (and look/medical reflect the loss).
         missing = list(getattr(target.db, "missing_body_parts", []) or [])
@@ -657,7 +658,8 @@ class CmdSever(Command):
             target.db.injuries = kept_injuries
 
         # 2) Replace body-part descriptions with "missing" text instead of whatever
-        #    they had before.
+        #    they had before. body_descs is mutated in-place; the explicit reassignment
+        #    is still required to trigger the Evennia attribute ORM save.
         def _missing_desc(part_name: str) -> str:
             if part_name == "head":
                 return "The head is gone; the neck ends in a jagged, butchered stump."
@@ -676,6 +678,8 @@ class CmdSever(Command):
         if full == "head":
             part_for_msg = "head (and face)"
         caller.msg(f"|rYou work the blade until the {part_for_msg} comes free in a wet, final pull.|n")
+        if severed:
+            caller.msg(f"|rYou hold |w{severed.get_display_name(caller) if hasattr(severed, 'get_display_name') else severed.key}|r in your hands.|n")
         if caller.location:
             caller.location.msg_contents(
                 f"{caller.get_display_name(caller.location)} saws away until {target.get_display_name(caller.location)}'s {part_for_msg} comes free.",
@@ -713,9 +717,10 @@ class CmdLoot(Command):
             return
         cname = corpse.get_display_name(caller)
         caller.msg("You kneel and start pilfering through the pockets and folds of %s." % cname)
-        caller.location.msg_contents(
-            "%s kneels beside %s and begins searching through the body's pockets and belongings." % (caller.get_display_name(caller), cname),
-            exclude=caller,
-        )
+        if caller.location:
+            caller.location.msg_contents(
+                "%s kneels beside %s and begins searching through the body's pockets and belongings." % (caller.get_display_name(caller.location), cname),
+                exclude=caller,
+            )
         from evennia.utils import delay
         delay(5.5, _loot_finish, caller.id, corpse.id)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import traceback
 
 from evennia import TICKER_HANDLER as ticker
 from evennia.utils import logger
@@ -82,6 +83,8 @@ def _clear_combat_round_flags(character):
         character.attributes.remove("combat_positioning_attempted")
     if getattr(character.db, "combat_skip_next_turn", False):
         character.attributes.remove("combat_skip_next_turn")
+    if getattr(character.db, "combat_skip_turns", 0):
+        character.attributes.remove("combat_skip_turns")
 
 
 def remove_both_combat_tickers(a, b):
@@ -188,19 +191,12 @@ def defender_first_attack(defender_id, attacker_id):
     if getattr(defender.db, "is_creature", False):
         return
     try:
-        import traceback
-
         execute_combat_turn(defender, attacker)
     except Exception as e:
         tb = traceback.format_exc()
         if hasattr(defender, "msg"):
             combat_msg(defender, f"{CC['miss']}Combat error: {e}|n")
-        try:
-            from evennia import logger
-
-            logger.log_err(f"Combat execute_combat_turn error: {e}\n{tb}")
-        except Exception:
-            pass
+        logger.log_err(f"Combat execute_combat_turn error: {e}\n{tb}")
         return
     id_them = ticker_id(defender, attacker)
     if id_them:
@@ -232,18 +228,11 @@ def _start_first_round(attacker_id, target_id):
     if get_combat_target(attacker) != target:
         return
     try:
-        import traceback
-
         execute_combat_turn(attacker, target)
     except Exception as e:
         tb = traceback.format_exc()
         combat_msg(attacker, f"{CC['miss']}Combat error: {e}|n")
-        try:
-            from evennia import logger
-
-            logger.log_err(f"Combat execute_combat_turn error: {e}\n{tb}")
-        except Exception:
-            pass
+        logger.log_err(f"Combat execute_combat_turn error: {e}\n{tb}")
         set_combat_target(attacker, None)
         set_combat_target(target, None)
         return
@@ -272,7 +261,7 @@ def start_combat_ticker(attacker, target):
     mark_room_combat_activity(getattr(attacker, "location", None) or getattr(target, "location", None))
 
     # Check if target is jacked into the Matrix and trigger emergency disconnect
-    if hasattr(target.db, 'sitting_on') and target.db.sitting_on:
+    if getattr(target.db, 'sitting_on', None):
         from typeclasses.matrix.devices import DiveRig
         rig = target.db.sitting_on
         if isinstance(rig, DiveRig) and rig.db.active_connection:

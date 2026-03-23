@@ -7,9 +7,10 @@ Custom exit type for leaving the city into the wilderness and returning.
   delayed move (same as outside) with ambient messages (guards, etc.), then to city gate.
 """
 
-from evennia.objects.objects import DefaultExit
 from evennia.utils import delay
 from evennia.utils.search import search_object
+
+from typeclasses.exits import Exit
 
 # Delay (seconds) before actually entering the wilderness from the gate
 OUTSIDE_TO_WILDS_DELAY = 11
@@ -65,11 +66,9 @@ def _inside_to_city_callback(obj_id, gate_id, step):
             obj.msg("|rThe way inside is not open.|n")
             return
         gate = gates[0]
-        if not gate:
-            obj.msg("|rThe way inside is not open.|n")
-            return
         old_loc = obj.location
-        obj.move_to(gate, quiet=False)
+        # Use quiet=True and send our own messages so observers don't see two departure lines.
+        obj.move_to(gate, quiet=True)
         if old_loc:
             old_loc.msg_contents(
                 "%s passes through the gate toward the city." % obj.get_display_name(old_loc),
@@ -82,7 +81,7 @@ def _inside_to_city_callback(obj_id, gate_id, step):
             )
 
 
-class OutsideToWildernessExit(DefaultExit):
+class OutsideToWildernessExit(Exit):
     """
     Exit that leads from the city gate into the wilderness map.
     Uses delayed movement (10-12 s) with 2-3 ambient messages before entering.
@@ -91,8 +90,15 @@ class OutsideToWildernessExit(DefaultExit):
     def at_traverse(self, traversing_object, destination):
         from evennia.contrib.grid import wilderness
         from world.wilderness_map import CITY_GATE_COORD
+        from typeclasses.exit_traversal import precheck_exit_traversal
 
         if not traversing_object:
+            return
+
+        ok, dest_out, err, _dir = precheck_exit_traversal(self, traversing_object, destination)
+        if not ok:
+            if err:
+                traversing_object.msg(err)
             return
 
         # Staggered exit: ambient messages then enter after OUTSIDE_TO_WILDS_DELAY
@@ -108,7 +114,7 @@ class OutsideToWildernessExit(DefaultExit):
         delay(OUTSIDE_TO_WILDS_DELAY, _outside_to_wilds_callback, traversing_object.id, 2)
 
 
-class InsideToCityExit(DefaultExit):
+class InsideToCityExit(Exit):
     """
     Exit that appears only at wilderness (0,0). When traversed, uses delayed
     movement (same as going outside) with ambient messages, then moves to the
@@ -117,9 +123,17 @@ class InsideToCityExit(DefaultExit):
 
     def at_traverse(self, traversing_object, destination):
         from world.wilderness_map import get_city_gate_room
+        from typeclasses.exit_traversal import precheck_exit_traversal
 
         if not traversing_object or not traversing_object.location:
             return
+
+        ok, dest_out, err, _dir = precheck_exit_traversal(self, traversing_object, destination)
+        if not ok:
+            if err:
+                traversing_object.msg(err)
+            return
+
         room = traversing_object.location
         wilderness_script = getattr(room, "wilderness", None)
         provider = getattr(wilderness_script, "mapprovider", None) if wilderness_script else None

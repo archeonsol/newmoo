@@ -695,7 +695,7 @@ def announce_vehicle_attack(room, attacker_vehicle, target, weapon, hit: bool, t
     interior = getattr(attacker_vehicle.db, "interior", None)
     if interior and hasattr(interior, "contents_get"):
         tgt_name = vehicle_label(target) if _is_vehicle(target) else (
-            combat_display_name(target, drv) if drv else vehicle_label(target) if _is_vehicle(target) else getattr(target, "key", "target")
+            combat_display_name(target, drv) if drv else getattr(target, "key", "target")
         )
         tpl_crew = base_template
         if not tpl_crew:

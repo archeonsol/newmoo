@@ -14,6 +14,7 @@ Key features:
 """
 
 import time
+from datetime import datetime
 
 from typeclasses.matrix.items import NetworkedItem
 from world.matrix_accounts import get_account, set_alias, get_alias, has_alias
@@ -172,16 +173,19 @@ class Handset(NetworkedItem):
         Get the character currently authenticated on this handset.
 
         For basic handsets, this is whoever is holding/wearing it.
+        Walks the container chain so a handset inside a bag still authenticates
+        the character who owns the bag.
         Future jailbroken devices may have separate authentication.
 
         Returns:
             Character or None: The authenticated user
         """
-        # For now, handset authenticates whoever is holding it
-        if hasattr(self, 'location'):
-            from typeclasses.characters import Character
-            if isinstance(self.location, Character):
-                return self.location
+        from typeclasses.characters import Character
+        loc = getattr(self, "location", None)
+        while loc is not None:
+            if isinstance(loc, Character):
+                return loc
+            loc = getattr(loc, "location", None)
         return None
 
     def handle_contacts(self, caller, *args):
@@ -694,7 +698,7 @@ class Handset(NetworkedItem):
         """Save a contact on this handset."""
         matrix_id = (matrix_id or "").strip()
         alias = (alias or "").strip()
-        if matrix_id is None or not str(matrix_id).strip():
+        if not matrix_id:
             return False, "|rInvalid Matrix ID.|n"
         if not alias:
             return False, "Usage: handset save <ID> as <alias>"
@@ -761,8 +765,6 @@ class Handset(NetworkedItem):
         for entry in log[-20:][::-1]:
             t = entry.get("t", 0)
             try:
-                from datetime import datetime
-
                 ts = datetime.fromtimestamp(float(t)).strftime("%b %d %H:%M")
             except Exception:
                 ts = "?"
@@ -790,18 +792,13 @@ class Handset(NetworkedItem):
         return state
 
     def _set_call_state(self, state: str, peer_dbref: int | None = None):
+        # Always invalidate the cached peer object; get_call_peer re-resolves on demand.
+        # The old logic only cleared the cache when the peer changed, but missed the case
+        # where prev was None and a new peer was being set for the first time.
         try:
-            prev = getattr(self.ndb, "call_peer", None)
-            if peer_dbref is None:
-                self.ndb._call_peer_obj = None
-            elif prev is not None:
-                try:
-                    if int(prev) != int(peer_dbref):
-                        self.ndb._call_peer_obj = None
-                except Exception:
-                    self.ndb._call_peer_obj = None
+            self.ndb.call_state = state
+            self.ndb.call_peer = peer_dbref
+            self.ndb._call_peer_obj = None
         except Exception:
             pass
-        self.ndb.call_state = state
-        self.ndb.call_peer = peer_dbref
 

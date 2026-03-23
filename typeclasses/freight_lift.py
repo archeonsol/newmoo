@@ -36,39 +36,59 @@ class FreightLift(CityRoom):
         phase = self.db.current_phase or "docked_upper"
         started = self.db.phase_started or time.time()
         elapsed = time.time() - started
-
-        base = (
-            f"|x{'=' * 48}|n\n"
-            f"  {name.upper()}\n"
-            f"|x{'=' * 48}|n\n\n"
-        )
+        divider = f"|x{'=' * 48}|n"
 
         if phase.startswith("docked"):
             dock_dur = self.db.dock_duration or DEFAULT_DOCK_DURATION
             remaining = max(0, int(dock_dur - elapsed))
             station_name = "upper" if "upper" in phase else "lower"
-            base += (
-                f"  The doors are open. You are docked at the {station_name} station.\n"
-                f"  The lift will depart in approximately {remaining} seconds.\n\n"
-                f"  |xUse |wout|x to disembark.|n\n"
+            status = (
+                f"{divider}\n"
+                f"  {name.upper()}\n"
+                f"{divider}\n"
+                f"  The doors are open. The car is docked at the {station_name} station.\n"
+                f"  Departure in approximately {remaining} seconds.\n"
+                f"{divider}"
             )
         elif phase.startswith("transit"):
             transit_dur = self.db.transit_duration or DEFAULT_TRANSIT_DURATION
             remaining = max(0, int(transit_dur - elapsed))
             direction = "descending" if "down" in phase else "ascending"
-            base += (
-                f"  The doors are sealed. The lift is {direction}.\n"
-                f"  Estimated arrival in {remaining} seconds.\n\n"
-                f"  |xThere is nowhere to go. Wait.|n\n"
+            status = (
+                f"{divider}\n"
+                f"  {name.upper()}\n"
+                f"{divider}\n"
+                f"  The doors are sealed. The car is {direction}.\n"
+                f"  Arrival in approximately {remaining} seconds.\n"
+                f"{divider}"
             )
+        else:
+            status = ""
 
-        chars = [
-            c
-            for c in self.contents_get(content_type="character")
-            if c is not looker
-        ]
-        if chars:
-            char_names = [c.get_display_name(looker) for c in chars]
-            base += f"\n  Also here: {', '.join(char_names)}\n"
+        # Build the room display manually so the lift status sits between
+        # the room description and the characters/objects/exits sections.
+        header = self.get_display_header(looker, **kwargs)
+        desc = self.get_display_desc(looker, **kwargs)
+        things = self.get_display_things(looker, **kwargs)
+        furniture = self.get_display_furniture(looker, **kwargs)
+        characters = self.get_display_characters(looker, **kwargs)
+        footer = self.get_display_footer(looker, **kwargs)
+        exits = self.get_display_exits(looker, **kwargs)
+        ambient = self.get_display_ambient(looker, **kwargs)
 
-        return base
+        head = "\n".join([p for p in (header, desc) if p])
+        parts = [head]
+        if status:
+            parts.append(status)
+        if ambient:
+            parts.append(ambient)
+        if things:
+            parts.append(things)
+        if furniture:
+            parts.append(furniture)
+        tail = "\n".join([p for p in (characters, exits, footer) if p])
+        if tail:
+            parts.append(tail)
+
+        appearance = "\n\n".join([p for p in parts if p])
+        return self.format_appearance(appearance, looker, **kwargs)

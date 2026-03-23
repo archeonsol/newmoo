@@ -4,6 +4,13 @@ Multi-puppet commands: add puppet to set, list puppets, run command as p1/p2/...
 Commands in this module inherit from evennia's BaseCommand (not commands.base_cmds.Command)
 on purpose: they run at Account level (e.g. addpuppet, p1, p2). Character flatline/dead
 checks are not applied here; character-level commands use base_cmds.Command and at_pre_cmd.
+
+Design invariant
+----------------
+``account.db.multi_puppets`` stores ONLY the IDs of NPC/secondary puppets (p2, p3, ...).
+The main character (p1) is NEVER stored in this list — it is always resolved live as
+``session.puppet``.  This prevents the relay system from firing for the main character
+and causing duplicate output.
 """
 
 from evennia.commands.command import Command as BaseCommand
@@ -14,12 +21,15 @@ from commands.media_cmds import _get_object_by_id
 MAX_MULTI_PUPPETS = 9
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _is_puppet_viable(obj):
     """
     Return True if obj is a living, puppetable character.
     Returns False for:
       - None / missing objects
-      - objects without a location (deleted/limbo-less)
       - flatlined characters (death_state == flatlined)
       - permanently dead characters (death_state == permanent)
       - Corpse typeclass objects
@@ -60,7 +70,7 @@ def _clear_attr(obj, key):
 
 
 def _clear_multi_puppet_links_for_account(account):
-    """Remove _multi_puppet_account_id and _multi_puppet_slot from all characters in account's multi_puppets."""
+    """Remove relay markers from all NPC puppets in account's multi_puppets list."""
     ids = list(getattr(account.db, "multi_puppets", None) or [])
     for oid in ids:
         obj = _get_object_by_id(oid)
@@ -85,102 +95,119 @@ def _multi_puppet_account(caller):
     return caller
 
 
-def _prune_dead_puppets(account, keep_p1=True):
-    """
-    Remove IDs from multi_puppets that no longer resolve to viable puppets
-    (missing objects, flatlined, permanently dead, or Corpse typeclass).
+def _get_session(account, session=None):
+    """Return the first active session for account, or the provided session."""
+    if session:
+        return session
+    handler = getattr(account, "sessions", None)
+    if handler and hasattr(handler, "get"):
+        sess_list = handler.get() or []
+        return sess_list[0] if sess_list else None
+    return None
 
-    When keep_p1 is True (default), the first slot is always preserved even if
-    it is currently flatlined — the player's main character should never be
-    silently dropped from the list.
+
+def _main_puppet(account, session=None):
+    """Return the main character (current session puppet), or None."""
+    sess = _get_session(account, session)
+    return getattr(sess, "puppet", None) if sess else None
+
+
+def _prune_dead_puppets(account):
+    """
+    Remove IDs from multi_puppets (NPC list) that no longer resolve to viable puppets
+    (missing objects, flatlined, permanently dead, or Corpse typeclass).
+    Clears relay markers on removed entries.
     """
     ids = list(getattr(account.db, "multi_puppets", None) or [])
     valid = []
-    for i, oid in enumerate(ids):
+    for oid in ids:
         obj = _get_object_by_id(oid)
-        if i == 0 and keep_p1:
-            # Always keep p1 (main character) regardless of state.
-            if obj and hasattr(obj, "db"):
-                valid.append(oid)
-            # If p1 object is truly gone (deleted), drop it so the list can be rebuilt.
-        else:
-            if _is_puppet_viable(obj):
-                valid.append(oid)
-            elif obj and hasattr(obj, "db"):
-                # Object exists but is dead/flatlined — clear its relay markers.
-                _clear_attr(obj, "_multi_puppet_account_id")
-                _clear_attr(obj, "_multi_puppet_slot")
-                _clear_relay_cache(obj)
+        if _is_puppet_viable(obj):
+            valid.append(oid)
+        elif obj and hasattr(obj, "db"):
+            # Object exists but is dead/flatlined — clear its relay markers.
+            _clear_attr(obj, "_multi_puppet_account_id")
+            _clear_attr(obj, "_multi_puppet_slot")
+            _clear_relay_cache(obj)
     if len(valid) != len(ids):
         account.db.multi_puppets = valid
     return valid
 
 
-def _multi_puppet_list(account):
+def _npc_puppet_ids(account):
     """
-    Return list of puppet dbrefs; keep list clean and ensure the current session
-    puppet is always p1 (index 0).
+    Return the clean list of NPC puppet IDs (p2, p3, ...) after pruning dead entries.
+    The main character (p1) is NOT included here.
+    """
+    return _prune_dead_puppets(account)
 
-    If the current puppet is already in the list but not at index 0, it is moved
-    to the front.  If it is absent entirely, it is prepended.
+
+def _multi_puppet_list(account, session=None):
     """
-    ids = _prune_dead_puppets(account)
-    session = getattr(account, "sessions", None)
-    if session and hasattr(session, "get"):
-        sess_list = session.get()
-        if sess_list:
-            sess = sess_list[0]
-            puppet = getattr(sess, "puppet", None)
-            if puppet and getattr(puppet, "id", None) is not None:
-                pid = puppet.id
-                if not ids:
-                    ids = [pid]
-                    account.db.multi_puppets = ids
-                elif ids[0] != pid:
-                    # Current puppet must be p1 — move or prepend it.
-                    ids = [pid] + [oid for oid in ids if oid != pid]
-                    ids = ids[:MAX_MULTI_PUPPETS]
-                    account.db.multi_puppets = ids
-    return ids
+    Return the full ordered list of puppet IDs for display/indexing:
+      index 0 = main character (session.puppet, p1) — NOT stored in db
+      index 1+ = NPC puppets from account.db.multi_puppets (p2, p3, ...)
+
+    The main character's ID is prepended live; it is never written to
+    account.db.multi_puppets.
+    """
+    npc_ids = _npc_puppet_ids(account)
+    main = _main_puppet(account, session)
+    if main and getattr(main, "id", None) is not None:
+        # Safety: if the main character somehow ended up in the NPC list, remove it.
+        pid = main.id
+        if pid in npc_ids:
+            npc_ids = [oid for oid in npc_ids if oid != pid]
+            account.db.multi_puppets = npc_ids
+            obj = _get_object_by_id(pid)
+            if obj:
+                _clear_attr(obj, "_multi_puppet_account_id")
+                _clear_attr(obj, "_multi_puppet_slot")
+                _clear_relay_cache(obj)
+        return [pid] + npc_ids
+    return npc_ids
 
 
 def _ensure_current_puppet_in_list(account, session=None):
     """
-    Ensure the current session puppet is p1 (index 0) in the multi-puppet list.
-    Calls _multi_puppet_list which already enforces this invariant; this function
-    additionally sets the relay link on p1 if it was just inserted.
+    Return the full ordered puppet ID list (main first, then NPCs).
+    Ensures NPC relay links are numbered correctly (slot 2, 3, ...).
+    Does NOT add the main character to account.db.multi_puppets.
     """
-    if not session:
-        session_handler = getattr(account, "sessions", None)
-        if session_handler and hasattr(session_handler, "get"):
-            sess_list = session_handler.get() or []
-            session = sess_list[0] if sess_list else None
-    puppet = getattr(session, "puppet", None) if session else None
-    ids = _multi_puppet_list(account)
-    if puppet and getattr(puppet, "id", None) is not None:
-        if not ids or ids[0] != puppet.id:
-            # _multi_puppet_list should have fixed this, but be defensive.
-            ids = [puppet.id] + [oid for oid in ids if oid != puppet.id]
-            ids = ids[:MAX_MULTI_PUPPETS]
-            account.db.multi_puppets = ids
-        # Always ensure p1 has correct relay link.
-        _set_multi_puppet_link(puppet, account.id, 1)
+    ids = _multi_puppet_list(account, session=session)
+    # Re-number NPC relay links (slots 2, 3, ...) based on their position in the full list.
+    for i, oid in enumerate(ids[1:], start=2):
+        obj = _get_object_by_id(oid)
+        if obj:
+            _set_multi_puppet_link(obj, account.id, i)
     return ids
 
 
-def _resolve_multi_puppet(account, index):
-    """Return (Character or None, 0-based index). index 0 = first in list (p1)."""
-    ids = _multi_puppet_list(account)
-    if index < 0 or index >= len(ids):
+def _resolve_multi_puppet(account, index, session=None):
+    """
+    Return (Character or None, 0-based index).
+    index 0 = main character (session.puppet, p1)
+    index 1+ = NPC puppets from db list
+    """
+    if index == 0:
+        char = _main_puppet(account, session)
+        return char, 0
+    npc_ids = _npc_puppet_ids(account)
+    npc_index = index - 1  # p2 -> npc_ids[0], p3 -> npc_ids[1], ...
+    if npc_index < 0 or npc_index >= len(npc_ids):
         return None, index
     from evennia.utils.search import search_object
     try:
-        ref = "#%s" % int(ids[index])
+        ref = "#%s" % int(npc_ids[npc_index])
         result = search_object(ref)
         return (result[0] if result else None), index
     except (TypeError, ValueError):
         return None, index
 
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
 
 class StaffOnlyPuppet(CmdIC):
     """
@@ -204,9 +231,6 @@ class StaffOnlyPuppet(CmdIC):
         """
         account = self.account
         session = self.session
-
-        # Remember previous multi-puppet list so we can clear their links.
-        old_ids = list(getattr(account.db, "multi_puppets", None) or [])
 
         new_character = None
         character_candidates = []
@@ -303,33 +327,22 @@ class StaffOnlyPuppet(CmdIC):
             )
             return
 
-        # --- Multi-puppet: new session puppet is always p1; keep former p2+ (do not wipe the set). ---
+        # The new main character must never appear in the NPC puppet list.
+        # Clear any stale relay markers it may have from a previous life as an NPC puppet.
         puppet = getattr(self.session, "puppet", None)
-        if puppet and getattr(puppet, "id", None) is not None:
-            new_id = puppet.id
-            new_list = [new_id]
-            seen = {new_id}
-            for oid in old_ids:
-                if oid in seen:
-                    continue
-                obj = _get_object_by_id(oid)
-                if obj and hasattr(obj, "db"):
-                    new_list.append(oid)
-                    seen.add(oid)
-            new_list = new_list[:MAX_MULTI_PUPPETS]
-            new_set = set(new_list)
-            for oid in old_ids:
-                if oid not in new_set:
-                    obj = _get_object_by_id(oid)
-                    if obj and hasattr(obj, "db"):
-                        _clear_attr(obj, "_multi_puppet_account_id")
-                        _clear_attr(obj, "_multi_puppet_slot")
-                        _clear_relay_cache(obj)
-            account.db.multi_puppets = new_list
-            for i, oid in enumerate(new_list):
+        if puppet:
+            npc_ids = list(getattr(account.db, "multi_puppets", None) or [])
+            if getattr(puppet, "id", None) in npc_ids:
+                npc_ids = [oid for oid in npc_ids if oid != puppet.id]
+                account.db.multi_puppets = npc_ids
+            _clear_attr(puppet, "_multi_puppet_account_id")
+            _clear_attr(puppet, "_multi_puppet_slot")
+            _clear_relay_cache(puppet)
+            # Re-number remaining NPC slots.
+            for i, oid in enumerate(npc_ids, start=2):
                 obj = _get_object_by_id(oid)
                 if obj:
-                    _set_multi_puppet_link(obj, account.id, i + 1)
+                    _set_multi_puppet_link(obj, account.id, i)
 
 
 class StaffOnlyUnpuppet(CmdOOC):
@@ -337,9 +350,10 @@ class StaffOnlyUnpuppet(CmdOOC):
     Unpuppet / leave character. Staff only.
 
     Usage:
-      @unpuppet              - fully unpuppet (legacy behaviour)
-      @unpuppet all          - keep p1 puppeted, drop p2, p3, ... from multi-puppet set
-      @unpuppet p2 p3 ...    - drop specific multi-puppet slots while keeping p1
+      @unpuppet              - drop all NPC puppets (p2+), keep p1 puppeted
+      @unpuppet all          - same as above
+      @unpuppet p2 p3 ...    - drop specific NPC puppet slots while keeping p1
+      @unpuppet p1           - fully unpuppet (go OOC)
     """
 
     key = "@unpuppet"
@@ -347,53 +361,29 @@ class StaffOnlyUnpuppet(CmdOOC):
     locks = "cmd:perm(Builder)"
 
     def func(self):
-        """
-        Staff unpuppet:
-          - No args: unpuppet completely (current behaviour).
-          - Args like 'p2 p3 p4': drop those multi-puppet slots only, keeping p1 puppeted.
-        """
         args = (self.args or "").strip()
-
-        # No arguments: full unpuppet + clear all multi-puppets (legacy behaviour).
-        if not args:
-            _clear_multi_puppet_links_for_account(self.account)
-            super().func()
-            if hasattr(self.account, "db"):
-                self.account.db.multi_puppets = []
-            return
-
-        # Special case: "@unpuppet all" -> keep p1, drop all extra puppets (p2+).
-        if args.lower() == "all":
-            ids = _multi_puppet_list(self.account)
-            if not ids:
-                self.caller.msg("You have no puppets in your set.")
+        # No arguments or "all": drop all NPC puppets, keep p1 puppeted.
+        if not args or args.lower() == "all":
+            npc_ids = _npc_puppet_ids(self.account)
+            if not npc_ids:
+                self.caller.msg("You have no NPC puppets in your set.")
                 return
-            if len(ids) == 1:
-                self.caller.msg("Only p1 is in your puppet set; nothing to unpuppet.")
-                return
-            keep_id = ids[0]
-            removed_ids = ids[1:]
             removed_names = []
-            for oid in removed_ids:
+            for oid in npc_ids:
                 obj = _get_object_by_id(oid)
                 if obj and hasattr(obj, "db"):
                     removed_names.append(obj.get_display_name(self.caller))
                     _clear_attr(obj, "_multi_puppet_account_id")
                     _clear_attr(obj, "_multi_puppet_slot")
                     _clear_relay_cache(obj)
-            if hasattr(self.account, "db"):
-                self.account.db.multi_puppets = [keep_id]
-            # Ensure p1 still has correct link.
-            first = _get_object_by_id(keep_id)
-            if first:
-                _set_multi_puppet_link(first, self.account.id, 1)
+            self.account.db.multi_puppets = []
             if removed_names:
-                self.caller.msg("Unpuppeted: %s (p2+). You remain puppeting p1." % ", ".join(removed_names))
+                self.caller.msg("Unpuppeted: %s. You remain puppeting your main character." % ", ".join(removed_names))
             else:
-                self.caller.msg("Multi-puppet set trimmed; you remain puppeting p1.")
+                self.caller.msg("Multi-puppet set cleared; you remain puppeting your main character.")
             return
 
-        # With arguments: interpret as one or more p-slots (p2, p3, ...). Only drop those slots.
+        # With arguments: interpret as one or more p-slots (p2, p3, ...). Only drop those NPC slots.
         tokens = args.split()
         indices_to_remove = set()
         wants_full_unpuppet = False
@@ -415,41 +405,42 @@ class StaffOnlyUnpuppet(CmdOOC):
                 self.account.db.multi_puppets = []
             return
 
-        # Remove selected multi-puppet slots while keeping main puppet (p1) active.
-        ids = _multi_puppet_list(self.account)
-        if not ids:
-            self.caller.msg("You have no puppets in your set.")
+        # Remove selected NPC puppet slots.
+        # The full list is [main, npc0, npc1, ...] so p2 = npc index 0, p3 = npc index 1, etc.
+        npc_ids = _npc_puppet_ids(self.account)
+        if not npc_ids:
+            self.caller.msg("You have no NPC puppets in your set.")
             return
 
         removed_names = []
+        # Convert p-slot indices to npc_ids indices (subtract 1 since p1 is not in the list).
+        npc_indices_to_remove = {idx - 1 for idx in indices_to_remove}
         # Work from highest index down so list pops don't shift earlier indices.
-        for idx in sorted(indices_to_remove, reverse=True):
-            if 0 <= idx < len(ids):
-                oid = ids[idx]
+        for npc_idx in sorted(npc_indices_to_remove, reverse=True):
+            if 0 <= npc_idx < len(npc_ids):
+                oid = npc_ids[npc_idx]
                 obj = _get_object_by_id(oid)
                 if obj and hasattr(obj, "db"):
                     removed_names.append(obj.get_display_name(self.caller))
                     _clear_attr(obj, "_multi_puppet_account_id")
                     _clear_attr(obj, "_multi_puppet_slot")
                     _clear_relay_cache(obj)
-                ids.pop(idx)
+                npc_ids.pop(npc_idx)
 
-        # Re-number remaining slots and persist.
-        if hasattr(self.account, "db"):
-            self.account.db.multi_puppets = ids
-        for slot, oid in enumerate(ids, start=1):
+        # Re-number remaining NPC slots (slot 2, 3, ...) and persist.
+        self.account.db.multi_puppets = npc_ids
+        for i, oid in enumerate(npc_ids, start=2):
             obj = _get_object_by_id(oid)
             if obj:
-                _set_multi_puppet_link(obj, self.account.id, slot)
+                _set_multi_puppet_link(obj, self.account.id, i)
         if removed_names:
             self.caller.msg("Unpuppeted: %s" % ", ".join(removed_names))
 
 
 class CmdAddPuppet(BaseCommand):
     """
-    Add another character to your multi-puppet set without unpuppeting the current one.
-    Your session will now control the new character (normal commands use them); use p1, p2, ...
-    to run commands as the first, second, etc. puppet.
+    Add an NPC to your multi-puppet set without unpuppeting your main character.
+    Use p2, p3, ... to run commands as the added NPCs.
     Usage: @addpuppet <character>
     """
     key = "@addpuppet"
@@ -478,15 +469,13 @@ class CmdAddPuppet(BaseCommand):
             else None
         )
 
-        # If normal search failed, try a relaxed, room-local surname/partial match
-        # similar to @puppet/@restore: match any word in the name, or substring.
+        # If normal search failed, try a relaxed, room-local surname/partial match.
         if not char and hasattr(searcher, "location"):
             loc = getattr(searcher, "location", None)
             if loc and hasattr(loc, "contents_get"):
                 arg_low = raw.lower()
                 relaxed = []
                 for obj in loc.contents_get(content_type="character"):
-                    # Only consider characters we can puppet.
                     if not obj.access(account, "puppet"):
                         continue
                     key_low = (getattr(obj, "key", "") or "").lower()
@@ -501,9 +490,7 @@ class CmdAddPuppet(BaseCommand):
                     return
 
         if not char:
-            # Final fallback: global object search like before.
             from evennia.utils.search import search_object
-
             matches = search_object(raw)
             if isinstance(matches, list) and len(matches) == 1:
                 char = matches[0]
@@ -519,30 +506,39 @@ class CmdAddPuppet(BaseCommand):
         if not hasattr(char, "location"):
             self.msg("That's not a character you can puppet.")
             return
+
+        # Prevent adding the main character as an NPC puppet.
+        main = _main_puppet(account, session)
+        if main and char.id == getattr(main, "id", None):
+            self.msg("That's your main character — they're already p1.")
+            return
+
         if not _is_puppet_viable(char):
             self.msg("|r%s|n is dead, flatlined, or otherwise not puppetable." % char.get_display_name(self.caller))
             return
-        # Build multi_puppets: current puppet is always p1; newly added go to p2, p3, ... Do NOT call puppet_object.
-        ids = _ensure_current_puppet_in_list(account, session=session)
-        if char.id in ids:
+
+        npc_ids = _npc_puppet_ids(account)
+        if char.id in npc_ids:
             self.msg("You already have that character in your puppet set.")
             return
-        if len(ids) >= MAX_MULTI_PUPPETS:
-            self.msg(f"You can only have {MAX_MULTI_PUPPETS} puppets in your set.")
+        # p1 slot is the main character; NPC puppets start at p2.
+        if len(npc_ids) >= MAX_MULTI_PUPPETS - 1:
+            self.msg(f"You can only have {MAX_MULTI_PUPPETS - 1} NPC puppets in your set.")
             return
-        # Append: p1 = current (first in list), p2 = first added, p3 = second added, etc.
-        ids.append(char.id)
-        account.db.multi_puppets = ids
-        for i, oid in enumerate(ids):
-            obj = _get_object_by_id(oid)
-            if obj:
-                _set_multi_puppet_link(obj, account.id, i + 1)
-        self.msg("You add |w%s|n to your puppet set. You remain controlling your current character (p1). Use |wp2|n to act as %s, |wp3|n for the next, etc." % (char.get_display_name(self.caller), char.get_display_name(self.caller)))
+
+        npc_ids.append(char.id)
+        account.db.multi_puppets = npc_ids
+        slot = len(npc_ids) + 1  # p2, p3, ...
+        _set_multi_puppet_link(char, account.id, slot)
+        self.msg(
+            "You add |w%s|n to your puppet set as p%s. Use |wp%s|n to act as them."
+            % (char.get_display_name(self.caller), slot, slot)
+        )
 
 
 class CmdPuppetList(BaseCommand):
     """
-    List your current multi-puppet set (p1, p2, ... and which character each slot is).
+    List your current multi-puppet set (p1 = you, p2, p3, ... = NPC puppets).
     Usage: @puppet/list
     """
     key = "@puppet/list"
@@ -556,27 +552,25 @@ class CmdPuppetList(BaseCommand):
             self.msg("No account.")
             return
         session = getattr(self, "session", None)
-        ids = _ensure_current_puppet_in_list(account, session=session)
-        if not ids:
-            self.msg("You have no puppets in your set. Use |w@puppet|n to puppet a character, then |w@addpuppet <name>|n to add more.")
+        main = _main_puppet(account, session)
+        npc_ids = _npc_puppet_ids(account)
+        if not npc_ids:
+            self.msg("You have no NPC puppets in your set. Use |w@addpuppet <name>|n to add NPCs.")
             return
+
         lines = []
-        current = getattr(session, "puppet", None) if session else None
-        for i, oid in enumerate(ids):
+        # p2+: NPC puppets only. p1 (main character) is not shown here.
+        for i, oid in enumerate(npc_ids, start=2):
             obj = _get_object_by_id(oid)
-            slot = i + 1
             if not obj:
-                lines.append("  p%s: |r#%s (gone)|n" % (slot, oid))
+                lines.append("  p%s: |r#%s (gone)|n" % (i, oid))
                 continue
             name = obj.get_display_name(self.caller)
             loc_name = obj.location.name if obj.location else "nowhere"
-            mark = " |w(you)|n" if obj == current else ""
-            if not _is_puppet_viable(obj):
-                status = " |r(dead/flatlined)|n"
-            else:
-                status = ""
-            lines.append("  p%s: %s (%s)%s%s" % (slot, name, loc_name, status, mark))
-        self.msg("|wYour puppet set:|n\n%s" % "\n".join(lines))
+            status = " |r(dead/flatlined)|n" if not _is_puppet_viable(obj) else ""
+            lines.append("  p%s: %s (%s)%s" % (i, name, loc_name, status))
+
+        self.msg("|wYour NPC puppet set:|n\n%s" % "\n".join(lines))
 
 
 class CmdPuppetSlot(BaseCommand):
@@ -594,7 +588,6 @@ class CmdPuppetSlot(BaseCommand):
         account = _multi_puppet_account(self.caller)
         session = getattr(self, "session", None)
         if not session:
-            # Fallback: get session from account
             if hasattr(account, "sessions") and account.sessions.get():
                 session = account.sessions.get()[0]
         if not session:
@@ -606,11 +599,12 @@ class CmdPuppetSlot(BaseCommand):
             index = int(raw[1:]) - 1
         else:
             index = 0
-        char, _ = _resolve_multi_puppet(account, index)
+        char, _ = _resolve_multi_puppet(account, index, session=session)
         if not char:
             self.msg("You don't have a puppet in slot %s. Use |w@puppet|n and |w@addpuppet|n to build your set." % (index + 1))
             return
-        if not _is_puppet_viable(char):
+        # p1 is always the main character — no liveness gate needed (they act normally).
+        if index > 0 and not _is_puppet_viable(char):
             self.msg("|rp%s (%s) is dead or flatlined and cannot act.|n" % (index + 1, char.name))
             return
         sub_cmd = (self.args or "").strip()

@@ -40,7 +40,7 @@ def _trust_heal_ok(caller, target):
     ok, _reason = check_trust_or_incapacitated(target, caller, "heal")
     if not ok:
         caller.msg(
-            f"{_CRIT}They don't trust you enough for that. They need to |w@trust you to heal|n.{_N}"
+            f"{_CRIT}They haven't given you permission to treat them.{_N}"
         )
     return ok
 
@@ -53,7 +53,7 @@ def _trust_operate_ok(caller, target):
     ok, _reason = check_trust_or_incapacitated(target, caller, "operate")
     if not ok:
         caller.msg(
-            f"{_CRIT}They don't trust you enough for that. They need to |w@trust you to operate|n.{_N}"
+            f"{_CRIT}They haven't given you permission to operate on them.{_N}"
         )
     return ok
  
@@ -736,13 +736,6 @@ def node_medical_exit(caller, raw_string, **kwargs):
  
  
 def start_medical_menu(caller, target):
-    if target != caller:
-        from world.rpg.trust import check_trust_or_incapacitated
-
-        ok, _reason = check_trust_or_incapacitated(target, caller, "heal")
-        if not ok:
-            caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
-            return
     from evennia.utils.evmenu import EvMenu
     EvMenu(
         caller,

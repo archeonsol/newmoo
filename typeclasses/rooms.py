@@ -5,6 +5,7 @@ Rooms are simple containers that has no location of their own.
 Look output: room name (colored), desc, "You see a X, a Y and a Z.", character poses, exits.
 """
 
+import random
 import re
 from evennia.objects.objects import DefaultRoom, DefaultExit
 from evennia.utils import delay
@@ -258,8 +259,6 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
         msgs = getattr(self.db, "ambient_messages", None) or []
         if not msgs:
             return ""
-        import random
-
         line = random.choice(list(msgs))
         return (line or "").strip()
 
@@ -286,8 +285,6 @@ class Room(MatrixIdMixin, ObjectParent, DefaultRoom):
         msgs = getattr(self.db, "ambient_messages", None) or []
         if not msgs:
             return ""
-        import random
-
         line = random.choice(list(msgs))
         line = (line or "").strip()
         if not line:
@@ -1007,7 +1004,7 @@ class GateMixin:
         self.db.gate_id = ""
         self.db.sealed = False
         self.db.seal_reason = ""
-        self.db.connects_to = ""
+        self.db.connects_districts = ("", "")
 
 
 class GateRoom(GateMixin, CityRoom):

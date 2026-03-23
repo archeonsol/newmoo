@@ -244,6 +244,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdVweaponRemove,
         )
         from commands.rpg.faction_cmds import CmdFaction
+        from commands.economy_cmds import (
+            CmdPay, CmdDropMoney, CmdShopList, CmdBuy, CmdWire, CmdWireConfirm,
+            CmdBankMenu, CmdShopSet, CmdShopItem, CmdSpawnBank, CmdTagBank,
+        )
         from commands.sheet_cmds import CmdStats
         from commands.player_cmds import CmdXp
         from commands.notes_cmds import CmdAddNote, CmdNotes, CmdNoteSearch
@@ -349,6 +353,13 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdDose())
         self.add(CmdTease())
         self.add(CmdXp())
+        self.add(CmdPay())
+        self.add(CmdDropMoney())
+        self.add(CmdShopList())
+        self.add(CmdBuy())
+        self.add(CmdWire())
+        self.add(CmdWireConfirm())
+        self.add(CmdBankMenu())
         self.add(CmdDescribeMeAs())
         self.add(CmdSkintone())
         self.add(CmdBody())
@@ -467,6 +478,10 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSpawnOR())
         self.add(CmdSpawnCyberwareStation())
         self.add(CmdSpawnPerfume())
+        self.add(CmdShopSet())
+        self.add(CmdShopItem())
+        self.add(CmdSpawnBank())
+        self.add(CmdTagBank())
         self.add(CmdStaffSheet())
         self.add(CmdStaffSetStat())
         self.add(CmdStaffSetSkill())
@@ -553,7 +568,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(StaffCharDelete())
         from commands.sheet_cmds import CmdStats
         from commands.staff_cmds import CmdNextNote, CmdGmViewNotes
-        from commands.death_cmds import CmdGoLight, CmdGoShard
+        from commands.death_cmds import CmdGoLight, CmdGoShard, CmdReturnIC
         from commands.multipuppet_cmds import CmdAddPuppet, CmdPuppetList, CmdPuppetSlot
         from commands.channel_cmds import CmdChannelSub, CmdChannelUnsub, CmdHelpReply, CmdHelp, CmdOocName
         from commands.media_cmds import CmdTuneTelevision, CmdTelevisionApp, CmdLabel
@@ -563,6 +578,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdGmViewNotes())
         self.add(CmdGoLight())
         self.add(CmdGoShard())
+        self.add(CmdReturnIC())
         self.add(CmdAddPuppet())
         self.add(CmdPuppetList())
         self.add(CmdPuppetSlot())

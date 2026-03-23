@@ -790,7 +790,12 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
                         skip_fall_asleep_broadcast = True
                 except ImportError:
                     pass
-                if not skip_fall_asleep_broadcast:
+                going_ooc = getattr(self.db, "_ooc_going_ooc", False)
+                try:
+                    self.attributes.remove("_ooc_going_ooc")
+                except Exception:
+                    pass
+                if not skip_fall_asleep_broadcast and not going_ooc:
                     try:
                         from world.rpg.crafting import substitute_clothing_desc
                         msg = getattr(self.db, "fall_asleep_message", None) or "$N falls asleep."

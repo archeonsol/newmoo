@@ -552,9 +552,9 @@ def set_part_type_id(vehicle, part_id, type_id):
     if not any(t["id"] == type_id for t in options):
         return False
     _ensure_vehicle_parts_migrated(vehicle)
-    if not vehicle.db.vehicle_part_types:
-        vehicle.db.vehicle_part_types = {}
-    vehicle.db.vehicle_part_types[part_id] = type_id
+    types = dict(vehicle.db.vehicle_part_types or {})
+    types[part_id] = type_id
+    vehicle.db.vehicle_part_types = types
     invalidate_perf_cache(vehicle)
     sync_security_tier_from_part(vehicle)
     if part_id == "armor":
@@ -641,8 +641,9 @@ def get_part_condition(vehicle, part_id):
 
 def set_part_condition(vehicle, part_id, value):
     _ensure_vehicle_parts_migrated(vehicle)
-    parts = vehicle.db.vehicle_parts
+    parts = dict(vehicle.db.vehicle_parts or {})
     parts[part_id] = max(0, min(100, int(round(value))))
+    vehicle.db.vehicle_parts = parts
     invalidate_perf_cache(vehicle)
 
 

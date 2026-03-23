@@ -118,7 +118,7 @@ def cleanup_adds_body_parts_on_remove(character, removed_cyberware_obj, remainin
             continue
         extras = list(getattr(character.db, "extra_body_parts", None) or [])
         if part in extras:
-            extras.remove(part)
+            extras = [p for p in extras if p != part]
             character.db.extra_body_parts = extras
         descs = dict(getattr(character.db, "body_descriptions", None) or {})
         if part in descs:
@@ -247,6 +247,8 @@ def get_cyberware_for_part(character, part):
     """
     result = []
     for cw in (getattr(character.db, "cyberware", None) or []):
+        if cw is None:
+            continue
         mods = getattr(cw, "body_mods", None) or {}
         if part in mods:
             result.append(cw)

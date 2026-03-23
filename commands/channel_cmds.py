@@ -18,7 +18,11 @@ def _send_to_channel(caller, channel_alias, args, session, msg_func, no_channel_
         msg_func(no_channel_msg)
         return
     try:
-        channel = channels[0]
+        # Prefer an exact key match; fall back to first result for partial matches.
+        channel = next(
+            (c for c in channels if c.key.lower() == channel_alias.lower()),
+            channels[0],
+        )
     except (TypeError, IndexError):
         msg_func(no_channel_msg)
         return
@@ -76,9 +80,11 @@ def _unsubscribe_channel(account, alias, msg_func):
     if not channel.has_connection(account):
         msg_func("You are not subscribed to %s." % channel.key)
         return False
-    channel.disconnect(account)
-    msg_func("You left %s (%s)." % (channel.key, alias))
-    return True
+    if channel.disconnect(account):
+        msg_func("You left %s (%s)." % (channel.key, alias))
+        return True
+    msg_func("Could not leave %s." % channel.key)
+    return False
 
 
 def _xhelp_staff_reply(caller, target_name, message, msg_func, session):
@@ -87,7 +93,7 @@ def _xhelp_staff_reply(caller, target_name, message, msg_func, session):
     from evennia.utils.utils import strip_unsafe_input
     if not target_name or not (message or "").strip():
         return False
-    accounts = search_account(target_name, exact=False)
+    accounts = search_account(target_name, exact=True)
     if not accounts:
         msg_func("No account found matching '%s'." % target_name)
         return False
@@ -255,6 +261,9 @@ class CmdOocName(Command):
             current = getattr(caller.db, "ooc_display_name", None) or caller.key
             self.msg("Your OOC display name is: |w%s|n. Set it with |w@oocname <name>|n." % current)
             return
-        name = self.args.strip()[:64]
+        name = self.args.strip()
+        if len(name) > 64:
+            name = name[:64]
+            self.msg("|y(Name truncated to 64 characters.)|n")
         caller.db.ooc_display_name = name
         self.msg("OOC display name set to |w%s|n. You will appear as this on OOC-Chat (xooc)." % name)

@@ -2,8 +2,9 @@
 Weekly pay collection. Characters collect pay at a registry terminal.
 Pay is available once every 7 real-time days per faction.
 
-Currency is stored on character.db.currency (int). Vendors and other systems
-should use the same field for a single wallet balance.
+Currency is stored on character.db.currency (int) via world.rpg.economy.
+All wallet mutations go through economy helpers so the transaction log stays
+consistent across faction pay, shop purchases, and manual transfers.
 """
 
 import time
@@ -68,8 +69,8 @@ def collect_pay(character, faction_key):
 
     fdata = get_faction(faction_key)
 
-    current = int(getattr(character.db, "currency", 0) or 0)
-    character.db.currency = current + amount
+    from world.rpg.economy import add_funds
+    add_funds(character, amount, party=fdata["name"], reason="faction pay")
 
     pay_times = character.db.faction_pay_collected or {}
     pay_times[fdata["key"]] = time.time()

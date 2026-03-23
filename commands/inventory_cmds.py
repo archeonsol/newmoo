@@ -708,10 +708,15 @@ class CmdToggleClothing(Command):
         cfg = target.get_state_config(old_key)
         you_emote = cfg.get("toggle_emote_you") if cfg else None
 
-        item_name_you = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
+        substitute_clothing_desc = None
         if you_emote:
-            from world.rpg.crafting import substitute_clothing_desc
+            try:
+                from world.rpg.crafting import substitute_clothing_desc
+            except ImportError:
+                substitute_clothing_desc = None
 
+        item_name_you = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
+        if you_emote and substitute_clothing_desc:
             caller.msg(substitute_clothing_desc(you_emote, caller, item=target))
         else:
             caller.msg(f"You adjust {item_name_you}.")
@@ -722,9 +727,7 @@ class CmdToggleClothing(Command):
                     continue
                 vcaller = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.name
                 vitem = target.get_display_name(viewer) if hasattr(target, "get_display_name") else target.name
-                if you_emote:
-                    from world.rpg.crafting import substitute_clothing_desc
-
+                if you_emote and substitute_clothing_desc:
                     viewer.msg(substitute_clothing_desc(you_emote, caller, item=target))
                 else:
                     viewer.msg(f"{vcaller} adjusts {vitem}.")
@@ -805,17 +808,19 @@ class CmdStrip(Command):
         iname = item.get_display_name(caller) if hasattr(item, "get_display_name") else item.name
         tname = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.key
         if target is caller:
-            caller.msg(f"You strip {iname} and take it.")
-            caller.location.msg_contents(
-                f"{caller.get_display_name(caller)} strips {iname}.",
-                exclude=caller,
-            )
+            caller.msg(f"You strip off {iname} and take it.")
+            if caller.location:
+                caller.location.msg_contents(
+                    f"{caller.get_display_name(caller.location)} strips off {iname}.",
+                    exclude=caller,
+                )
         else:
             caller.msg(f"You strip {iname} from {tname} and take it.")
-            caller.location.msg_contents(
-                f"{caller.get_display_name(caller)} strips {iname} from {tname}.",
-                exclude=caller,
-            )
+            if caller.location:
+                caller.location.msg_contents(
+                    f"{caller.get_display_name(caller.location)} strips {iname} from {tname}.",
+                    exclude=caller,
+                )
 
 
 class CmdFrisk(Command):
@@ -850,12 +855,20 @@ class CmdFrisk(Command):
         if target == caller:
             caller.msg("You know what you're carrying.")
             return
-        from world.rpg.trust import check_trust_or_incapacitated
-
-        ok, _r = check_trust_or_incapacitated(target, caller, "strip")
-        if not ok:
-            caller.msg("They don't trust you for that. They need to @trust you to strip.")
-            return
+        # Flatlined characters (dying, 0 HP) can be frisked without consent — they are
+        # incapacitated and cannot object. Skip the trust check in that state.
+        flatlined = False
+        try:
+            from world.death import is_flatlined
+            flatlined = is_flatlined(target)
+        except ImportError:
+            pass
+        if not flatlined:
+            from world.rpg.trust import check_trust_or_incapacitated
+            ok, _r = check_trust_or_incapacitated(target, caller, "strip")
+            if not ok:
+                caller.msg("They don't trust you for that. They need to @trust you to strip.")
+                return
         tname = target.get_display_name(caller)
         caller.msg("You run your hands over %s's pockets and belongings." % tname)
         caller.location.msg_contents(

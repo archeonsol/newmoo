@@ -115,7 +115,7 @@ def _run_emote(caller, text, improvise=False):
     # Comma-start = no "You " prefix in echo (scene-setting style)
     starts_with_comma = bool(segments and segments[0].strip().startswith(","))
     chars_here = location.filter_visible(location.contents_get(content_type="character"), caller)
-    viewers = list(chars_here) + [caller]
+    viewers = [c for c in chars_here if c != caller] + [caller]
     debug_on = getattr(caller.db, "emote_debug", False) and caller.account
     if debug_on:
         debug_on = caller.account.permissions.check("Builder") or caller.account.permissions.check("Admin")
@@ -649,12 +649,16 @@ class CmdMemory(Command):
 
 class CmdCount(Command):
     """
-    Count how many things or people matching a name are in the room. Use this to
-    see how many pods, chairs, or characters matching 'tall man' are here. When
+    Count how many things or people matching a name are in the room. When
     there are multiples, shows 1st, 2nd so you can target them in poses.
 
+    Also used to check how much cash you're carrying. Use with no arguments,
+    or with 'money' / 'cash', to count your on-hand funds.
+
     Usage:
-      count <name>
+      count              -- show your on-hand cash
+      count money        -- show your on-hand cash
+      count <name>       -- count matching objects/people in the room
     """
     key = "count"
     locks = "cmd:all()"
@@ -668,8 +672,18 @@ class CmdCount(Command):
             caller.msg("You are not in a location.")
             return
         name_arg = (self.args or "").strip()
-        if not name_arg:
-            caller.msg("Usage: count <name> — Count how many things or people matching that name are here (e.g. |wcount pod|n, |wcount tall man|n).")
+
+        # No args or money/cash keywords → show on-hand cash
+        if not name_arg or name_arg.lower() in ("money", "cash", "funds", "credits"):
+            from world.rpg.economy import get_balance, format_currency, CURRENCY_NAME
+            amount = get_balance(caller)
+            if amount == 0:
+                caller.msg(f"You count your {CURRENCY_NAME}. You have nothing on hand.")
+            else:
+                caller.msg(
+                    f"You count your {CURRENCY_NAME}. "
+                    f"You have {format_currency(amount)} on hand."
+                )
             return
         search = name_arg.lower()
         ordinals = ("1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th")

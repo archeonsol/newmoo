@@ -82,14 +82,18 @@ def degrade_armor(armor_pieces, damage_type, reduction_amount):
     """
     When armor blocks damage, reduce quality on each piece that contributed.
     reduction_amount is how much was actually blocked; spread degradation across pieces.
+    Uses the same base+remainder distribution as degrade_cyberware_armor to avoid
+    over-penalising when many pieces share a small reduction.
     """
     if not armor_pieces or reduction_amount <= 0:
         return
-    # Each piece that contributed takes some quality loss (e.g. 1 point per 5 blocked, min 1)
-    loss_per_piece = max(1, reduction_amount // max(1, len(armor_pieces)))
-    for obj in armor_pieces:
-        q = max(0, int(getattr(obj.db, "quality", 100) or 100) - loss_per_piece)
-        obj.db.quality = max(0, q)
+    count = len(armor_pieces)
+    base = max(1, reduction_amount // count)
+    remainder = reduction_amount % count
+    for idx, obj in enumerate(armor_pieces):
+        loss = base + (1 if idx < remainder else 0)
+        q = max(0, int(getattr(obj.db, "quality", 100) or 100) - loss)
+        obj.db.quality = q
 
 
 def degrade_cyberware_armor(character, cyberware_pieces, reduction_amount):

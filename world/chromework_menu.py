@@ -121,19 +121,19 @@ def _goto_process_desc_input(caller, raw_string, **kwargs):
 
     text = (raw_string or "").strip()
     if not text:
-        caller.msg(f"Type {CHROMOWORK_DESC_MIN}-{CHROMOWORK_DESC_MAX} characters, or |wb|n to go back.")
+        caller.msg(f"Enter a description between {CHROMOWORK_DESC_MIN} and {CHROMOWORK_DESC_MAX} characters.")
         return ("node_chromework_desc_enter", retry)
 
     if len(text) < CHROMOWORK_DESC_MIN or len(text) > CHROMOWORK_DESC_MAX:
-        caller.msg(f"Description must be {CHROMOWORK_DESC_MIN}-{CHROMOWORK_DESC_MAX} characters.")
+        caller.msg(f"Description must be between {CHROMOWORK_DESC_MIN} and {CHROMOWORK_DESC_MAX} characters.")
         return ("node_chromework_desc_enter", retry)
 
     clean = strip_color_codes(text)
     if clean != text:
-        caller.msg("Color codes were stripped from the description; use Set color for tint.")
+        caller.msg("Color codes are not permitted in descriptions.")
 
     if not hasattr(caller, "roll_check"):
-        caller.msg("You cannot perform chromework.")
+        caller.msg("You lack the skill to work this chrome.")
         return ("node_chromework_main", _ctx(station, cyberware))
 
     tier, total = caller.roll_check(
@@ -142,9 +142,7 @@ def _goto_process_desc_input(caller, raw_string, **kwargs):
         difficulty=CHROMOWORK_DESC_DIFFICULTY,
     )
     if tier == "Failure":
-        caller.msg(
-            f"You botch the fine adjustment. (Electrical Engineering vs {CHROMOWORK_DESC_DIFFICULTY}, got {total})"
-        )
+        caller.msg("Your hands slip. The adjustment doesn't take.")
         return ("node_chromework_desc_enter", retry)
 
     custom = dict(getattr(cyberware.db, "custom_descriptions", None) or {})
@@ -220,9 +218,8 @@ def node_chromework_desc_pick(caller, raw_string, **kwargs):
         f"  {_HEADER_COLOR}SET DESCRIPTION{_N}",
         _line(),
         "",
-        "  Pick a part to customize.",
-        f"  Length: {CHROMOWORK_DESC_MIN}-{CHROMOWORK_DESC_MAX} characters. Electrical Engineering check vs "
-        f"{CHROMOWORK_DESC_DIFFICULTY}.",
+        "  Select a part to write a description for.",
+        f"  Descriptions must be {CHROMOWORK_DESC_MIN}\u2013{CHROMOWORK_DESC_MAX} characters.",
         "",
     ]
     for i, part in enumerate(parts, 1):

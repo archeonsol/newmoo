@@ -98,7 +98,7 @@ def close_doors(lift):
                     results[0].delete()
                 except Exception as err:
                     logger.log_err(f"close_doors delete exit {eid}: {err}")
-        setattr(lift.db, attr, None)
+            setattr(lift.db, attr, None)
 
 
 def _get_station(lift, phase):
@@ -107,7 +107,8 @@ def _get_station(lift, phase):
     else:
         sid = lift.db.lower_station
     if sid:
-        results = search_object(f"#{sid}")
+        sid_str = str(sid).lstrip("#")
+        results = search_object(f"#{sid_str}")
         return results[0] if results else None
     return None
 
@@ -137,7 +138,7 @@ def start_freight_cycle(lift):
         lift.db.phase_started = time.time()
     scr = ensure_freight_cycle_script(lift)
     try:
-        scr.start(interval=5, repeats=0)
+        scr.start()
     except Exception:
         pass
     phase = lift.db.current_phase or "docked_upper"
@@ -167,8 +168,6 @@ class FreightCycleScript(DefaultScript):
     def at_script_creation(self):
         self.key = "freight_cycle"
         self.desc = "Drives the freight lift dock/transit cycle."
-        self.db_interval = 5
-        self.db_persistent = True
         self.db.warnings_sent = []
 
     def at_repeat(self, **kwargs):
@@ -243,7 +242,8 @@ class FreightCycleScript(DefaultScript):
 
         station = None
         if sid:
-            results = search_object(f"#{sid}")
+            sid_str = str(sid).lstrip("#")
+            results = search_object(f"#{sid_str}")
             station = results[0] if results else None
 
         if not station:

@@ -299,7 +299,7 @@ def _worn_phrase(character, looker=None):
     name = best.get_display_name(looker) if hasattr(best, "get_display_name") else getattr(best, "key", str(best))
     if not name:
         return ""
-    return "wearing a " + name
+    return "wearing " + _article_for(name) + " " + name
 
 
 def get_short_desc(character, looker=None):

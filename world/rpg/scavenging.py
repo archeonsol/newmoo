@@ -126,32 +126,8 @@ LOOT_BY_TIER_URBAN = {
 
 
 # Wilderness biome loot tables (used when room has scavenge_<biome> tag)
-LOOT_BY_TIER_GRASSLANDS = {
-    "grey": [
-        "|xCracked Filter Mask|n",
-        "|xRust-Flaked Machete Blade|n",
-        "|xBundle of Moldy Rations|n",
-    ],
-    "green": [
-        "|gField-Dressed Medkit Shell|n",
-        "|gPurified Water Cartridge|n",
-        "|gReinforced Canvas Satchel|n",
-    ],
-    "blue": [
-        "|cStabilized Mutagen Sample|n",
-        "|cRefined Herb Distillate|n",
-        "|cHardened Survival Harness|n",
-    ],
-    "purple": [
-        "|mAncient Root Idol|n",
-        "|mLiving Spore Phial|n",
-        "|mWitcher's Bone Charm|n",
-    ],
-    "yellow": [
-        "|yRelic of the First Expedition|n",
-        "|yHeart of the Pale Tree|n",
-    ],
-}
+# Grasslands uses the same table as generic wild — alias rather than duplicate.
+LOOT_BY_TIER_GRASSLANDS = LOOT_BY_TIER_WILD
 
 LOOT_BY_TIER_HARSHLANDS = {
     "grey": [
@@ -309,9 +285,14 @@ def _pick_loot_table(room):
     return None, None
 
 
+# roll_check returns values on a 0-200 scale. All thresholds and probability bands
+# below are calibrated for that range. Fumble threshold: ~25% of rolls produce nothing.
+_FUMBLE_THRESHOLD = 50
+
+
 def _determine_rarity(env, final_roll):
     """
-    Map final_roll (from roll_check) to a rarity tier, with a chance of no loot.
+    Map final_roll (from roll_check, 0-200 scale) to a rarity tier, with a chance of no loot.
 
     We bias slightly by environment:
     - Urban: slightly more forgiving (small bonus to effective roll)
@@ -321,7 +302,7 @@ def _determine_rarity(env, final_roll):
     with occasional purple and extremely rare yellow (legendary) results.
     """
     # Fumbles: come up empty-handed on very low effective results.
-    if final_roll <= 50:
+    if final_roll <= _FUMBLE_THRESHOLD:
         return None
 
     effective = final_roll

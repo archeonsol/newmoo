@@ -247,6 +247,16 @@ def apply_clone_snapshot(character, snapshot):
     except Exception:
         pass
 
+    # Ensure the clone has the standard character cmdset. A fresh create_object call sets
+    # this up via at_object_creation, but being explicit here guards against any state
+    # that may have been carried over before apply_clone_snapshot was called.
+    try:
+        from django.conf import settings
+        char_cmdset = getattr(settings, "CMDSET_CHARACTER", "commands.default_cmdsets.CharacterCmdSet")
+        character.cmdset.add_default(char_cmdset)
+    except Exception:
+        pass
+
 
 def _splinter_narrative_step(character_id, step_index):
     """One step of the splinter narrative; schedules next or stores snapshot."""
@@ -257,6 +267,14 @@ def _splinter_narrative_step(character_id, step_index):
         character = result[0]
     except Exception:
         return
+    # If the character died during the narrative, make_permanent_death already backed up
+    # any prior snapshot. Don't overwrite a corpse with a new one.
+    try:
+        from world.death import is_permanently_dead
+        if is_permanently_dead(character):
+            return
+    except Exception:
+        pass
     if step_index < len(SPLINTER_NARRATIVE):
         character.msg(SPLINTER_NARRATIVE[step_index])
         delay(2.5, _splinter_narrative_step, character_id, step_index + 1)
@@ -272,6 +290,12 @@ def run_splinter_sequence(character):
     """Start the splinter narrative; at the end stores clone_snapshot on character."""
     if not character:
         return
+    try:
+        from world.death import is_flatlined, is_permanently_dead
+        if is_flatlined(character) or is_permanently_dead(character):
+            return
+    except Exception:
+        pass
     character.msg(SPLINTER_NARRATIVE[0])
     delay(2.5, _splinter_narrative_step, character.id, 1)
 

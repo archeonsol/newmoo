@@ -33,36 +33,54 @@ class BulkheadRoom(CityRoom):
     def return_appearance(self, looker, **kwargs):
         name = self.db.bulkhead_id or "bulkhead"
         sealed = bool(self.db.sealed)
-
-        header = (
-            f"|x{'=' * 52}|n\n"
-            f"  |w{name.upper().replace('_', ' ')}|n\n"
-            f"|x{'=' * 52}|n\n\n"
-            "  A reinforced corridor cut through structural steel. The walls are\n"
-            "  two feet thick on either side — you can see the cross-section where\n"
-            "  the bulkhead frame meets the rock. Hydraulic rams line the ceiling,\n"
-            "  connected to a blast door that can seal the passage in seconds.\n\n"
-        )
+        divider = f"|x{'=' * 52}|n"
 
         if sealed:
             reason = self.db.seal_reason or "No reason given."
             sealed_by = self.db.sealed_by or "Unknown"
-            text = header + (
-                "  |R[SEALED]|n\n\n"
+            status = (
+                f"{divider}\n"
+                f"  |w{name.upper().replace('_', ' ')}|n  |R[SEALED]|n\n"
+                f"{divider}\n"
                 "  The blast door is down. Floor to ceiling, wall to wall. Solid\n"
                 "  steel, three bolts deep. The hydraulic rams are locked in the\n"
                 "  closed position. Red warning lights pulse along the frame.\n\n"
-                f"  |wSeal authority:|n {sealed_by}\n"
-                f"  |wReason:|n {reason}\n\n"
-                "  |xYou can go back the way you came. You are not going through this.|n\n"
+                f"  Sealed by {sealed_by}. Reason: {reason}\n"
+                f"{divider}"
             )
         else:
-            text = header + (
+            status = (
+                f"{divider}\n"
+                f"  |w{name.upper().replace('_', ' ')}|n\n"
+                f"{divider}\n"
                 "  The blast door is retracted into the ceiling. The passage is\n"
                 "  clear. The hydraulic rams idle in the open position. Green\n"
-                "  status lights run along the frame.\n\n"
-                "  |xThe way through is open.|n\n"
+                "  status lights run along the frame.\n"
+                f"{divider}"
             )
 
-        text += f"|x{'=' * 52}|n"
-        return text
+        # Build the room display manually so the bulkhead status sits between
+        # the room description and the characters/objects/exits sections.
+        header = self.get_display_header(looker, **kwargs)
+        desc = self.get_display_desc(looker, **kwargs)
+        things = self.get_display_things(looker, **kwargs)
+        furniture = self.get_display_furniture(looker, **kwargs)
+        characters = self.get_display_characters(looker, **kwargs)
+        footer = self.get_display_footer(looker, **kwargs)
+        exits = self.get_display_exits(looker, **kwargs)
+        ambient = self.get_display_ambient(looker, **kwargs)
+
+        head = "\n".join([p for p in (header, desc) if p])
+        parts = [head, status]
+        if ambient:
+            parts.append(ambient)
+        if things:
+            parts.append(things)
+        if furniture:
+            parts.append(furniture)
+        tail = "\n".join([p for p in (characters, exits, footer) if p])
+        if tail:
+            parts.append(tail)
+
+        appearance = "\n\n".join([p for p in parts if p])
+        return self.format_appearance(appearance, looker, **kwargs)

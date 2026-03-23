@@ -49,7 +49,9 @@ def first_to_third(text, character):
     key = (getattr(character.db, "pronoun", "neutral") or "neutral").lower()
     sub, poss, obj = PRONOUN_MAP.get(key, PRONOUN_MAP["neutral"])
     reflexive = {"he": "himself", "she": "herself", "they": "themself"}.get(sub, "themself")
-    text = re.sub(r"\bI'm\b", f"{sub}'s", text, flags=re.IGNORECASE)
+    # "I'm" -> "he's" / "she's" / "they're" (not "they's")
+    im_contraction = f"{sub}'re" if sub == "they" else f"{sub}'s"
+    text = re.sub(r"\bI'm\b", im_contraction, text, flags=re.IGNORECASE)
     text = re.sub(r"\bI\b", sub, text, flags=re.IGNORECASE)
     text = re.sub(r"\bmy\b", poss, text, flags=re.IGNORECASE)
     text = re.sub(r"\bme\b", obj, text, flags=re.IGNORECASE)
@@ -283,7 +285,8 @@ def _get_name_mention_timeline(text, targets):
     """Return list of (end_pos, char) for each name mention in order (by position)."""
     events = []
     for name, char in targets:
-        for m in re.finditer(r"\b" + re.escape(name) + r"\b", text, re.IGNORECASE):
+        # Use (?<!\w)/(?!\w) instead of \b so sdescs with digits or hyphens match correctly.
+        for m in re.finditer(r"(?<!\w)" + re.escape(name) + r"(?!\w)", text, re.IGNORECASE):
             events.append((m.end(), char))
     events.sort(key=lambda x: x[0])
     return events

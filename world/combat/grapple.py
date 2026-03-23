@@ -847,7 +847,6 @@ def grapple_strike(grappler, victim):
         victim.db.current_stamina = victim.max_stamina
         v_cur = victim.max_stamina
     v_cur = int(v_cur or 0)
-    drain = min(v_cur, STAMINA_DRAIN_GRAPPLE_STRIKE)
     victim.db.current_stamina = max(0, v_cur - STAMINA_DRAIN_GRAPPLE_STRIKE)
 
     v_name_for_g = _combat_display_name(victim, grappler)

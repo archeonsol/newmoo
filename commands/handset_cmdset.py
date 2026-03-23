@@ -9,7 +9,7 @@ class HandsetCmdSet(CmdSet):
     key = "HandsetCmdSet"
     priority = 5
     mergetype = "Union"
-    no_exits = True
+    no_exits = False
     no_objs = False
     no_channels = False
 

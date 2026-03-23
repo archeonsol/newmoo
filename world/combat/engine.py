@@ -195,8 +195,6 @@ def _defender_parry_skill(defender):
     try:
         from typeclasses.weapons import get_weapon_key
     except Exception as e:
-        from evennia.utils import logger
-
         logger.log_trace("combat._defender_parry_skill: import get_weapon_key failed: %s" % e)
         return "unarmed"
     wielded = getattr(defender.db, "wielded_obj", None)
@@ -248,8 +246,6 @@ def resolve_attack(attacker, defender, weapon_key="fists"):
         def_trauma_mod = int(t_def_def or 0)
         def_mod += def_trauma_mod
     except Exception as e:
-        from evennia.utils import logger
-
         logger.log_trace("combat.resolve_attack: get_trauma_combat_modifiers failed: %s" % e)
 
     # Low stamina applies a soft combat penalty instead of hard lockout.
@@ -655,15 +651,6 @@ def _execute_vehicle_weapon_combat_turn(attacker, defender, vehicle, weapon, mty
 
 def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs):
     attacker, defender = resolve_combat_objects(attacker, defender, kwargs)
-    if attacker and defender and (kwargs.get("attacker_id") is not None or kwargs.get("defender_id") is not None):
-        from .utils import get_object_by_id
-
-        a_new = get_object_by_id(attacker.id if hasattr(attacker, "id") else kwargs.get("attacker_id"))
-        d_new = get_object_by_id(defender.id if hasattr(defender, "id") else kwargs.get("defender_id"))
-        if a_new:
-            attacker = a_new
-        if d_new:
-            defender = d_new
     if not attacker or not defender:
         _remove_both_combat_tickers(attacker, defender)
         return
@@ -682,6 +669,24 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
     inst = get_instance_for(attacker)
     if inst:
         inst.next_round()
+    _skip_turns = int(getattr(attacker.db, "combat_skip_turns", 0) or 0)
+    if _skip_turns > 0:
+        attacker.db.combat_skip_turns = _skip_turns - 1
+        if getattr(attacker.db, "combat_flee_attempted", False):
+            attacker.attributes.remove("combat_flee_attempted")
+        if getattr(attacker.db, "combat_positioning_attempted", False):
+            attacker.attributes.remove("combat_positioning_attempted")
+        combat_msg(attacker, CC["dodge"] + "You're still getting back to your feet — you can't strike yet.|n")
+        defender_name = combat_role_name(attacker, defender, role="attacker")
+        combat_msg(defender, CC["dodge"] + "%s is still recovering and doesn't strike.|n" % defender_name)
+        loc = getattr(attacker, "location", None) or getattr(defender, "location", None)
+        if loc and hasattr(loc, "contents_get"):
+            for viewer in loc.contents_get(content_type="character"):
+                if viewer in (attacker, defender):
+                    continue
+                atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
+                combat_msg(viewer, f"{atk_v} is still recovering from the fall and doesn't strike.")
+        return
     if getattr(attacker.db, "combat_skip_next_turn", False):
         attacker.attributes.remove("combat_skip_next_turn")
         if getattr(attacker.db, "combat_flee_attempted", False):
@@ -810,6 +815,12 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
             result, attack_value = resolved
 
     move_name = attack_move["name"]
+
+    # Consume one round per trigger pull (miss, parry, dodge, and hit all expend ammo).
+    if is_ranged_weapon(weapon_key) and wielded_obj and hasattr(wielded_obj, "db"):
+        current = int(wielded_obj.db.ammo_current or 0)
+        if current > 0:
+            wielded_obj.db.ammo_current = current - 1
 
     _biker_atk_line = None
     _biker_room_tpl = None
@@ -1020,11 +1031,6 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
         clear_biker_momentum_after_attack(attacker)
     except Exception:
         pass
-
-    if is_ranged_weapon(weapon_key) and wielded_obj and hasattr(wielded_obj, "db"):
-        current = int(wielded_obj.db.ammo_current or 0)
-        if current > 0:
-            wielded_obj.db.ammo_current = current - 1
 
 
 def _remove_both_combat_tickers(a, b):

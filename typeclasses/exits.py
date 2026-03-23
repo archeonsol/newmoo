@@ -97,6 +97,9 @@ class Exit(ObjectParent, DefaultExit):
 
         if begin_staggered_walk_segment:
             begin_staggered_walk_segment(traversing_object, destination, direction, new_norm, exit_obj=self)
+        else:
+            # Fallback if staggered movement module failed to import.
+            super().at_traverse(traversing_object, destination)
         return
 
     def _after_precheck_ok(self, traversing_object, destination):
@@ -146,11 +149,9 @@ class ShaftOpening(CityExit):
         if not destination:
             super().at_traverse(traversing_object, destination)
             return
-        if getattr(traversing_object.ndb, "hide_pending", False):
-            traversing_object.ndb.hide_pending = False
-            traversing_object.msg("|yYour attempt to hide is interrupted.|n")
-            return
 
+        # Shaft confirmation must happen before the hide_pending/precheck logic in super().
+        # If not yet confirmed, warn and set the confirmation flag; super() is not called.
         dir_key = (self.key or "").strip().lower()
         if not getattr(traversing_object.ndb, "_confirmed_shaft_entry", False) or getattr(
             traversing_object.ndb, "_confirmed_shaft_direction", None
@@ -165,4 +166,5 @@ class ShaftOpening(CityExit):
 
         traversing_object.ndb._confirmed_shaft_entry = False
         traversing_object.ndb._confirmed_shaft_direction = None
+        # Delegate to parent which handles hide_pending, precheck, and staggered movement.
         super().at_traverse(traversing_object, destination)

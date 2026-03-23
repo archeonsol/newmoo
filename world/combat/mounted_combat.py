@@ -136,42 +136,42 @@ def biker_defense_bonus(defender) -> int:
 # Each entry is (you_template, third_person_template).
 # {biker} = third-person name; {weapon} = weapon name; {bike} = bike label.
 _BIKER_PREFIXES_MELEE = [
-    ("You lean hard off the saddle and swing {weapon} in a wide arc.",
-     "Leaning hard off the saddle, {biker} swings {weapon} in a wide arc."),
-    ("You wrench the throttle and cut in close, {weapon} already moving.",
-     "{biker} wrenches the throttle and cuts in close, {weapon} already moving."),
-    ("The engine screams as you carve past, {weapon} slashing through the gap.",
-     "The engine screams as {biker} carves past, {weapon} slashing through the gap."),
-    ("You drop a shoulder and drive {weapon} forward off the bike.",
-     "{biker} drops a shoulder and drives {weapon} forward off the bike."),
-    ("Throttle wide, you close the distance in a heartbeat and bring {weapon} around.",
-     "Throttle wide, {biker} closes the distance in a heartbeat and brings {weapon} around."),
+    ("You lean hard off the saddle of your {bike} and swing {weapon} in a wide arc.",
+     "Leaning hard off the saddle of their {bike}, {biker} swings {weapon} in a wide arc."),
+    ("You wrench the throttle of your {bike} and cut in close, {weapon} already moving.",
+     "{biker} wrenches the throttle of their {bike} and cuts in close, {weapon} already moving."),
+    ("The {bike}'s engine screams as you carve past, {weapon} slashing through the gap.",
+     "The {bike}'s engine screams as {biker} carves past, {weapon} slashing through the gap."),
+    ("You drop a shoulder and drive {weapon} forward off the {bike}.",
+     "{biker} drops a shoulder and drives {weapon} forward off the {bike}."),
+    ("Throttle wide on the {bike}, you close the distance in a heartbeat and bring {weapon} around.",
+     "Throttle wide on the {bike}, {biker} closes the distance in a heartbeat and brings {weapon} around."),
 ]
 
 _BIKER_PREFIXES_GUN = [
-    ("You steady the {weapon} one-handed, the engine's vibration absorbed into the shot.",
-     "{biker} steadies the {weapon} one-handed, the engine's vibration absorbed into the shot."),
-    ("The bike holds its line as you level the {weapon} and fire.",
-     "The bike holds its line as {biker} levels the {weapon} and fires."),
-    ("You throttle back just enough to draw a bead, {weapon} raised.",
-     "{biker} throttles back just enough to draw a bead, {weapon} raised."),
-    ("Engine idling low, you sight down the {weapon} and squeeze.",
-     "Engine idling low, {biker} sights down the {weapon} and squeezes."),
-    ("You swing wide and bring the {weapon} to bear in a single smooth motion.",
-     "{biker} swings wide and brings the {weapon} to bear in a single smooth motion."),
+    ("You steady the {weapon} one-handed, the {bike}'s vibration absorbed into the shot.",
+     "{biker} steadies the {weapon} one-handed, the {bike}'s vibration absorbed into the shot."),
+    ("The {bike} holds its line as you level the {weapon} and fire.",
+     "The {bike} holds its line as {biker} levels the {weapon} and fires."),
+    ("You throttle back the {bike} just enough to draw a bead, {weapon} raised.",
+     "{biker} throttles back the {bike} just enough to draw a bead, {weapon} raised."),
+    ("The {bike} idles low as you sight down the {weapon} and squeeze.",
+     "The {bike} idles low as {biker} sights down the {weapon} and squeezes."),
+    ("You swing the {bike} wide and bring the {weapon} to bear in a single smooth motion.",
+     "{biker} swings the {bike} wide and brings the {weapon} to bear in a single smooth motion."),
 ]
 
 _BIKER_PREFIXES_UNARMED = [
-    ("Standing on the pegs, you launch off the bike and drive a fist forward.",
-     "Standing on the pegs, {biker} launches off the bike and drives a fist forward."),
-    ("You kill the throttle and swing a bare-knuckle blow from the saddle.",
-     "{biker} kills the throttle and swings a bare-knuckle blow from the saddle."),
-    ("The engine drops to idle as you lean in and throw a punch.",
-     "The engine drops to idle as {biker} leans in and throws a punch."),
-    ("You grab a fistful of jacket and yank, swinging a free elbow.",
-     "{biker} grabs a fistful of jacket and yanks, swinging a free elbow."),
-    ("Momentum carrying the bike forward, you hammer a strike across the gap.",
-     "Momentum carrying the bike forward, {biker} hammers a strike across the gap."),
+    ("Standing on the {bike}'s pegs, you launch off and drive a fist forward.",
+     "Standing on the {bike}'s pegs, {biker} launches off and drives a fist forward."),
+    ("You kill the {bike}'s throttle and swing a bare-knuckle blow from the saddle.",
+     "{biker} kills the {bike}'s throttle and swings a bare-knuckle blow from the saddle."),
+    ("The {bike} drops to idle as you lean in and throw a punch.",
+     "The {bike} drops to idle as {biker} leans in and throws a punch."),
+    ("You grab a fistful of jacket and yank, swinging a free elbow off the {bike}.",
+     "{biker} grabs a fistful of jacket and yanks, swinging a free elbow off the {bike}."),
+    ("Momentum carrying the {bike} forward, you hammer a strike across the gap.",
+     "Momentum carrying the {bike} forward, {biker} hammers a strike across the gap."),
 ]
 
 _MELEE_SKILLS = frozenset({"short_blades", "long_blades", "blunt_weaponry"})
@@ -180,15 +180,19 @@ _GUN_SKILLS = frozenset({"sidearms", "longarms", "automatics"})
 
 def biker_combat_lines(attacker, weapon_key: str, weapon_obj=None) -> tuple[str, str] | tuple[None, None]:
     """
-    Return (attacker_line, room_line) for a biker's attack setup, or (None, None) if not a biker.
-    attacker_line uses "You"; room_line uses the third-person recog name per viewer (caller must
-    substitute {biker} themselves using combat_role_name_attacker_party).
+    Return (attacker_line, room_tpl) for a biker's attack setup, or (None, None) if not a biker.
+    attacker_line uses "You" and is fully formatted.
+    room_tpl still contains {biker} for per-viewer substitution by the caller; {bike} and {weapon}
+    are already substituted.
     The random choice is made once so both lines are consistent.
     """
     import random as _random
 
     if not _is_biker(attacker):
         return None, None
+
+    bike = getattr(attacker.db, "mounted_on", None)
+    bike_label = (getattr(bike.db, "vehicle_name", None) or getattr(bike, "key", "the bike")) if bike else "the bike"
 
     wname = (
         getattr(weapon_obj, "key", None) or weapon_key.replace("_", " ")
@@ -204,7 +208,10 @@ def biker_combat_lines(attacker, weapon_key: str, weapon_obj=None) -> tuple[str,
         pool = _BIKER_PREFIXES_UNARMED
 
     you_tpl, room_tpl = _random.choice(pool)
-    return you_tpl.format(weapon=wname), room_tpl
+    # Substitute everything except {biker}, which the engine resolves per-viewer.
+    you_line = you_tpl.format(weapon=wname, bike=bike_label)
+    room_tpl_partial = room_tpl.replace("{weapon}", wname).replace("{bike}", bike_label)
+    return you_line, room_tpl_partial
 
 
 def biker_hit_splash(biker, damage: int, weapon_class_or_key) -> None:
@@ -224,7 +231,7 @@ def biker_hit_splash(biker, damage: int, weapon_class_or_key) -> None:
             pass
     if int(damage or 0) >= 20:
         tier, _ = biker.roll_check(["endurance"], "driving", difficulty=max(1, int(damage) // 2))
-        if tier == "Failure":
+        if tier not in ("Critical Success", "Full Success", "Marginal Success"):
             try:
                 from world.vehicle_mounts import force_dismount
 

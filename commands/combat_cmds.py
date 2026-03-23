@@ -2,6 +2,8 @@
 Combat commands: CmdAttack, CmdStop, CmdFlee, CmdStance, CmdGrapple, CmdLetGo, CmdResist, CmdExecute, _combat_caller.
 """
 
+import random
+
 from evennia.utils import logger
 from commands.base_cmds import Command, _command_character
 from world.combat import start_combat_ticker, stop_combat_ticker, _get_combat_target, _combat_display_name
@@ -122,7 +124,7 @@ class CmdAttack(Command):
             caller.db.combat_vehicle_aim_part = aim_part
         else:
             if getattr(caller.db, "combat_vehicle_aim_part", None) is not None:
-                del caller.db.combat_vehicle_aim_part
+                caller.attributes.remove("combat_vehicle_aim_part")
         if target == caller:
             caller.msg("You can't attack yourself.")
             return
@@ -375,7 +377,6 @@ class CmdFlee(Command):
                 caller.msg("No exit in that direction.")
                 return
         else:
-            import random
             exit_obj = random.choice(exits)
         dest = getattr(exit_obj, "destination", None)
         if not dest or not hasattr(caller, "move_to"):
@@ -406,7 +407,7 @@ class CmdFlee(Command):
         remove_both_combat_tickers(caller, opponent)
         victim = getattr(caller.db, "grappling", None)
         dir_name = (getattr(exit_obj, "key", None) or "away").strip()
-        caller.move_to(dest)
+        caller.move_to(dest, quiet=True)
         if victim and hasattr(victim, "move_to"):
             victim.move_to(dest)
             if dest and hasattr(dest, "contents_get"):

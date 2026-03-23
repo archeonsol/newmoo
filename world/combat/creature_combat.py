@@ -209,7 +209,6 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
 
     # Use both so telegraph execution still has a room if creature/target moved
     loc = getattr(creature, "location", None) or getattr(target, "location", None)
-    damage = int(spec.get("damage", 0))
     stamina_drain = int(spec.get("stamina_drain", 0))
 
     # Attack announcement: prefer the move's flavor (msg/execute_msg/msg_hit) so we never show generic when the move has flavor

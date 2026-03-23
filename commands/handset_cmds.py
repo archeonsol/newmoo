@@ -62,7 +62,7 @@ def _ring_room_messages(handset):
         return
     holder.msg("Your handset rings.")
     if room:
-        hname = holder.get_display_name(holder) if hasattr(holder, "get_display_name") else holder.key
+        hname = holder.get_display_name(room) if hasattr(holder, "get_display_name") else holder.key
         try:
             room.msg_contents(f"{hname}'s handset rings.", exclude=holder)
         except Exception:
@@ -85,7 +85,7 @@ def _beep_text_message(receiver_handset, sender_id: str, msg: str, msg_kind: str
     if holder:
         holder.msg("Your handset beeps.")
         if room:
-            hname = holder.get_display_name(holder) if hasattr(holder, "get_display_name") else holder.key
+            hname = holder.get_display_name(room) if hasattr(holder, "get_display_name") else holder.key
             try:
                 room.msg_contents(f"{hname}'s handset beeps.", exclude=holder)
             except Exception:
@@ -262,7 +262,7 @@ class CmdHandset(Command):
             try:
                 verb = "takes a photo" if kind == "photo" else "takes a selfie"
                 room.msg_contents(
-                    f"{caller.get_display_name(caller)} {verb} with their handset.",
+                    f"{caller.get_display_name(room)} {verb} with their handset.",
                     exclude=caller,
                 )
             except Exception:
@@ -271,7 +271,7 @@ class CmdHandset(Command):
         if holder:
             holder.msg("Your handset beeps.")
             if room:
-                hname = holder.get_display_name(holder) if hasattr(holder, "get_display_name") else holder.key
+                hname = holder.get_display_name(room) if hasattr(holder, "get_display_name") else holder.key
                 try:
                     room.msg_contents(f"{hname}'s handset beeps.", exclude=holder)
                 except Exception:
@@ -522,6 +522,11 @@ class CmdHandset(Command):
             caller.msg("|rInvalid number/contact.|n")
             return
 
+        own_id = handset.get_matrix_id() if hasattr(handset, "get_matrix_id") else None
+        if own_id and own_id.upper() == str(target_id).upper():
+            caller.msg("|rYou can't call yourself.|n")
+            return
+
         target_handset = _lookup_handset_by_matrix_id(target_id)
         if not target_handset:
             caller.msg("|rThat number can't be reached.|n")
@@ -625,7 +630,7 @@ class CmdHandset(Command):
         if caller.location:
             try:
                 caller.location.msg_contents(
-                    f"{caller.get_display_name(caller)} speaks quietly into their handset.",
+                    f"{caller.get_display_name(caller.location)} speaks quietly into their handset.",
                     exclude=caller,
                 )
             except Exception:

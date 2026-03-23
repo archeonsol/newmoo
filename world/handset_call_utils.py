@@ -115,7 +115,7 @@ def ring_echo_callback(handset_id, session_id):
         holder.msg(f"|yYour handset is still ringing{suf}.|n")
         room = getattr(holder, "location", None)
         if room:
-            hname = holder.get_display_name(holder) if hasattr(holder, "get_display_name") else holder.key
+            hname = holder.get_display_name(room) if hasattr(holder, "get_display_name") else holder.key
             try:
                 room.msg_contents(f"|y{hname}'s handset is still ringing{suf}.|n", exclude=holder)
             except Exception:
@@ -133,7 +133,14 @@ def ring_timeout_callback(dialer_id, target_id, session_id):
         target = tr[0] if tr else None
     except Exception:
         dialer = target = None
-    if not dialer or not target:
+    if not dialer:
+        return
+    if not target:
+        # Target handset was deleted; clean up dialer so it doesn't stay in "dialing" forever.
+        clear_call(dialer)
+        d_holder = dialer.get_authenticated_user() if hasattr(dialer, "get_authenticated_user") else None
+        if d_holder:
+            d_holder.msg("|yNo answer.|n")
         return
     try:
         if getattr(dialer.ndb, "call_session_id", None) != session_id:

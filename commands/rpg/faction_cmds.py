@@ -107,8 +107,12 @@ class CmdFaction(Command):
                 self.caller.msg("No object found.")
                 return None
             return o[0]
-        r = self.caller.search(name, global_search=True)
-        return r
+        # quiet=True suppresses Evennia's built-in "Could not find X" message so
+        # _mutate's "Character not found." is the only error the caller sees.
+        r = self.caller.search(name, global_search=True, quiet=True)
+        if not r:
+            return None
+        return r[0] if isinstance(r, (list, tuple)) else r
 
     def _parse_eq(self, rest):
         """Parse 'charname = FACTION' or 'charname = FACTION 3' for setrank."""

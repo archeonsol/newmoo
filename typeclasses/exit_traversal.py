@@ -3,6 +3,32 @@ Shared exit traversal checks (used by typeclasses.exits.Exit and commands.stealt
 Returns (ok, destination_out, err_msg).
 """
 import random
+from evennia.utils import logger
+
+# Cached VOID_ROOM_ID — loaded once from ServerConfig on first use.
+# Set to _VOID_UNSET sentinel so None is a valid "no void room" value.
+_VOID_UNSET = object()
+_void_room_id_cache = _VOID_UNSET
+
+
+def _get_void_room_id():
+    """Return the void room id (int or None), caching after the first DB read."""
+    global _void_room_id_cache
+    if _void_room_id_cache is not _VOID_UNSET:
+        return _void_room_id_cache
+    try:
+        from evennia.server.models import ServerConfig
+        val = ServerConfig.objects.conf("VOID_ROOM_ID", default=None)
+        _void_room_id_cache = int(val) if val is not None else None
+    except Exception:
+        _void_room_id_cache = None
+    return _void_room_id_cache
+
+
+def invalidate_void_room_id_cache():
+    """Call this whenever VOID_ROOM_ID is changed in ServerConfig."""
+    global _void_room_id_cache
+    _void_room_id_cache = _VOID_UNSET
 
 
 def precheck_exit_traversal(exit_obj, traversing_object, destination):
@@ -45,14 +71,9 @@ def precheck_exit_traversal(exit_obj, traversing_object, destination):
             return False, destination, "You're in combat! Use |wflee|n or |wflee <direction>|n to try to break away.", None
 
     if getattr(traversing_object.db, "voided", False):
-        try:
-            from evennia.server.models import ServerConfig
-
-            void_id = ServerConfig.objects.conf("VOID_ROOM_ID", default=None)
-            if void_id is not None and getattr(destination, "id", None) != int(void_id):
-                return False, destination, "|rYou cannot leave the void.|n", None
-        except Exception:
-            pass
+        void_id = _get_void_room_id()
+        if void_id is not None and getattr(destination, "id", None) != void_id:
+            return False, destination, "|rYou cannot leave the void.|n", None
 
     try:
         from evennia.utils.utils import inherits_from
@@ -91,7 +112,7 @@ def precheck_exit_traversal(exit_obj, traversing_object, destination):
                 None,
             )
     except Exception:
-        pass
+        logger.log_trace("precheck_exit_traversal: bulkhead_locked check failed")
 
     try:
         from evennia.utils.utils import inherits_from
@@ -111,7 +132,7 @@ def precheck_exit_traversal(exit_obj, traversing_object, destination):
                             None,
                         )
     except Exception:
-        pass
+        logger.log_trace("precheck_exit_traversal: gate_bulkhead check failed")
 
     try:
         from world.rpg.factions import is_faction_member
@@ -139,7 +160,7 @@ def precheck_exit_traversal(exit_obj, traversing_object, destination):
                 if get_member_rank(traversing_object, fk) < min_r:
                     return False, destination, "|rAccess denied. Insufficient rank.|n", None
     except Exception:
-        pass
+        logger.log_trace("precheck_exit_traversal: door/faction check failed")
 
     dest_out = destination
     direction_str = (getattr(exit_obj, "key", None) or "away").strip()

@@ -1101,12 +1101,13 @@ ARMOR_TEMPLATES = [
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Module-level index for O(1) key lookups (built once at import time).
+_ARMOR_TEMPLATE_BY_KEY: dict = {t["key"]: t for t in ARMOR_TEMPLATES}
+
+
 def get_armor_template(key):
     """Return the template dict for key, or None."""
-    for t in ARMOR_TEMPLATES:
-        if t.get("key") == key:
-            return t
-    return None
+    return _ARMOR_TEMPLATE_BY_KEY.get(key)
 
 
 def get_templates_by_level(level):

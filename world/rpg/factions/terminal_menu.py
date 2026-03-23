@@ -70,9 +70,8 @@ def _pay_status_line(caller, fdata):
     can, reason, amount = can_collect_pay(caller, fdata["key"])
     if can:
         return f"{amount}/week (available)"
-    if "Next pay" in reason or "h" in reason:
-        return f"{get_rank_pay(fdata['ranks'], get_member_rank(caller, fdata['key']))}/week ({reason})"
-    return f"{get_rank_pay(fdata['ranks'], get_member_rank(caller, fdata['key']))}/week ({reason})"
+    weekly = get_rank_pay(fdata["ranks"], get_member_rank(caller, fdata["key"]))
+    return f"{weekly}/week ({reason})"
 
 
 def _get_terminal(caller, kwargs):
@@ -165,7 +164,7 @@ def node_terminal_main(caller, raw_string, **kwargs):
         n += 1
 
     add_opt("Collect pay", "node_collect_pay")
-    if staff:
+    if perm >= 3 or staff:
         add_opt("View roster", "node_view_roster", roster_page=0)
     add_opt("View own record", "node_own_record")
 
@@ -212,8 +211,9 @@ def node_view_roster(caller, raw_string, **kwargs):
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
-    if not _is_staff(caller):
-        caller.msg("|rAccess denied. Staff only.|n")
+    perm = get_member_permission(caller, fdata["key"])
+    if perm < 3 and not _is_staff(caller):
+        caller.msg("|rAccess denied. Leadership clearance required.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
     roster = get_faction_roster(fdata["key"], limit=50)

@@ -8,6 +8,7 @@ import time
 from evennia.objects.objects import DefaultExit
 
 from world.rp_features import msg_room_with_character_display
+from world.movement.direction_constants import DIR_ALIASES as _DIR_ALIASES, DIR_OPPOSITES as _OPP
 
 VEHICLE_ACCESS_CAT = "vehicle_access"
 
@@ -39,33 +40,6 @@ def _after_vehicle_move_hook(vehicle, driver, destination, old_room, direction: 
     check_room_hazards(vehicle, destination)
     maneuver = _movement_maneuver(vehicle, destination, old_room, direction)
     _vehicle_after_room_transition(vehicle, driver, destination, maneuver=maneuver, rooms=1)
-
-_DIR_ALIASES = {
-    "n": "north",
-    "s": "south",
-    "e": "east",
-    "w": "west",
-    "ne": "northeast",
-    "nw": "northwest",
-    "se": "southeast",
-    "sw": "southwest",
-    "u": "up",
-    "d": "down",
-}
-
-_OPP = {
-    "north": "south",
-    "south": "north",
-    "east": "west",
-    "west": "east",
-    "northeast": "southwest",
-    "southwest": "northeast",
-    "northwest": "southeast",
-    "southeast": "northwest",
-    "up": "down",
-    "down": "up",
-}
-
 
 def normalize_direction(direction: str) -> str:
     if not direction:

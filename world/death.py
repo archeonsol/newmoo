@@ -208,6 +208,8 @@ def character_can_act(character, allow_builders=True):
             return False, "|rYou are dead. Only an administrator can help you now.|n"
     except Exception:
         pass
+    # Fallback: catch state desync where HP reached 0 but death_state was never set
+    # (e.g. HP was modified directly without going through at_damage).
     hp = getattr(character, "hp", None)
     if hp is not None and hp <= 0:
         return False, "|rYou are dying. There is nothing you can do.|n"
@@ -293,9 +295,9 @@ def _flatline_to_permanent_callback(character_id):
     except Exception as e:
         logger.log_trace("death._flatline_to_permanent_callback(#%s): %s" % (character_id, e))
         return
-    if not is_flatlined(character):
-        return
-    if is_permanently_dead(character):
+    # Collapse the two-step check into one read to eliminate the race window where
+    # a concurrent execute() call could slip between is_flatlined and is_permanently_dead.
+    if getattr(character.db, "death_state", None) != DEATH_STATE_FLATLINED:
         return
     make_permanent_death(character, attacker=None, reason="time")
 
@@ -310,7 +312,7 @@ def _get_or_create_limbo():
         rooms = []
     if rooms:
         limbo = rooms[0]
-        if hasattr(limbo, "db"):
+        if hasattr(limbo, "db") and limbo.db.desc != DEATH_LOBBY_DESC:
             limbo.db.desc = DEATH_LOBBY_DESC
         return limbo
     try:
@@ -342,13 +344,13 @@ def _get_or_create_spirit(account, limbo):
             spirit.locks.add("puppet:all()")
         except Exception:
             pass
-        # Ensure Spirit has death-lobby cmds (go light always; go shard only when account has clone)
+        # Ensure Spirit has death-lobby cmds (go light always; go shard only when account has clone).
+        # Use persistent=True so the cmdset survives a server restart; never write cmdset_storage
+        # directly as that bypasses the ORM save.
         try:
             spirit.cmdset.clear()
-            spirit.cmdset.add("commands.spirit_cmdset.SpiritCmdSet")
+            spirit.cmdset.add("commands.spirit_cmdset.SpiritCmdSet", persistent=True)
             spirit.cmdset.update()
-            # Persist so command handler sees this cmdset when resolving Spirit as caller
-            spirit.cmdset_storage = ["commands.spirit_cmdset.SpiritCmdSet"]
         except Exception:
             pass
         return spirit
@@ -490,13 +492,12 @@ def _safe_corpse_locks(character):
 
 
 def _safe_wipe_corpse_cmdsets(character):
+    # Use = [] rather than del: del on a Django model field only removes the Python-level
+    # override and reverts to the field default rather than persisting an empty list.
     try:
-        del character.cmdset_storage
-    except Exception:
-        try:
-            character.cmdset_storage = []
-        except Exception as e:
-            _log_death_step("cmdset_storage", e)
+        character.cmdset_storage = []
+    except Exception as e:
+        _log_death_step("cmdset_storage", e)
     try:
         character.cmdset.cmdset_stack = []
         character.cmdset.update()

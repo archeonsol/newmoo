@@ -252,6 +252,15 @@ class CmdBulkheadAdmin(Command):
                 self.msg("Exit dbrefs must be integers (e.g. #1234 or 1234).")
                 return
 
+            ex1_res = search_object(f"#{e1}")
+            ex2_res = search_object(f"#{e2}")
+            if not ex1_res:
+                self.msg(f"No object found at #{e1}. Check the district exit dbref.")
+                return
+            if not ex2_res:
+                self.msg(f"No object found at #{e2}. Check the station exit dbref.")
+                return
+
             setup_bulkhead_exits(target, e1, e2)
             self.msg(
                 f"Bulkhead {target.key} configured: district exit #{e1}, station exit #{e2}."

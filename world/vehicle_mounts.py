@@ -12,15 +12,19 @@ def force_dismount(character, motorcycle, reason=""):
     motorcycle.db.driver = None
 
     if reason == "damage":
-        character.msg("|rThe impact throws you from the bike. You hit the ground.|n")
+        character.msg(
+            "|rThe impact throws you from the bike. You hit the ground hard — the wind knocked out of you.|n"
+        )
         if character.location:
             character.location.msg_contents(
-                "{name} is thrown from their bike!",
+                "{name} is thrown from their bike and hits the ground!",
                 exclude=character,
                 mapping={"name": character},
             )
         if hasattr(character, "at_damage"):
-            character.at_damage(None, 8, weapon_key="fall")
+            character.at_damage(None, 12, weapon_key="fall")
+        # Stagger: skip the next 2 combat rounds while recovering from the fall.
+        character.db.combat_skip_turns = 2
     elif reason == "grappled":
         character.msg("|rYou're pulled from the bike.|n")
     elif reason == "move":
@@ -50,7 +54,7 @@ def check_motorcycle_dismount_on_damage(character, damage):
     if dmg <= 0:
         return
     tier, _ = character.roll_check(["endurance"], "driving", difficulty=dmg // 2)
-    if tier == "Failure":
+    if tier not in ("Critical Success", "Full Success", "Marginal Success"):
         force_dismount(character, bike, reason="damage")
 
 

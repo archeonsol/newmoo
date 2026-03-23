@@ -194,7 +194,7 @@ class CmdExitVehicle(Command):
     """
 
     key = "disembark"
-    aliases = ["disembark"]
+    aliases = []
     locks = "cmd:all()"
     help_category = "Vehicles"
     usage_typeclasses = ["typeclasses.vehicles.VehicleInterior"]
@@ -843,7 +843,6 @@ class CmdFly(Command):
         from typeclasses.vehicles import AerialVehicle, _can_vehicle_enter
         from world.rpg.staggered_movement import DRIVE_DELAY, get_drive_delay
         from world.movement.aerial import fly_vertical
-        from world.movement.falling import process_fall
         from world.vehicle_movement import (
             bump_drive_session,
             clear_drive_queue_state,
@@ -1016,7 +1015,7 @@ class CmdEvaluateVehicle(Command):
         if candidates:
             vehicle = caller.search(arg, candidates=candidates)
         else:
-                vehicle = caller.search(arg, location=loc)
+            vehicle = caller.search(arg, location=loc)
         if not vehicle:
             return
         if not isinstance(vehicle, Vehicle):

@@ -72,6 +72,7 @@ class CombatWeapon(Object):
     Ranged weapons also have db.ammo_type, db.ammo_capacity, db.ammo_current.
     """
     def at_object_creation(self):
+        super().at_object_creation()
         self.db.weapon_key = WEAPON_KEY_UNARMED
         self.db.damage_type = "impact"  # slashing, impact, penetrating, burn/freeze/arc/void via overrides
         self.db.damage_mod = 0  # Future: quality modifier applied to move damage
@@ -133,8 +134,6 @@ class UnarmedWeapon(CombatWeapon):
         super().at_object_creation()
         self.db.weapon_key = WEAPON_KEY_UNARMED
         self.db.damage_type = "impact"
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "A weapon that augments or counts as unarmed combat."
@@ -149,8 +148,6 @@ class ShortBladeWeapon(CombatWeapon):
         super().at_object_creation()
         self.db.weapon_key = WEAPON_KEY_SHORT_BLADE
         self.db.damage_type = "slashing"
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "A short blade: knife, dagger, or similar."
@@ -211,8 +208,6 @@ class SidearmWeapon(CombatWeapon, _RangedWeaponMixin):
         self.db.damage_type = "penetrating"
         from world.ammo import AMMO_TYPE_SIDEARM, DEFAULT_AMMO_CAPACITY
         self.at_object_creation_ranged(AMMO_TYPE_SIDEARM, DEFAULT_AMMO_CAPACITY["sidearm"])
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "A sidearm: pistol or revolver. It needs pistol ammo to fire."
@@ -229,8 +224,6 @@ class LongarmWeapon(CombatWeapon, _RangedWeaponMixin):
         self.db.damage_type = "penetrating"
         from world.ammo import AMMO_TYPE_LONGARM, DEFAULT_AMMO_CAPACITY
         self.at_object_creation_ranged(AMMO_TYPE_LONGARM, DEFAULT_AMMO_CAPACITY["longarm"])
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "A longarm: rifle or shotgun. It needs rifle ammo to fire."
@@ -247,8 +240,6 @@ class AutomaticWeapon(CombatWeapon, _RangedWeaponMixin):
         self.db.damage_type = "penetrating"
         from world.ammo import AMMO_TYPE_AUTOMATIC, DEFAULT_AMMO_CAPACITY
         self.at_object_creation_ranged(AMMO_TYPE_AUTOMATIC, DEFAULT_AMMO_CAPACITY["automatic"])
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "An automatic weapon: SMG, assault rifle, or similar. It needs automatic ammo to fire."

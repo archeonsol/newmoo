@@ -2,6 +2,8 @@
 Builder commands for freight lifts.
 """
 
+import time
+
 from commands.base_cmds import Command
 
 
@@ -81,8 +83,6 @@ class CmdFreight(Command):
         caller.msg(f"|yFreight cycle stopped on {lift.key} (#{lift.id}).|n")
 
     def _do_status(self, caller, rest):
-        import time
-
         lift = self._resolve_lift(caller, rest)
         if not lift:
             return
@@ -150,5 +150,17 @@ class CmdFreight(Command):
         if len(bits) != 2:
             caller.msg("Provide exactly two station dbrefs after =.")
             return
-        setup_freight_stations(lift, bits[0].strip(), bits[1].strip())
-        caller.msg(f"|gSet upper_station={bits[0]} lower_station={bits[1]} on {lift.key}.|n")
+        from evennia.utils.search import search_object
+
+        upper_ref = bits[0].strip().lstrip("#")
+        lower_ref = bits[1].strip().lstrip("#")
+        upper_obj = search_object(f"#{upper_ref}")
+        lower_obj = search_object(f"#{lower_ref}")
+        if not upper_obj:
+            caller.msg(f"|rUpper station dbref #{upper_ref} not found.|n")
+            return
+        if not lower_obj:
+            caller.msg(f"|rLower station dbref #{lower_ref} not found.|n")
+            return
+        setup_freight_stations(lift, upper_ref, lower_ref)
+        caller.msg(f"|gSet upper_station=#{upper_ref} lower_station=#{lower_ref} on {lift.key}.|n")

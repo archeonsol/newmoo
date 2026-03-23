@@ -710,6 +710,11 @@ class Vehicle(MatrixIdMixin, Object):
             if getattr(self.db, "max_weapon_mounts", None) is None:
                 self.db.max_weapon_mounts = vcfg["max_mounts"]
             init_vehicle_hp_for_type(self)
+            if not getattr(self.db, "weapon_mount_types", None):
+                meta = {}
+                for i, mtype in enumerate(vcfg["mount_types"][: int(self.db.max_weapon_mounts or 2)]):
+                    meta[f"m{i}"] = mtype
+                self.db.weapon_mount_types = meta
         except Exception:
             if getattr(self.db, "vehicle_hp", None) is None:
                 self.db.vehicle_hp = 100
@@ -723,18 +728,6 @@ class Vehicle(MatrixIdMixin, Object):
             from world.vehicle_parts import refresh_vehicle_armor
 
             refresh_vehicle_armor(self)
-        except Exception:
-            pass
-        try:
-            from world.combat.vehicle_combat import VEHICLE_MOUNT_CONFIGS
-
-            vt = getattr(self.db, "vehicle_type", None) or "ground"
-            vcfg = VEHICLE_MOUNT_CONFIGS.get(vt, VEHICLE_MOUNT_CONFIGS["ground"])
-            if not getattr(self.db, "weapon_mount_types", None):
-                meta = {}
-                for i, mtype in enumerate(vcfg["mount_types"][: int(self.db.max_weapon_mounts or 2)]):
-                    meta[f"m{i}"] = mtype
-                self.db.weapon_mount_types = meta
         except Exception:
             pass
         try:
@@ -780,9 +773,7 @@ class Vehicle(MatrixIdMixin, Object):
         if recovered:
             return recovered
 
-        if getattr(self.ndb, "_interior_tag_search_done", False):
-            pass
-        else:
+        if not getattr(self.ndb, "_interior_tag_search_done", False):
             try:
                 found = search_tag(VEHICLE_INTERIOR_TAG, category=str(self.id))
                 self.ndb._interior_tag_search_done = True
@@ -857,7 +848,8 @@ class Vehicle(MatrixIdMixin, Object):
         ok, _reason = _can_vehicle_be_placed_in_room(self, dest)
         if ok:
             return
-        if source_location:
+        # Guard against recursive at_after_move when moving back to source.
+        if source_location and dest != source_location:
             self.move_to(source_location, quiet=True)
 
     def return_appearance(self, looker, **kwargs):
@@ -1001,8 +993,6 @@ class Motorcycle(Vehicle):
     has_interior_default = False
 
     def at_object_creation(self):
-        self.db.vehicle_type = "motorcycle"
-        self.db.has_interior = False
         super().at_object_creation()
         self.db.vehicle_type = "motorcycle"
         self.db.has_interior = False
@@ -1010,7 +1000,7 @@ class Motorcycle(Vehicle):
         self.db.max_passengers = getattr(self.db, "max_passengers", None) or 1
         self.db.rider = None
         self.db.speed_class = getattr(self.db, "speed_class", None) or "fast"
-        if not hasattr(self.db, "has_pillion"):
+        if not self.attributes.has("has_pillion"):
             self.db.has_pillion = False
 
     @property

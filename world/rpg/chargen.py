@@ -228,12 +228,6 @@ def _render_ladder(caller) -> str:
     return "\n".join(rows)
 
 
-# We shrink the bar slightly so two columns can comfortably fit side-by-side in a 72-char terminal
-_BAR_WIDTH = 10  
-
-# Shrunk slightly to give the text columns enough room to fit long words
-_BAR_WIDTH = 7  
-
 def _stat_table(caller, stats: dict) -> str:
     tbl = EvTable(
         "|xTrait|n", "|xGr|n", "|xPower|n",
@@ -387,7 +381,7 @@ def start_cinematic_chargen(caller):
         "|xYou just don't remember it yet.|n\n"
     ))
     # Keep the ritual non-escapable from menu commands like `quit`.
-    delay(19.5, lambda: EvMenu(caller, "world.chargen", startnode="node_name", auto_quit=False))
+    delay(19.5, lambda: EvMenu(caller, "world.rpg.chargen", startnode="node_name", auto_quit=False))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -690,17 +684,15 @@ def node_apply_mark(caller, raw_string="", **kwargs):
         return node_skills(caller, raw_string, **kwargs)
 
     count, tier_level, tier_label = MARKS_LADDER[tier_index]
-    skills = caller.db.skills or {}
+    skills = dict(caller.db.skills or {})
     cur    = skills.get(skill_key, 0) or 0
 
     if cur >= tier_level:
         caller.msg("\n|r[!] That skill is already etched to this depth.|n\n")
         return node_skills(caller, raw_string, **kwargs)
 
-    if not caller.db.skills:
-        caller.db.skills = {}
-        
-    caller.db.skills[skill_key] = tier_level
+    skills[skill_key] = tier_level
+    caller.db.skills = skills
     caller.db.chargen_mark_tier_picks_left = picks_left - 1
     return node_skills(caller, raw_string, **kwargs)
 

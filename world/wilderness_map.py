@@ -34,45 +34,54 @@ CITY_GATE_COORD = (0, 0)
 # Example: a town reached by going 19 east and 7 north from city gate.
 TOWN_COORD = (19, 7)
 
-# Map wilderness coordinates to permanent room paths or objects.
-# Replace the string values with actual room paths (or room objects) in your world.
+# Map wilderness coordinates to permanent rooms via dbref strings (e.g. "#123").
+# Use the room's #dbref so lookups are exact and never match by name/path.
+# Example: once you've built the town entry room and noted its dbref, set:
+#   TOWN_COORD: "#123"
+# Leave the value as None (or omit the entry) to skip that coord until the room exists.
 PERMANENT_COORDS = {
-    # Example – town entry room; adjust to your actual room path.
-    TOWN_COORD: "world.town.TownSquare",  # TODO: create this room and update this path
+    # TOWN_COORD: "#123",  # TODO: replace with actual dbref once the room is built
 }
 
 
 def get_city_gate_room(provider):
-    """Resolve the city gate room from the provider's city_gate_room_path."""
+    """
+    Resolve the city gate room from the provider's city_gate_room_path.
+
+    Accepted values:
+      - A dbref string like "#123"  (preferred)
+      - An integer dbref
+      - A tag string (no "#" prefix) — searches by tag, prefers rooms (location=None)
+      - An already-resolved room object
+    """
     path = getattr(provider, "city_gate_room_path", None)
     if not path:
         return None
+    # Already a resolved object
+    if not isinstance(path, (str, int)):
+        return path if hasattr(path, "at_object_leave") else None
+    # Integer dbref
     if isinstance(path, int):
-        results = search_object(path)
+        results = search_object(f"#{path}")
         return results[0] if results else None
-    if isinstance(path, str) and path.startswith("#"):
+    # Dbref string "#NNN"
+    if path.startswith("#"):
         try:
-            dbref = int(path.lstrip("#"))
-            results = search_object(dbref)
+            int(path.lstrip("#"))  # validate it's numeric
+            results = search_object(path)
             return results[0] if results else None
         except (ValueError, TypeError):
             pass
-    if isinstance(path, str):
-        # Path (dbref string already handled above)
-        if path.startswith("world.") or "/" in path or path.count(".") >= 1:
-            results = search_object(path)
-            return results[0] if results else None
-        # Treat as tag: prefer rooms (location is None); exits also have at_object_leave
-        from evennia.utils.search import search_tag
-        tagged = search_tag(path)
-        for obj in (tagged or []):
-            if hasattr(obj, "at_object_leave") and getattr(obj, "location", None) is None:
-                return obj
-        for obj in (tagged or []):
-            if hasattr(obj, "at_object_leave"):
-                return obj
-        return None
-    return path if hasattr(path, "at_object_leave") else None
+    # Tag string — prefer rooms (location is None)
+    from evennia.utils.search import search_tag
+    tagged = search_tag(path)
+    for obj in (tagged or []):
+        if hasattr(obj, "at_object_leave") and getattr(obj, "location", None) is None:
+            return obj
+    for obj in (tagged or []):
+        if hasattr(obj, "at_object_leave"):
+            return obj
+    return None
 
 
 class ColonyWildernessRoom(wilderness.WildernessRoom):
@@ -181,7 +190,9 @@ class ColonyWildernessProvider(wilderness.WildernessMapProvider):
                     key="inside",
                     aliases=["in"],
                     location=room,
-                    destination=room,
+                    # destination is resolved dynamically in InsideToCityExit.at_traverse;
+                    # set to None here so the exit doesn't falsely point back at the wilderness room.
+                    destination=None,
                     report_to=obj,
                 )
         else:
@@ -189,16 +200,19 @@ class ColonyWildernessProvider(wilderness.WildernessMapProvider):
                 inside_exit.delete()
 
         # 1) Hand off to permanent structures if this coord is special.
+        # PERMANENT_COORDS values must be dbref strings ("#NNN") or room objects.
         if (x, y) in PERMANENT_COORDS:
             target = PERMANENT_COORDS[(x, y)]
             dest = None
-            if isinstance(target, str):
+            if target is None:
+                pass  # entry reserved but room not built yet
+            elif isinstance(target, str) and target.startswith("#"):
                 try:
                     found = search_object(target)
                     dest = found[0] if found else None
                 except Exception:
                     dest = None
-            else:
+            elif not isinstance(target, str):
                 dest = target if hasattr(target, "at_object_leave") else None
             if dest:
                 obj.msg("|gYou leave the wastes behind and enter a settlement.|n")
@@ -249,7 +263,7 @@ class ColonyWildernessProvider(wilderness.WildernessMapProvider):
                 for tag in list(room.tags.all()):
                     t = str(tag).lower()
                     if t in ("wildscavenge", "urbanscavenge") or t.startswith("biome_") or t.startswith("scavenge_"):
-                        room.tags.remove(tag)
+                        room.tags.remove(t)  # pass the string key, not the tag object
                 room.tags.add("wildscavenge")
                 room.tags.add(f"biome_{biome}")
                 room.tags.add(f"scavenge_{biome}")

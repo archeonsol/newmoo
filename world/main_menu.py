@@ -148,7 +148,7 @@ def node_puppet_character(caller, raw_string, **kwargs):
     current = getattr(session, "puppet", None)
     if current is char:
         caller.msg("\n|c>> Downloading consciousness... Returning to body.|n\n")
-        return "", None
+        return None, None
 
     caller.msg("\n|c>> Downloading consciousness... Returning to body.|n\n")
 
@@ -159,7 +159,7 @@ def node_puppet_character(caller, raw_string, **kwargs):
         caller.msg("\n|r[!] Synchronization failed. That body is no longer available.|n\n")
         return "node_start"
 
-    return "", None
+    return None, None
 
 
 def node_create_character(caller, raw_string, **kwargs):
@@ -216,8 +216,8 @@ def node_create_character(caller, raw_string, **kwargs):
     except RuntimeError:
         caller.msg("\n|r[!] Critical error. You remain at the registry.|n\n")
         return "node_start"
-        
-    return None 
+
+    return None, None
 
 
 def node_rules(caller, raw_string, **kwargs):

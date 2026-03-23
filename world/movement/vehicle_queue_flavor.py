@@ -3,31 +3,7 @@ Brief cabin / rider lines for queued vehicle moves (no full windscreen between s
 """
 from __future__ import annotations
 
-_DIR_ALIASES = {
-    "n": "north",
-    "s": "south",
-    "e": "east",
-    "w": "west",
-    "ne": "northeast",
-    "nw": "northwest",
-    "se": "southeast",
-    "sw": "southwest",
-    "u": "up",
-    "d": "down",
-}
-
-_OPP = {
-    "north": "south",
-    "south": "north",
-    "east": "west",
-    "west": "east",
-    "northeast": "southwest",
-    "southwest": "northeast",
-    "northwest": "southeast",
-    "southeast": "northwest",
-    "up": "down",
-    "down": "up",
-}
+from world.movement.direction_constants import DIR_ALIASES as _DIR_ALIASES, DIR_OPPOSITES as _OPP
 
 
 def _norm(d: str | None) -> str:

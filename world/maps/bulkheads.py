@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from evennia.utils import logger
-from evennia.utils.search import search_object, search_tag, search_tag
+from evennia.utils.search import search_object, search_tag
 
 
 def can_operate_bulkhead(character):
@@ -37,7 +37,8 @@ def can_operate_bulkhead(character):
 
 
 def _log_bulkhead_event(bulkhead_room, event_type: str, character, details: str = ""):
-    log = list(bulkhead_room.db.seal_log or [])
+    raw = getattr(bulkhead_room.db, "seal_log", None)
+    log = list(raw) if isinstance(raw, (list, tuple)) else []
     log.append(
         {
             "event": event_type,

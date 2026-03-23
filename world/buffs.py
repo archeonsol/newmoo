@@ -156,11 +156,14 @@ def _register_all_drug_buff_classes():
         cd_dur = int(cd.get("duration_seconds", 0) or 0)
         cd_debuffs = cd.get("stat_debuffs") or {}
         if cd or cd_dur or cd_debuffs:
+            # If cd_dur is unspecified (0) but debuffs exist, default to 1 hour so the
+            # comedown is actually felt rather than expiring in 1 second.
+            effective_cd_dur = cd_dur if cd_dur else (3600 if cd_debuffs else 1)
             build_drug_buff_class(
                 drug_key,
                 "comedown",
                 "%s comedown" % name,
-                max(1, cd_dur) if (cd_dur or cd_debuffs) else 1,
+                max(1, effective_cd_dur),
                 {},
                 cd_debuffs,
             )

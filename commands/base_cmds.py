@@ -512,6 +512,36 @@ class CmdGet(DefaultCmdGet if DefaultCmdGet else BaseCommand):
             else:
                 caller.msg("Get what?")
             return
+
+        # Cash pile interception: if the target is a cash pile, convert it to
+        # wallet funds instead of moving it to inventory.
+        if " from " not in args:
+            try:
+                obj = caller.search(args, location=caller.location, quiet=True)
+                if obj:
+                    import evennia.utils.utils as _utils
+                    obj_list = _utils.make_iter(obj)
+                    if obj_list:
+                        candidate = obj_list[0]
+                        if candidate.tags.get("cash_pile", category="economy"):
+                            from world.rpg.economy import add_funds, format_currency, CURRENCY_NAME
+                            amount = int(getattr(candidate.db, "cash_amount", 0) or 0)
+                            if amount > 0:
+                                add_funds(caller, amount, party="ground", reason="picked up cash")
+                                caller.msg(
+                                    f"You scoop up {format_currency(amount)}."
+                                )
+                                caller.location.msg_contents(
+                                    f"|w{caller.key}|n picks up a pile of {CURRENCY_NAME}.",
+                                    exclude=[caller],
+                                )
+                            else:
+                                caller.msg("The pile is empty.")
+                            candidate.delete()
+                            return
+            except Exception:
+                pass
+
         if " from " not in args:
             if DefaultCmdGet:
                 super().func()
