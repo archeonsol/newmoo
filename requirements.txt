@@ -74,3 +74,6 @@ humanize==4.15.0
 
 # Pathfinding for XYZgrid contrib
 scipy==1.17.1
+
+# Transitions
+transitions==0.9.3
