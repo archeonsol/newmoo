@@ -1,6 +1,7 @@
 """
 Medical tools and devices: scanners, bandages, medkits, suture kits, splints, defibrillator, etc.
-Use with the medical menu or 'use <tool> on <target>' for scan/treat. Defib: defib <target> or use defibrillator on <target>.
+Antibiotics and immunosuppressants are pill bottles (typeclasses.med_pills), not MedicalTools.
+Use the medical menu or 'use <tool> on <target>' for scan/treat. Defib: defib <target> or use defibrillator on <target>.
 """
 import random
 import time
@@ -18,7 +19,6 @@ from world.medical.medical_treatment import (
     TOOL_HEMOSTATIC,
     TOOL_SURGICAL_KIT,
     TOOL_TOURNIQUET,
-    TOOL_ANTIBIOTICS,
 )
 
 
@@ -154,123 +154,6 @@ class SurgicalKit(MedicalTool):
         self.db.uses_remaining = 5
 
 
-class CoAmoxiclav(MedicalTool):
-    """Co-amoxiclav (amoxicillin/clavulanate): broad skin/soft tissue coverage."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "co-amoxiclav"
-        self.db.antibiotic_profile = "co_amoxiclav"
-        self.db.antibiotic_targets = [
-            "surface_cellulitis",
-            "stitch_abscess",
-            "sewer_fever",
-        ]
-        self.db.uses_remaining = 4
-
-
-class Cephalexin(MedicalTool):
-    """Cephalexin: first-line skin/soft tissue oral cephalosporin."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "cephalexin"
-        self.db.antibiotic_profile = "cephalexin"
-        self.db.antibiotic_targets = [
-            "surface_cellulitis",
-            "stitch_abscess",
-        ]
-        self.db.uses_remaining = 5
-
-
-class Doxycycline(MedicalTool):
-    """Doxycycline: atypical/respiratory and mixed soft tissue support."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "doxycycline"
-        self.db.antibiotic_profile = "doxycycline"
-        self.db.antibiotic_targets = [
-            "sewer_fever",
-            "pleural_empyema",
-        ]
-        self.db.uses_remaining = 4
-
-
-class Metronidazole(MedicalTool):
-    """Metronidazole: anaerobic coverage for deep foul/necrotic wounds."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "metronidazole"
-        self.db.antibiotic_profile = "metronidazole"
-        self.db.antibiotic_targets = [
-            "anaerobic_wound_rot",
-        ]
-        self.db.uses_remaining = 4
-
-
-class Clindamycin(MedicalTool):
-    """Clindamycin: tissue/bone anaerobic and skin-adjacent coverage."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "clindamycin"
-        self.db.antibiotic_profile = "clindamycin"
-        self.db.antibiotic_targets = [
-            "anaerobic_wound_rot",
-            "bone_deep_osteitis",
-        ]
-        self.db.uses_remaining = 3
-
-
-class PiperacillinTazobactam(MedicalTool):
-    """Piperacillin/tazobactam: broad severe polymicrobial rescue coverage."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "piperacillin/tazobactam"
-        self.db.antibiotic_profile = "pip_tazo"
-        self.db.antibiotic_targets = [
-            "anaerobic_wound_rot",
-            "bone_deep_osteitis",
-            "pleural_empyema",
-            "sewer_fever",
-            "bloodfire_sepsis",
-        ]
-        self.db.uses_remaining = 2
-
-
-class Vancomycin(MedicalTool):
-    """Vancomycin: high-tier rescue for severe bloodstream/device infections."""
-    def at_object_creation(self):
-        super().at_object_creation()
-        self.db.medical_tool_type = TOOL_ANTIBIOTICS
-        self.key = "vancomycin"
-        self.db.antibiotic_profile = "vancomycin"
-        self.db.antibiotic_targets = [
-            "bloodfire_sepsis",
-            "chrome_interface_necrosis",
-        ]
-        self.db.uses_remaining = 2
-
-
-# Backward-compatible aliases for older prototypes/scripts.
-class Antibiotics(CoAmoxiclav):
-    """Compatibility alias -> co-amoxiclav."""
-    pass
-
-
-class AntiAnaerobeKit(Metronidazole):
-    """Compatibility alias -> metronidazole."""
-    pass
-
-
-class InterfacePhageCocktail(Vancomycin):
-    """Compatibility alias -> vancomycin."""
-    pass
-
-
 class ORStation(MedicalTool):
     """
     Legacy operating room surgical station (operating theatre). Use OperatingTable for new spawns.
@@ -330,8 +213,9 @@ class OperatingTable(MedicalTool):
         patient = self.get_patient()
         if patient != target:
             return False, "Anesthesia can only be administered to the patient on the operating table."
-        now_ts = time.time()
-        if bool(getattr(target.db, "medical_unconscious", False)) and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts:
+        from world.medical import is_unconscious
+
+        if is_unconscious(target):
             return False, "Patient is already unconscious."
         delay_secs = random.randint(5, 6)
         target.msg("|mA mask descends. You inhale |wsevoflurane|m vapor as the room starts to blur...|n")
@@ -353,9 +237,6 @@ class OperatingTable(MedicalTool):
             now = time.time()
             old_until = float(getattr(target.db, "sedated_until", 0.0) or 0.0)
             target.db.sedated_until = max(old_until, now + ko_secs)
-            old_med_until = float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0)
-            target.db.medical_unconscious = True
-            target.db.medical_unconscious_until = max(old_med_until, now + ko_secs)
             target.db.sedated_by = getattr(operator, "id", None)
             target.msg("|mThe vapor takes hold. Darkness closes in.|n")
 
@@ -373,19 +254,23 @@ class OperatingTable(MedicalTool):
             return False, "You can only wake the patient lying on the operating table."
 
         was_sedated = float(getattr(target.db, "sedated_until", 0.0) or 0.0) > time.time()
-        was_uncon = bool(getattr(target.db, "medical_unconscious", False))
+        from world.medical import is_unconscious
+
+        was_uncon = is_unconscious(target)
         if not was_sedated and not was_uncon:
             return False, "They are already awake."
 
         try:
             from world.combat.grapple import force_wake_medical_unconscious
+
             force_wake_medical_unconscious(target, silent=True)
         except Exception:
-            target.db.medical_unconscious = False
-            target.db.medical_unconscious_until = 0.0
+            try:
+                from world.unconscious_state import force_wake_unconscious
 
-        target.db.sedated_until = 0.0
-        target.db.sedated_by = None
+                force_wake_unconscious(target, silent=True)
+            except Exception:
+                pass
         target.msg("|mThe chemical haze thins. Your awareness snaps back in a rush.|n")
         if target.location and hasattr(target.location, "contents_get"):
             for v in target.location.contents_get(content_type="character"):
@@ -405,7 +290,7 @@ def get_medical_tools_from_inventory(character):
     """
     from world.medical.medical_treatment import (
         TOOL_SCANNER, TOOL_BANDAGES, TOOL_MEDKIT, TOOL_SUTURE_KIT,
-        TOOL_SPLINT, TOOL_HEMOSTATIC, TOOL_TOURNIQUET, TOOL_SURGICAL_KIT, TOOL_ANTIBIOTICS,
+        TOOL_SPLINT, TOOL_HEMOSTATIC, TOOL_TOURNIQUET, TOOL_SURGICAL_KIT,
     )
     result = {}
     if not character:

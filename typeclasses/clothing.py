@@ -23,15 +23,15 @@ class Clothing(Item):
         self.db.worn_desc = ""
         self.db.tease_message = ""
         # Quality from tailoring finalize roll: adjective (e.g. "fancy") and score (0-100) for outfit averaging
-        if not hasattr(self.db, "quality_adjective"):
+        if not self.attributes.has("quality_adjective"):
             self.db.quality_adjective = ""
-        if not hasattr(self.db, "quality_score"):
+        if not self.attributes.has("quality_score"):
             self.db.quality_score = None
         # Tailored clothing layering (0-5); default 1 unless tailoring sets otherwise.
-        if not hasattr(self.db, "clothing_layer"):
+        if not self.attributes.has("clothing_layer"):
             self.db.clothing_layer = 1
         # See-through clothing (jewelry, mesh, etc.): when True, does not replace body-part text.
-        if not hasattr(self.db, "see_thru"):
+        if not self.attributes.has("see_thru"):
             self.db.see_thru = False
         # Optional two-state support (for zipping, hoods, etc.).
         # db.state: current active state key (e.g. "a" or "b"). None → no special state handling.
@@ -42,11 +42,11 @@ class Clothing(Item):
         #       "see_thru": bool,
         #       "toggle_emote_you": "You zip up $N's jacket.",  # room text auto-derived from this
         #   }
-        if not hasattr(self.db, "state"):
+        if not self.attributes.has("state"):
             self.db.state = None
-        if not hasattr(self.db, "state_a"):
+        if not self.attributes.has("state_a"):
             self.db.state_a = None
-        if not hasattr(self.db, "state_b"):
+        if not self.attributes.has("state_b"):
             self.db.state_b = None
 
     def has_two_states(self):
@@ -129,7 +129,7 @@ class Clothing(Item):
             if self in worn:
                 # Move back to giver if Evennia already moved it.
                 if self.location is not giver:
-                    self.location = giver
+                    self.move_to(giver, quiet=True)
                 giver.msg(f"You must |wremove|n {self.get_display_name(giver)} before you can give it to someone.")
                 if receiver and hasattr(receiver, "msg"):
                     receiver.msg(f"{giver.get_display_name(receiver)} is still wearing {self.get_display_name(receiver)} and cannot give it yet.")
@@ -137,6 +137,6 @@ class Clothing(Item):
             # If anything goes wrong, better to leave the item with the giver than to allow a half-worn state.
             try:
                 if self.location is not giver:
-                    self.location = giver
+                    self.move_to(giver, quiet=True)
             except Exception:
                 pass

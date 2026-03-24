@@ -7,6 +7,8 @@ that combat logic can evolve independently of flavor text and numbers.
 
 from __future__ import annotations
 
+from world.theme_colors import COMBAT_COLORS as CC
+
 # Hands required per weapon: 1 = one-handed, 2 = two-handed. Used for wield/unwield.
 WEAPON_HANDS = {
     "fists": 1,
@@ -24,14 +26,16 @@ WEAPON_HANDS = {
 # defender and room see generic messages. Templates use {target} for the
 # defender's name.
 COMBAT_READY_ATTACKER_MSG = {
-    "fists": "|rYou raise your fists, eyeing {target}.|n",
-    "claws": "|rYou spread your hands, chrome claws poised, eyeing {target}.|n",
-    "knife": "|rYou ready your blade, eyeing {target}.|n",
-    "long_blade": "|rYou ready your blade, eyeing {target}.|n",
-    "blunt": "|rYou heft your weapon, eyeing {target}.|n",
-    "sidearm": "|rYou bring your sidearm up, eyeing {target}.|n",
-    "longarm": "|rYou shoulder your weapon, eyeing {target}.|n",
-    "automatic": "|rYou bring the weapon to bear, eyeing {target}.|n",
+    "fists": "" + CC["miss"] + "You raise your fists, eyeing {target}.|n",
+    "claws": "" + CC["miss"] + "You spread your hands, chrome claws poised, eyeing {target}.|n",
+    "knife": "" + CC["miss"] + "You ready your blade, eyeing {target}.|n",
+    "long_blade": "" + CC["miss"] + "You ready your blade, eyeing {target}.|n",
+    "blunt": "" + CC["miss"] + "You heft your weapon, eyeing {target}.|n",
+    "sidearm": "" + CC["miss"] + "You bring your sidearm up, eyeing {target}.|n",
+    "longarm": "" + CC["miss"] + "You shoulder your weapon, eyeing {target}.|n",
+    "automatic": "" + CC["miss"] + "You bring the weapon to bear, eyeing {target}.|n",
+    # Vehicle crew using attack + mounted weapon (opening range bands are legacy UI only; room size rules combat).
+    "vehicle_mount": "" + CC["miss"] + "You train the mount on {target}, hands on the controls.|n",
 }
 
 

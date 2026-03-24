@@ -1,20 +1,33 @@
 from __future__ import annotations
 
+import logging
 import random
+import time
 from evennia.utils import logger
 
+try:
+    from world.gamelog import get_logger as _get_gamelog
+    _log = _get_gamelog(__name__)
+except Exception:
+    _log = logging.getLogger("evennia")
+
+from world.theme_colors import COMBAT_COLORS as CC
 from world.medical import BODY_PARTS, apply_trauma, get_brutal_hit_flavor
 from world.skills import SKILL_STATS, WEAPON_KEY_TO_SKILL, DEFENSE_SKILL
+from world.combat.weapons import get_weapon_class_for_room_mod
+from world.combat.room_size import get_room_size_modifier, get_smoke_attack_penalty
+from world.combat.mounted_combat import (
+    get_mounted_attack_mod,
+    pedestrian_vs_biker_melee_penalty,
+    biker_defense_bonus,
+)
 from world.ammo import is_ranged_weapon
 from world.combat.weapon_definitions import WEAPON_DATA
 from world.combat.combat_messages import hit_message, get_result_messages, get_soak_messages
 from world.combat.damage_types import get_damage_type
 from world.combat.range_system import (
-    get_attack_range_penalty,
     get_parry_range_penalty,
-    get_combat_range,
     get_range_display_line,
-    RANGE_LABELS,
 )
 from world.combat.cover import (
     get_cover_defense_bonus,
@@ -53,9 +66,12 @@ except ImportError:
 from .utils import (
     combat_display_name,
     combat_role_name,
+    combat_role_name_attacker_party,
+    relay_combat_room_msg,
     combat_msg,
     resolve_combat_objects,
     get_combat_target,
+    get_combat_external_location,
 )
 from .instance import get_instance_for, try_auto_switch_target
 
@@ -187,8 +203,6 @@ def _defender_parry_skill(defender):
     try:
         from typeclasses.weapons import get_weapon_key
     except Exception as e:
-        from evennia.utils import logger
-
         logger.log_trace("combat._defender_parry_skill: import get_weapon_key failed: %s" % e)
         return "unarmed"
     wielded = getattr(defender.db, "wielded_obj", None)
@@ -240,18 +254,25 @@ def resolve_attack(attacker, defender, weapon_key="fists"):
         def_trauma_mod = int(t_def_def or 0)
         def_mod += def_trauma_mod
     except Exception as e:
-        from evennia.utils import logger
-
         logger.log_trace("combat.resolve_attack: get_trauma_combat_modifiers failed: %s" % e)
 
     # Low stamina applies a soft combat penalty instead of hard lockout.
     atk_mod += int(get_stamina_modifier(attacker) or 0)
     def_mod += int(get_stamina_modifier(defender) or 0)
-    atk_mod += int(get_attack_range_penalty(attacker, defender, weapon_key) or 0)
+    room = getattr(attacker, "location", None)
+    wc = get_weapon_class_for_room_mod(weapon_key)
+    atk_mod += int(get_room_size_modifier(room, wc))
+    atk_mod += int(get_smoke_attack_penalty(room, weapon_key))
+    atk_mod += int(get_mounted_attack_mod(attacker, weapon_key))
+    atk_mod += int(pedestrian_vs_biker_melee_penalty(defender, weapon_key))
     atk_mod += int(get_suppressed_attack_penalty(attacker) or 0)
-    current_range = get_combat_range(attacker, defender)
-    damage_type = get_damage_type(weapon_key, None)
-    def_mod += int(get_cover_defense_bonus(defender, weapon_key, damage_type, current_range) or 0)
+    def_mod += int(get_cover_defense_bonus(defender, weapon_key) or 0)
+    def_mod += int(biker_defense_bonus(defender))
+    try:
+        if float(getattr(defender.db, "suppressed_until", 0) or 0) > time.time():
+            def_mod -= 10
+    except Exception:
+        pass
 
     attack_skill = WEAPON_KEY_TO_SKILL.get(weapon_key, "unarmed")
     attack_stats = SKILL_STATS.get(attack_skill, ["strength", "agility"])
@@ -435,8 +456,10 @@ def _check_body_shield(defender, attack_value, attacker_rating=None):
     return effective_defender, hit_shield
 
 
-def can_attack(attacker, defender, weapon_key, wielded_obj):
-    """Single gatekeeper for combat pre-flight checks."""
+def can_attack(attacker, defender, weapon_key, wielded_obj, *, vehicle_mounted_attack: bool = False):
+    """Single gatekeeper for combat pre-flight checks.
+    If vehicle_mounted_attack is True, skip personal handheld ranged ammo checks (vehicle weapon uses its own ammo).
+    """
     if getattr(attacker.db, "grappled_by", None):
         msg = "You're locked in their grasp; you can't strike back."
         combat_msg(attacker, msg)
@@ -447,7 +470,7 @@ def can_attack(attacker, defender, weapon_key, wielded_obj):
             for viewer in loc.contents_get(content_type="character"):
                 if viewer in (attacker, defender):
                     continue
-                atk_v = combat_role_name(attacker, viewer, role="attacker")
+                atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
                 combat_msg(viewer, f"{atk_v} struggles against a hold and can't strike back.")
         return False
     if getattr(attacker.db, "grappling", None):
@@ -455,6 +478,14 @@ def can_attack(attacker, defender, weapon_key, wielded_obj):
         held_name = combat_role_name(held, attacker, role="defender")
         combat_msg(attacker, f"You're busy maintaining a grapple on {held_name} and cannot make normal attacks.")
         return False
+
+    try:
+        from world.medical.limb_trauma import is_hand_usable
+        if not is_hand_usable(attacker, "left") and not is_hand_usable(attacker, "right"):
+            combat_msg(attacker, "You can't strike. Your arms are ruined.")
+            return False
+    except Exception:
+        pass
 
     if not can_fight(attacker):
         combat_msg(attacker, "You're too exhausted to strike.")
@@ -465,12 +496,17 @@ def can_attack(attacker, defender, weapon_key, wielded_obj):
             for viewer in loc.contents_get(content_type="character"):
                 if viewer in (attacker, defender):
                     continue
-                atk_v = combat_role_name(attacker, viewer, role="attacker")
+                atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
                 combat_msg(viewer, f"{atk_v} looks too exhausted to strike.")
         return False
 
-    if is_ranged_weapon(weapon_key) and wielded_obj and (not getattr(wielded_obj, "has_ammo", lambda: True)()):
-        combat_msg(attacker, "Click. |rempty.|n The mag is dry. |wReload|n or you're dead.")
+    if (
+        not vehicle_mounted_attack
+        and is_ranged_weapon(weapon_key)
+        and wielded_obj
+        and (not getattr(wielded_obj, "has_ammo", lambda: True)())
+    ):
+        combat_msg(attacker, "Click. " + CC["miss"] + "empty.|n The mag is dry. |wReload|n or you're dead.")
         atk_name = combat_role_name(attacker, defender, role="attacker")
         combat_msg(defender, f"{atk_name} pulls the trigger. Click. Empty. Your turn.")
         loc = getattr(attacker, "location", None) or getattr(defender, "location", None)
@@ -478,8 +514,8 @@ def can_attack(attacker, defender, weapon_key, wielded_obj):
             for viewer in loc.contents_get(content_type="character"):
                 if viewer in (attacker, defender):
                     continue
-                atk_v = combat_role_name(attacker, viewer, role="attacker")
-                combat_msg(viewer, f"{atk_v} pulls the trigger. Click. |rempty.|n")
+                atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
+                combat_msg(viewer, f"{atk_v} pulls the trigger. Click. {CC['miss']}empty.|n")
         return False
 
     return True
@@ -494,30 +530,37 @@ def _preflight_checks(attacker, defender):
         return False
     if getattr(attacker.db, "current_hp", None) is not None and attacker.db.current_hp <= 0:
         return False
+    try:
+        from typeclasses.vehicles import Vehicle
+
+        if isinstance(defender, Vehicle) and getattr(defender.db, "vehicle_destroyed", False):
+            return False
+    except ImportError:
+        pass
     if getattr(defender.db, "current_hp", None) is not None and defender.db.current_hp <= 0:
         return False
     return True
 
 
-def _emit_result_messages(attacker, defender, result, weapon_key, wielded_obj, move_name):
+def _emit_result_messages(attacker, defender, result, weapon_key, wielded_obj, move_name, biker_room_tpl=None):
     templates = get_result_messages(result, weapon_key, wielded_obj, move_name=move_name)
     def_name = combat_role_name(defender, attacker, role="defender")
     atk_name = combat_role_name(attacker, defender, role="attacker")
     defaults = {
         "MISS": (
-            "You attack {defender} but |rmiss.|n",
-            "{attacker} attacks, but you slip the blow. |rMiss.|n",
-            "{attacker} attacks {defender} but |rmisses.|n",
+            "You attack {defender} but " + CC["miss"] + "miss.|n",
+            "{attacker} attacks, but you slip the blow. " + CC["miss"] + "Miss.|n",
+            "{attacker} attacks {defender} but " + CC["miss"] + "misses.|n",
         ),
         "PARRIED": (
-            "Your strike is |cturned aside|n by {defender}'s guard.",
-            "You meet {attacker}'s strike and |cturn it aside.|n",
-            "{attacker} attacks {defender}, but {defender} |cparries the blow.|n",
+            "Your strike is " + CC["parry"] + "turned aside|n by {defender}'s guard.",
+            "You meet {attacker}'s strike and " + CC["parry"] + "turn it aside.|n",
+            "{attacker} attacks {defender}, but {defender} " + CC["parry"] + "parries the blow.|n",
         ),
         "DODGED": (
-            "You swing for {defender}, but they're already moving. |yDodge.|n",
-            "You move as {attacker} strikes, and the blow |ymisses.|n",
-            "{attacker} attacks {defender}, but {defender} |ydodges aside.|n",
+            "You swing for {defender}, but they're already moving. " + CC["dodge"] + "Dodge.|n",
+            "You move as {attacker} strikes, and the blow " + CC["dodge"] + "misses.|n",
+            "{attacker} attacks {defender}, but {defender} " + CC["dodge"] + "dodges aside.|n",
         ),
     }
     atk_default, def_default, room_default = defaults[result]
@@ -526,13 +569,14 @@ def _emit_result_messages(attacker, defender, result, weapon_key, wielded_obj, m
     loc = getattr(attacker, "location", None) or getattr(defender, "location", None)
     if not loc or not hasattr(loc, "contents_get"):
         return
-    room_tpl = templates.get("room") or room_default
+    room_tpl = biker_room_tpl or templates.get("room") or room_default
     for viewer in loc.contents_get(content_type="character"):
         if viewer in (attacker, defender):
             continue
-        atk_v = combat_role_name(attacker, viewer, role="attacker")
+        atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
         def_v = combat_role_name(defender, viewer, role="defender")
         combat_msg(viewer, room_tpl.format(attacker=atk_v, defender=def_v))
+    relay_combat_room_msg(loc, attacker, defender, room_tpl)
 
 
 def _emit_soak(attacker, defender, effective_defender, body_part, weapon_key, wielded_obj, move_name, hit_shield):
@@ -547,16 +591,22 @@ def _emit_soak(attacker, defender, effective_defender, body_part, weapon_key, wi
         "eff_for_eff": combat_role_name(effective_defender, effective_defender, role="defender"),
     }
     if hit_shield:
-        combat_msg(attacker, (soak_templates.get("attacker") or "|cYour blow lands on {effective_defender}'s {loc} — {defender} pulled them in the way — but their armor absorbs it.|n").format(attacker=names["atk_for_def"], defender=names["def_for_atk"], effective_defender=names["eff_for_atk"], loc=body_part))
-        combat_msg(defender, (soak_templates.get("defender") or "|cYou pull {effective_defender} in the way. {attacker}'s strike hits them but armor takes it.|n").format(attacker=names["atk_for_def"], defender=names["def_for_atk"], effective_defender=names["eff_for_def"], loc=body_part))
-        combat_msg(effective_defender, (soak_templates.get("effective_defender") or "|c{defender} uses you as a shield. {attacker}'s blow hits your {loc}; your armor takes it.|n").format(attacker=names["atk_for_eff"], defender=names["def_for_eff"], effective_defender=names["eff_for_eff"], loc=body_part))
+        combat_msg(attacker, (soak_templates.get("attacker") or CC["soak"] + "Your blow lands on {effective_defender}'s {loc} — {defender} pulled them in the way — but their armor absorbs it.|n").format(attacker=names["atk_for_def"], defender=names["def_for_atk"], effective_defender=names["eff_for_atk"], loc=body_part))
+        combat_msg(defender, (soak_templates.get("defender") or CC["soak"] + "You pull {effective_defender} in the way. {attacker}'s strike hits them but armor takes it.|n").format(attacker=names["atk_for_def"], defender=names["def_for_atk"], effective_defender=names["eff_for_def"], loc=body_part))
+        combat_msg(effective_defender, (soak_templates.get("effective_defender") or CC["soak"] + "{defender} uses you as a shield. {attacker}'s blow hits your {loc}; your armor takes it.|n").format(attacker=names["atk_for_eff"], defender=names["def_for_eff"], effective_defender=names["eff_for_eff"], loc=body_part))
     else:
-        combat_msg(attacker, (soak_templates.get("attacker") or "|cYour blow lands on {defender}'s {loc}, but their armor absorbs it.|n").format(attacker=names["atk_for_def"], defender=names["def_for_atk"], effective_defender=names["def_for_atk"], loc=body_part))
-        combat_msg(defender, (soak_templates.get("defender") or "|c{attacker}'s strike hits your {loc}; your armor takes it.|n").format(attacker=names["atk_for_def"], defender=names["def_for_atk"], effective_defender=names["def_for_atk"], loc=body_part))
+        combat_msg(attacker, (soak_templates.get("attacker") or CC["soak"] + "Your blow lands on {defender}'s {loc}, but their armor absorbs it.|n").format(attacker=names["atk_for_def"], defender=names["def_for_atk"], effective_defender=names["def_for_atk"], loc=body_part))
+        combat_msg(defender, (soak_templates.get("defender") or CC["soak"] + "{attacker}'s strike hits your {loc}; your armor takes it.|n").format(attacker=names["atk_for_def"], defender=names["def_for_atk"], effective_defender=names["def_for_atk"], loc=body_part))
     loc = getattr(attacker, "location", None) or getattr(defender, "location", None)
     if not loc or not hasattr(loc, "contents_get"):
         return
-    room_tpl = soak_templates.get("room") or ("{defender} pulls {effective_defender} into the line of fire. {attacker}'s blow hits {effective_defender}'s {loc}, but their armor |csoaks the impact.|n" if hit_shield else "{attacker}'s blow lands on {defender}'s {loc}, but their armor |cabsorbs the hit.|n")
+    room_tpl = soak_templates.get("room") or (
+        "{defender} pulls {effective_defender} into the line of fire. {attacker}'s blow hits {effective_defender}'s {loc}, but their armor "
+        + CC["soak"]
+        + "soaks the impact.|n"
+        if hit_shield
+        else "{attacker}'s blow lands on {defender}'s {loc}, but their armor " + CC["soak"] + "absorbs the hit.|n"
+    )
     for viewer in loc.contents_get(content_type="character"):
         if viewer in (attacker, defender) or (hit_shield and viewer == effective_defender):
             continue
@@ -569,19 +619,46 @@ def _emit_soak(attacker, defender, effective_defender, body_part, weapon_key, wi
                 loc=body_part,
             )
         )
+    relay_combat_room_msg(
+        loc, attacker, defender, room_tpl,
+        effective_defender=combat_role_name(effective_defender, None, role="defender"),
+        loc=body_part,
+    )
+
+
+def _execute_vehicle_weapon_combat_turn(attacker, defender, vehicle, weapon, mtype):
+    """Resolve one combat tick using a vehicle-mounted weapon (same ticker as attack)."""
+    from world.combat.mounted_combat import clear_biker_momentum_after_attack
+    from world.combat.vehicle_combat import announce_vehicle_attack, apply_weapon_specials, resolve_vehicle_weapon_attack
+
+    room = vehicle.location
+    if not room:
+        combat_msg(attacker, "|rNo exterior field of fire.|n")
+        return
+    hit, tier, dmg, dtype = resolve_vehicle_weapon_attack(attacker, vehicle, weapon, defender, mtype)
+    if tier == "empty":
+        combat_msg(attacker, "|rThe mounted weapon is empty.|n")
+        return
+    if tier == "cooldown":
+        combat_msg(attacker, dtype or "|yWeapon cycling.|n")
+        return
+    announce_vehicle_attack(room, vehicle, defender, weapon, hit, tier or "")
+    apply_weapon_specials(weapon, vehicle, defender, hit, room)
+    if hit:
+        try:
+            from typeclasses.vehicles import Vehicle as VehicleCls
+        except ImportError:
+            VehicleCls = ()
+        if VehicleCls and not isinstance(defender, VehicleCls) and hasattr(defender, "at_damage"):
+            defender.at_damage(attacker, int(dmg), weapon_key=dtype or "fists")
+        if VehicleCls and isinstance(defender, VehicleCls) and getattr(defender.db, "vehicle_hp", None) is not None:
+            combat_msg(attacker, f"|yHull damage: {dmg}|n")
+    spend_stamina(attacker, STAMINA_COST_ATTACK)
+    clear_biker_momentum_after_attack(attacker)
 
 
 def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs):
     attacker, defender = resolve_combat_objects(attacker, defender, kwargs)
-    if attacker and defender and (kwargs.get("attacker_id") is not None or kwargs.get("defender_id") is not None):
-        from .utils import get_object_by_id
-
-        a_new = get_object_by_id(attacker.id if hasattr(attacker, "id") else kwargs.get("attacker_id"))
-        d_new = get_object_by_id(defender.id if hasattr(defender, "id") else kwargs.get("defender_id"))
-        if a_new:
-            attacker = a_new
-        if d_new:
-            defender = d_new
     if not attacker or not defender:
         _remove_both_combat_tickers(attacker, defender)
         return
@@ -600,21 +677,39 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
     inst = get_instance_for(attacker)
     if inst:
         inst.next_round()
+    _skip_turns = int(getattr(attacker.db, "combat_skip_turns", 0) or 0)
+    if _skip_turns > 0:
+        attacker.db.combat_skip_turns = _skip_turns - 1
+        if getattr(attacker.db, "combat_flee_attempted", False):
+            attacker.attributes.remove("combat_flee_attempted")
+        if getattr(attacker.db, "combat_positioning_attempted", False):
+            attacker.attributes.remove("combat_positioning_attempted")
+        combat_msg(attacker, CC["dodge"] + "You're still getting back to your feet — you can't strike yet.|n")
+        defender_name = combat_role_name(attacker, defender, role="attacker")
+        combat_msg(defender, CC["dodge"] + "%s is still recovering and doesn't strike.|n" % defender_name)
+        loc = getattr(attacker, "location", None) or getattr(defender, "location", None)
+        if loc and hasattr(loc, "contents_get"):
+            for viewer in loc.contents_get(content_type="character"):
+                if viewer in (attacker, defender):
+                    continue
+                atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
+                combat_msg(viewer, f"{atk_v} is still recovering from the fall and doesn't strike.")
+        return
     if getattr(attacker.db, "combat_skip_next_turn", False):
         attacker.attributes.remove("combat_skip_next_turn")
         if getattr(attacker.db, "combat_flee_attempted", False):
             attacker.attributes.remove("combat_flee_attempted")
         if getattr(attacker.db, "combat_positioning_attempted", False):
             attacker.attributes.remove("combat_positioning_attempted")
-        combat_msg(attacker, "|yYou're too busy adjusting your grip to strike this moment.|n")
+        combat_msg(attacker, CC["dodge"] + "You're too busy adjusting your grip to strike this moment.|n")
         defender_name = combat_role_name(attacker, defender, role="attacker")
-        combat_msg(defender, "|y%s is distracted and doesn't strike.|n" % defender_name)
+        combat_msg(defender, CC["dodge"] + "%s is distracted and doesn't strike.|n" % defender_name)
         loc = getattr(attacker, "location", None) or getattr(defender, "location", None)
         if loc and hasattr(loc, "contents_get"):
             for viewer in loc.contents_get(content_type="character"):
                 if viewer in (attacker, defender):
                     continue
-                atk_v = combat_role_name(attacker, viewer, role="attacker")
+                atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
                 combat_msg(viewer, f"{atk_v} adjusts their grip and doesn't strike this moment.")
         return
     wielded_obj = attacker.db.wielded_obj
@@ -624,19 +719,75 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
         weapon_key = "claws"
     else:
         weapon_key = "fists"
-    range_penalty = get_attack_range_penalty(attacker, defender, weapon_key)
-    if range_penalty is None:
-        current_range = get_combat_range(attacker, defender)
-        range_label = RANGE_LABELS.get(current_range, "this distance")
+
+    try:
+        from world.combat.vehicle_combat import get_attacker_vehicle_weapon_context
+    except ImportError:
+        get_attacker_vehicle_weapon_context = lambda _a: None
+
+    vctx = get_attacker_vehicle_weapon_context(attacker)
+    if vctx:
+        vehicle, _mount_id, vweapon, mtype = vctx
+        ext = getattr(vehicle, "location", None)
+        def_ext = get_combat_external_location(defender)
+        if not ext or def_ext != ext:
+            combat_msg(
+                attacker,
+                "|rYour target is not in the vehicle's field of fire (must be outside, same room as the vehicle).|n",
+            )
+            return
+        if not can_attack(attacker, defender, weapon_key, wielded_obj, vehicle_mounted_attack=True):
+            return
+        _execute_vehicle_weapon_combat_turn(attacker, defender, vehicle, vweapon, mtype)
+        return
+
+    try:
+        from world.combat.vehicle_combat import is_crew_in_enclosed_vehicle
+    except ImportError:
+        is_crew_in_enclosed_vehicle = lambda _: False
+
+    if is_crew_in_enclosed_vehicle(attacker):
         combat_msg(
             attacker,
-            f"|rYou can't use that weapon at {range_label} range. Use |wadvance|n or |wretreat|n to reposition.|n"
+            "|rNo weapon available from this seat. Use the vehicle's weapons or get out to fight on foot.|n",
         )
-        combat_msg(attacker, get_range_display_line(attacker, defender))
         return
 
     if not can_attack(attacker, defender, weapon_key, wielded_obj):
         return
+
+    try:
+        from typeclasses.vehicles import Vehicle
+    except ImportError:
+        Vehicle = ()
+
+    if isinstance(defender, Vehicle):
+        from world.combat.mounted_combat import clear_biker_momentum_after_attack
+        from world.combat.vehicle_combat import execute_on_foot_vs_vehicle_turn
+
+        spend_stamina(attacker, STAMINA_COST_ATTACK)
+        aimed = getattr(attacker.db, "combat_vehicle_aim_part", None)
+        execute_on_foot_vs_vehicle_turn(attacker, defender, weapon_key, wielded_obj, aimed_part=aimed)
+        clear_biker_momentum_after_attack(attacker)
+        return
+
+    try:
+        from world.combat.vehicle_combat import get_enclosed_vehicle_hull_for_crew
+    except ImportError:
+        get_enclosed_vehicle_hull_for_crew = lambda _c: None
+
+    hull = get_enclosed_vehicle_hull_for_crew(defender)
+    if hull:
+        ext_att = get_combat_external_location(attacker)
+        if ext_att and ext_att == getattr(hull, "location", None):
+            from world.combat.mounted_combat import clear_biker_momentum_after_attack
+            from world.combat.vehicle_combat import execute_on_foot_vs_vehicle_turn
+
+            spend_stamina(attacker, STAMINA_COST_ATTACK)
+            aimed = getattr(attacker.db, "combat_vehicle_aim_part", None)
+            execute_on_foot_vs_vehicle_turn(attacker, hull, weapon_key, wielded_obj, aimed_part=aimed)
+            clear_biker_momentum_after_attack(attacker)
+            return
 
     spend_stamina(attacker, STAMINA_COST_ATTACK)
 
@@ -659,7 +810,7 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
             for viewer in loc.contents_get(content_type="character"):
                 if viewer in (attacker, defender):
                     continue
-                atk_v = combat_role_name(attacker, viewer, role="attacker")
+                atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
                 def_v = combat_role_name(defender, viewer, role="defender")
                 combat_msg(viewer, f"{def_v} looks too exhausted to defend as {atk_v}'s blow lands.")
     else:
@@ -672,11 +823,36 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
             result, attack_value = resolved
 
     move_name = attack_move["name"]
+
+    # Consume one round per trigger pull (miss, parry, dodge, and hit all expend ammo).
+    if is_ranged_weapon(weapon_key) and wielded_obj and hasattr(wielded_obj, "db"):
+        current = int(wielded_obj.db.ammo_current or 0)
+        if current > 0:
+            wielded_obj.db.ammo_current = current - 1
+
+    _biker_atk_line = None
+    _biker_room_tpl = None
+    try:
+        from world.combat.mounted_combat import biker_combat_lines
+        _biker_atk_line, _biker_room_tpl = biker_combat_lines(attacker, weapon_key, wielded_obj)
+    except Exception:
+        pass
+
     if result in ("MISS", "PARRIED", "DODGED"):
-        _emit_result_messages(attacker, defender, result, weapon_key, wielded_obj, move_name)
+        # For misses, send the biker setup line first, then the miss description.
+        if _biker_atk_line:
+            combat_msg(attacker, _biker_atk_line)
+        _emit_result_messages(attacker, defender, result, weapon_key, wielded_obj, move_name,
+                              biker_room_tpl=_biker_room_tpl)
         combat_msg(attacker, get_range_display_line(attacker, defender))
     elif result in ("HIT", "CRITICAL"):
         if (defender.db.current_hp or 0) <= 0:
+            try:
+                from world.combat.mounted_combat import clear_biker_momentum_after_attack
+
+                clear_biker_momentum_after_attack(attacker)
+            except Exception:
+                pass
             _remove_both_combat_tickers(attacker, defender)
             return
         effective_defender, hit_shield = _check_body_shield(defender, attack_value, attacker_rating=attacker_rating)
@@ -706,6 +882,18 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
         if absorbed_fully and damage <= 0:
             _emit_soak(attacker, defender, effective_defender, body_part, weapon_key, wielded_obj, move_name, hit_shield)
         else:
+            try:
+                _log.info(
+                    "combat.hit",
+                    attacker=getattr(attacker, "key", "?"),
+                    target=getattr(effective_defender, "key", "?"),
+                    damage=damage,
+                    weapon=weapon_key,
+                    body_part=body_part,
+                    critical=is_critical,
+                )
+            except Exception:
+                pass
             trauma_result = apply_trauma(
                 effective_defender,
                 body_part,
@@ -755,7 +943,7 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
                     for viewer in loc.contents_get(content_type="character"):
                         if viewer in (attacker, defender, effective_defender):
                             continue
-                        atk_v = combat_role_name(attacker, viewer, role="attacker")
+                        atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
                         def_v = combat_role_name(defender, viewer, role="defender")
                         eff_v = combat_role_name(effective_defender, viewer, role="defender")
                         crit_tag = "|yCRITICAL.|n " if is_critical else ""
@@ -763,6 +951,14 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
                             viewer,
                             f"{def_v} drags {eff_v} into the path of {atk_v}'s attack. {crit_tag}{atk_v}'s blow crashes into {eff_v}'s {body_part}."
                         )
+                    crit_tag_n = "|yCRITICAL.|n " if is_critical else ""
+                    atk_n = combat_role_name_attacker_party(attacker, None, role="attacker")
+                    def_n = combat_role_name(defender, None, role="defender")
+                    eff_n = combat_role_name(effective_defender, None, role="defender")
+                    relay_combat_room_msg(
+                        loc, attacker, defender,
+                        f"{def_n} drags {eff_n} into the path of {atk_n}'s attack. {crit_tag_n}{atk_n}'s blow crashes into {eff_n}'s {body_part}.",
+                    )
             else:
                 main_atk, main_def = hit_message(
                     weapon_key,
@@ -782,22 +978,65 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
                     is_critical,
                     weapon_obj=wielded_obj,
                 )
-                combat_msg(attacker, f"{main_atk} {flavor_atk}".strip())
-                from typeclasses.cyberware_catalog import PainEditor
-                pain_editor = any(isinstance(cw, PainEditor) and not bool(getattr(cw.db, "malfunctioning", False)) for cw in (getattr(defender.db, "cyberware", None) or []))
+                atk_msg = f"{main_atk} {flavor_atk}".strip()
+                if _biker_atk_line:
+                    atk_msg = f"{_biker_atk_line} {atk_msg}"
+                combat_msg(attacker, atk_msg)
+                try:
+                    from world.alchemy.effects import has_pain_suppression
+
+                    pain_editor = has_pain_suppression(defender)
+                except Exception:
+                    pain_editor = False
                 if pain_editor:
                     combat_msg(defender, f"|xDamage registered at {body_part}. You feel nothing.|n")
                 else:
                     combat_msg(defender, f"{main_def} {flavor_def}".strip())
                 loc = getattr(attacker, "location", None) or getattr(defender, "location", None)
                 if loc and hasattr(loc, "contents_get"):
+                    crit_tag = CC["dodge"] + "CRITICAL.|n " if is_critical else ""
+                    _wname = getattr(wielded_obj, "key", None) or weapon_key.replace("_", " ")
                     for viewer in loc.contents_get(content_type="character"):
                         if viewer in (attacker, defender):
                             continue
-                        atk_v = combat_role_name(attacker, viewer, role="attacker")
+                        atk_v = combat_role_name_attacker_party(attacker, viewer, role="attacker")
                         def_v = combat_role_name(defender, viewer, role="defender")
-                        crit_tag = "|yCRITICAL.|n " if is_critical else ""
-                        combat_msg(viewer, f"{crit_tag}{atk_v}'s strike slams into {def_v}'s {body_part}.")
+                        # Use the defender-perspective line (second return value) — it uses
+                        # {attacker} as a name rather than "You", so it reads correctly for observers.
+                        _, _room_hit = hit_message(
+                            weapon_key, body_part, def_v, atk_v, is_critical,
+                            weapon_obj=wielded_obj, move_name=move_name,
+                        )
+                        _, _room_flavor = get_brutal_hit_flavor(
+                            weapon_key, body_part, trauma_result, def_v, atk_v,
+                            is_critical, weapon_obj=wielded_obj,
+                        )
+                        _room_outcome = f"{_room_hit} {_room_flavor}".strip()
+                        if _biker_room_tpl:
+                            _setup = _biker_room_tpl.format(biker=atk_v, weapon=_wname)
+                            combat_msg(viewer, f"{crit_tag}{_setup} {_room_outcome}")
+                        else:
+                            combat_msg(viewer, f"{crit_tag}{atk_v}'s strike slams into {def_v}'s {body_part}.")
+                    crit_tag_n = CC["dodge"] + "CRITICAL.|n " if is_critical else ""
+                    atk_n = combat_role_name_attacker_party(attacker, None, role="attacker")
+                    def_n = combat_role_name(defender, None, role="defender")
+                    _, _room_hit_n = hit_message(
+                        weapon_key, body_part, def_n, atk_n, is_critical,
+                        weapon_obj=wielded_obj, move_name=move_name,
+                    )
+                    _, _room_flavor_n = get_brutal_hit_flavor(
+                        weapon_key, body_part, trauma_result, def_n, atk_n,
+                        is_critical, weapon_obj=wielded_obj,
+                    )
+                    _room_outcome_n = f"{_room_hit_n} {_room_flavor_n}".strip()
+                    if _biker_room_tpl:
+                        _setup_n = _biker_room_tpl.format(biker=atk_n, weapon=_wname)
+                        relay_combat_room_msg(loc, attacker, defender, f"{crit_tag_n}{_setup_n} {_room_outcome_n}")
+                    else:
+                        relay_combat_room_msg(
+                            loc, attacker, defender,
+                            f"{crit_tag_n}{atk_n}'s strike slams into {def_n}'s {body_part}.",
+                        )
             effective_defender.at_damage(
                 attacker,
                 damage,
@@ -806,10 +1045,12 @@ def execute_combat_turn(attacker=None, defender=None, attack_type=None, **kwargs
                 weapon_obj=wielded_obj,
             )
 
-    if is_ranged_weapon(weapon_key) and wielded_obj and hasattr(wielded_obj, "db"):
-        current = int(wielded_obj.db.ammo_current or 0)
-        if current > 0:
-            wielded_obj.db.ammo_current = current - 1
+    try:
+        from world.combat.mounted_combat import clear_biker_momentum_after_attack
+
+        clear_biker_momentum_after_attack(attacker)
+    except Exception:
+        pass
 
 
 def _remove_both_combat_tickers(a, b):

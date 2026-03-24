@@ -123,16 +123,14 @@ class Camera(Object):
                 tv.display_broadcast(text)
             return
         if mode == "record":
-            buf = getattr(self.db, "recording_buffer", None)
-            if buf is None:
-                self.db.recording_buffer = []
-                buf = self.db.recording_buffer
+            buf = list(getattr(self.db, "recording_buffer", None) or [])
             start = getattr(self.db, "record_start_time", None)
             if start is None:
                 start = time.time()
                 self.db.record_start_time = start
             offset = time.time() - start
             buf.append({"t": round(offset, 2), "text": text})
+            self.db.recording_buffer = buf
 
     def stop_recording_and_make_cassette(self, holder=None):
         """
@@ -271,13 +269,9 @@ class Television(Object):
     def get_cassettes(self):
         """Return all Cassettes in this TV's contents."""
         objs = []
-        try:
-            from typeclasses.broadcast import Cassette
-            for obj in self.contents:
-                if isinstance(obj, Cassette):
-                    objs.append(obj)
-        except ImportError:
-            return []
+        for obj in self.contents:
+            if isinstance(obj, Cassette):
+                objs.append(obj)
         return objs
 
     def get_cassette(self):

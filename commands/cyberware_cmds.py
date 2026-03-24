@@ -51,13 +51,53 @@ class CmdCyberware(Command):
         else:
             caller.msg("Usage: @cyberware/install, /remove, or /list")
 
+    def _find_char(self, char_name):
+        """
+        Resolve char_name to a character object.
+
+        Tries global key/alias search first, then falls back to the caller's
+        recog map. Returns the character, or None if not found or ambiguous
+        (error message already sent to caller in those cases).
+        """
+        caller = self.caller
+        results = caller.search(char_name, global_search=True, quiet=True)
+        if results:
+            if len(results) == 1:
+                return results[0]
+            elif len(results) > 1:
+                caller.msg(f"Multiple matches for '{char_name}'. Use #dbref instead.")
+                return None
+        try:
+            from world.rp_features import RecogHandler
+            recog_map = RecogHandler(caller).all()
+            name_lower = char_name.lower()
+            exact = [obj for rname, obj in recog_map.items() if (rname or "").strip().lower() == name_lower]
+            if len(exact) == 1:
+                return exact[0]
+            if len(exact) > 1:
+                caller.msg(f"Multiple characters recog'd as '{char_name}'. Use #dbref instead.")
+                return None
+            prefix = [obj for rname, obj in recog_map.items() if (rname or "").strip().lower().startswith(name_lower)]
+            if len(prefix) == 1:
+                return prefix[0]
+            if len(prefix) > 1:
+                names = ", ".join(
+                    sorted(rname for rname, obj in recog_map.items() if (rname or "").strip().lower().startswith(name_lower))
+                )
+                caller.msg(f"Ambiguous name '{char_name}' matches: {names}. Be more specific or use #dbref.")
+                return None
+        except Exception:
+            pass
+        caller.msg(f"Could not find '{char_name}'.")
+        return None
+
     def _parse_char_and_arg(self):
         """Parse 'character = arg' from self.args. Returns (character, arg) or (None, None)."""
         if "=" not in self.args:
             self.caller.msg("Usage: @cyberware/<switch> <character> = <object or name>")
             return None, None
         char_name, _, arg = self.args.partition("=")
-        char = self.caller.search(char_name.strip(), global_search=True)
+        char = self._find_char(char_name.strip())
         return char, arg.strip()
 
     def _do_list(self):
@@ -66,7 +106,7 @@ class CmdCyberware(Command):
         if not char_name:
             caller.msg("Usage: @cyberware/list <character>")
             return
-        char = caller.search(char_name, global_search=True)
+        char = self._find_char(char_name)
         if not char:
             return
         cyberware = char.get_cyberware() if hasattr(char, "get_cyberware") else []
@@ -75,7 +115,17 @@ class CmdCyberware(Command):
             return
         lines = [f"Cyberware installed on {char.key}:"]
         for obj in cyberware:
-            lines.append(f"  {obj.key} (#{obj.id}) [{type(obj).__name__}]")
+            cls_name = type(obj).__name__
+            # Show prerequisite tree using networkx dependency graph.
+            prereqs_str = ""
+            try:
+                from world.cyberware_graph import get_install_prerequisites
+                prereqs = get_install_prerequisites(cls_name)
+                if prereqs:
+                    prereqs_str = f" | requires: {', '.join(prereqs)}"
+            except Exception:
+                pass
+            lines.append(f"  {obj.key} (#{obj.id}) [{cls_name}]{prereqs_str}")
         caller.msg("\n".join(lines))
 
     def _do_install(self):
@@ -155,6 +205,29 @@ class CmdCyberware(Command):
 
 
 class CmdSkinWeave(Command):
+    """
+    Set how your skin weave appears in descriptions (functional skin weave required).
+
+    Usage:
+        skinweave
+        skinweave coverage
+        skinweave set <body part> = <description>
+        skinweave reset
+        skinweave preset list
+        skinweave preset save <name>
+        skinweave preset load <name>
+        skinweave preset delete <name>
+
+    With no arguments, lists current text per covered body part. Preset load default
+    resets appearance to factory defaults (same as skinweave reset).
+
+    Evennia color codes (e.g. |321, |w) are allowed. If you use them, the line is not
+    wrapped in the default chrome tint. Minimum length applies to visible text after
+    codes are removed.
+
+    Aliases: sw
+    """
+
     key = "skinweave"
     aliases = ["sw"]
     locks = "cmd:all()"
@@ -190,7 +263,7 @@ class CmdSkinWeave(Command):
         if low.startswith("set ") and "=" in args:
             from commands.roleplay_cmds import _resolve_body_part
             left, _, desc = args[4:].partition("=")
-            part = _resolve_body_part(left.strip()) or left.strip().lower()
+            part = _resolve_body_part(left.strip(), caller=caller) or left.strip().lower()
             ok, msg = weave.update_weave_appearance(caller, part, desc.strip())
             caller.msg(msg if ok else f"|r{msg}|n")
             return
@@ -233,6 +306,16 @@ class CmdSkinWeave(Command):
 
 
 class CmdSurge(Command):
+    """
+    Trigger your adrenal pump surge or check its status (functional pump required).
+
+    Usage:
+        surge
+        surge status
+
+    Surge puts the pump on cooldown; status shows active surge, crash, or cooldown timers.
+    """
+
     key = "surge"
     locks = "cmd:all()"
     help_category = "Cyberware"
@@ -280,6 +363,18 @@ class CmdSurge(Command):
 
 
 class CmdClaws(Command):
+    """
+    Deploy or retract retractable claws (functional implant required).
+
+    Usage:
+        claws
+        claws status
+        claws deploy
+        claws retract
+
+    Aliases: claw
+    """
+
     key = "claws"
     aliases = ["claw"]
     locks = "cmd:all()"

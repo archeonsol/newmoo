@@ -36,6 +36,7 @@ class CyberwareBase(DefaultObject):
         }
         armor_values = {}          # Optional. {damage_type: protection_score}
         damage_model = "none"      # Optional durability routing model.
+        adds_body_parts = []       # Optional. Part keys appended to anatomy before body_mods (world.body).
 
     mode "lock"   — fully replaces the character's naked for that body part.
                     The user cannot edit it while installed.
@@ -63,6 +64,9 @@ class CyberwareBase(DefaultObject):
     required_implants = []  # class names that must already be installed
     required_implants_any = []  # at least one of these class names must be installed
     conflicts_with = []  # class names that cannot coexist
+    # Body part keys this implant adds to anatomy if missing (e.g. tail for a human).
+    # Applied before body_mods during install; see world.body.commit_adds_body_parts.
+    adds_body_parts = []
 
     # Surgery defaults: wound recorded when installed/removed via surgery.
     # Override surgery_body_part to target a specific part; otherwise the first
@@ -87,6 +91,10 @@ class CyberwareBase(DefaultObject):
         self.db.chrome_max_hp = int(getattr(self, "chrome_max_hp", 100) or 100)
         self.db.chrome_hp = int(getattr(self.db, "chrome_hp", self.db.chrome_max_hp) or self.db.chrome_max_hp)
         self.db.malfunctioning = bool(getattr(self.db, "malfunctioning", False))
+        # Cosmetic chromework (before install); color applies at render time
+        self.db.custom_color = None
+        self.db.custom_descriptions = {}
+        self.db.customized_by = None
 
     def on_install(self, character):
         """
@@ -102,16 +110,19 @@ class CyberwareBase(DefaultObject):
         if self.buff_class:
             character.buffs.add(self.buff_class)
 
+        from world.skin_tones import get_chrome_desc_text
+
         for part, (mode, text) in self.body_mods.items():
+            desc_text = get_chrome_desc_text(self, part) or text
             if mode == "lock":
                 locked = dict(character.db.locked_descriptions or {})
-                locked[part] = text
+                locked[part] = desc_text
                 character.db.locked_descriptions = locked
             elif mode == "append":
                 appended = dict(character.db.appended_descriptions or {})
                 if part not in appended:
                     appended[part] = {}
-                appended[part][self.typeclass_path] = text
+                appended[part][self.typeclass_path] = desc_text
                 character.db.appended_descriptions = appended
             else:
                 logger.log_warn(

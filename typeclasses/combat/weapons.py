@@ -6,7 +6,9 @@ for a sword). weapon_key determines which skill is rolled and which moves/damage
 Damage type (slashing/impact/penetrating/magical) drives trauma and injury; set db.damage_type
 to override the default for this weapon class. Ranged weapons use world.ammo and require loading.
 """
+from evennia.contrib.base_systems.components import ComponentHolderMixin, ComponentProperty
 from typeclasses.objects import Object
+from world.vehicle_components import AmmoComponent
 
 
 # Keys must exist in world.combat.WEAPON_DATA and world.skills.WEAPON_KEY_TO_SKILL
@@ -63,15 +65,60 @@ def _is_ranged_weapon_key(weapon_key):
         return False
 
 
-class CombatWeapon(Object):
+class CombatWeapon(ComponentHolderMixin, Object):
     """
     Base typeclass for all combat weapons. Set db.weapon_key to a key in
     world.combat.WEAPON_DATA (e.g. "knife", "long_blade"). Subclasses set a
     default weapon_key so you can create custom weapons by choosing the right
     template and renaming/describing the object.
-    Ranged weapons also have db.ammo_type, db.ammo_capacity, db.ammo_current.
+    Ranged weapons also have db.ammo_type, db.ammo_capacity, db.ammo_current
+    (legacy) and an AmmoComponent (component-backed, post-migration).
     """
+
+    ammo = ComponentProperty("ammo")
+
+    # ------------------------------------------------------------------
+    # Ammo compatibility shims — existing code uses weapon.db.ammo_current
+    # ------------------------------------------------------------------
+
+    @property
+    def ammo_current(self):
+        if self.ammo:
+            return int(self.ammo.current or 0)
+        return int(self.db.ammo_current or 0)
+
+    @ammo_current.setter
+    def ammo_current(self, value):
+        if self.ammo:
+            self.ammo.current = int(value)
+        self.db.ammo_current = int(value)
+
+    @property
+    def ammo_capacity(self):
+        if self.ammo:
+            return int(self.ammo.capacity or 0)
+        return int(self.db.ammo_capacity or 0)
+
+    @ammo_capacity.setter
+    def ammo_capacity(self, value):
+        if self.ammo:
+            self.ammo.capacity = int(value)
+        self.db.ammo_capacity = int(value)
+
+    @property
+    def ammo_type(self):
+        if self.ammo:
+            return self.ammo.type
+        return self.db.ammo_type
+
+    @ammo_type.setter
+    def ammo_type(self, value):
+        if self.ammo:
+            self.ammo.type = str(value)
+        self.db.ammo_type = str(value)
+
     def at_object_creation(self):
+        super().at_object_creation()
         self.db.weapon_key = WEAPON_KEY_UNARMED
         self.db.damage_type = "impact"  # slashing, impact, penetrating, burn/freeze/arc/void via overrides
         self.db.damage_mod = 0  # Future: quality modifier applied to move damage
@@ -113,13 +160,13 @@ class CombatWeapon(Object):
         """True if this weapon is ranged and has at least one round loaded."""
         if not _is_ranged_weapon_key(self.db.weapon_key):
             return True
-        return (self.db.ammo_current or 0) > 0
+        return self.ammo_current > 0
 
     def rounds_remaining(self):
-        """Current rounds in magazine; 0 for melee or unloaded ranged."""
+        """Current rounds in magazine; None for melee, int for ranged."""
         if not _is_ranged_weapon_key(self.db.weapon_key):
             return None  # N/A
-        return int(self.db.ammo_current or 0)
+        return self.ammo_current
 
 
 # --- Template classes: one per weapon skill ---
@@ -133,8 +180,6 @@ class UnarmedWeapon(CombatWeapon):
         super().at_object_creation()
         self.db.weapon_key = WEAPON_KEY_UNARMED
         self.db.damage_type = "impact"
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "A weapon that augments or counts as unarmed combat."
@@ -149,8 +194,6 @@ class ShortBladeWeapon(CombatWeapon):
         super().at_object_creation()
         self.db.weapon_key = WEAPON_KEY_SHORT_BLADE
         self.db.damage_type = "slashing"
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "A short blade: knife, dagger, or similar."
@@ -198,6 +241,13 @@ class _RangedWeaponMixin:
         self.db.ammo_type = ammo_type
         self.db.ammo_capacity = default_capacity
         self.db.ammo_current = 0
+        # Initialize AmmoComponent (ComponentHolderMixin is on CombatWeapon base)
+        self.components.add(AmmoComponent.create(
+            self,
+            type=ammo_type,
+            capacity=int(default_capacity),
+            current=0,
+        ))
 
 
 class SidearmWeapon(CombatWeapon, _RangedWeaponMixin):
@@ -211,8 +261,6 @@ class SidearmWeapon(CombatWeapon, _RangedWeaponMixin):
         self.db.damage_type = "penetrating"
         from world.ammo import AMMO_TYPE_SIDEARM, DEFAULT_AMMO_CAPACITY
         self.at_object_creation_ranged(AMMO_TYPE_SIDEARM, DEFAULT_AMMO_CAPACITY["sidearm"])
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "A sidearm: pistol or revolver. It needs pistol ammo to fire."
@@ -229,8 +277,6 @@ class LongarmWeapon(CombatWeapon, _RangedWeaponMixin):
         self.db.damage_type = "penetrating"
         from world.ammo import AMMO_TYPE_LONGARM, DEFAULT_AMMO_CAPACITY
         self.at_object_creation_ranged(AMMO_TYPE_LONGARM, DEFAULT_AMMO_CAPACITY["longarm"])
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "A longarm: rifle or shotgun. It needs rifle ammo to fire."
@@ -247,8 +293,6 @@ class AutomaticWeapon(CombatWeapon, _RangedWeaponMixin):
         self.db.damage_type = "penetrating"
         from world.ammo import AMMO_TYPE_AUTOMATIC, DEFAULT_AMMO_CAPACITY
         self.at_object_creation_ranged(AMMO_TYPE_AUTOMATIC, DEFAULT_AMMO_CAPACITY["automatic"])
-        if not getattr(self.db, "weapon_template", None):
-            self.db.weapon_template = self.key
         self._apply_weapon_template_defaults()
         if not self.db.desc:
             self.db.desc = "An automatic weapon: SMG, assault rifle, or similar. It needs automatic ammo to fire."

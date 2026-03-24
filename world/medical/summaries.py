@@ -2,6 +2,8 @@
 Medical summaries/diagnostics and combat modifiers split from world.medical.__init__.
 """
 
+from world.theme_colors import MEDICAL_COLORS as MC
+
 _FRACTURE_ATTACK_BONES = frozenset({"humerus", "metacarpals", "clavicle", "scapula", "jaw", "nose"})
 _FRACTURE_DEFENSE_BONES = frozenset({"femur", "ankle", "metatarsals", "cervical_spine", "spine", "pelvis", "ribs"})
 
@@ -62,18 +64,35 @@ def get_medical_summary(character):
                 organ_key in (i.get("organ_damage") or {}) and i.get("organ_destroyed")
                 for i in (character.db.injuries or [])
             )
-            desc = "|RDESTROYED - chrome replacement required|n" if destroyed else names[min(severity, 3)]
+            desc = f"{MC['arrest']}DESTROYED - chrome replacement required|n" if destroyed else names[min(severity, 3)]
             stab = " [recent surgery]" if (character.db.stabilized_organs or {}).get(organ_key) else ""
             parts.append(f"{names[0]} ({desc}){stab}")
         if parts:
-            lines.append("|rOrgan trauma:|n " + "; ".join(parts))
+            lines.append(f"{MC['critical']}Organ trauma:|n " + "; ".join(parts))
+    from world.medical.limb_trauma import LIMB_INFO, LIMB_SLOTS
+    limb_damage = character.db.limb_damage or {}
+    if limb_damage:
+        lparts = []
+        for limb_key in sorted(LIMB_SLOTS):
+            sev = int(limb_damage.get(limb_key, 0) or 0)
+            if sev <= 0:
+                continue
+            names = LIMB_INFO.get(limb_key, (limb_key,) * 4)
+            destroyed = any(
+                limb_key in (i.get("limb_damage") or {}) and i.get("fracture_destroyed")
+                for i in (character.db.injuries or [])
+            )
+            desc = f"{MC['arrest']}DESTROYED — chrome limb required|n" if destroyed else names[min(sev, 3)]
+            lparts.append(f"{names[0]} ({desc})")
+        if lparts:
+            lines.append(f"{MC['critical']}Limb trauma:|n " + "; ".join(lparts))
     fractures = character.db.fractures or []
     splinted = character.db.splinted_bones or []
     if fractures:
-        lines.append("|yFractures:|n " + ", ".join(BONE_INFO.get(b, b) + (" (splinted)" if b in splinted else "") for b in fractures))
+        lines.append(f"{MC['compensated']}Fractures:|n " + ", ".join(BONE_INFO.get(b, b) + (" (splinted)" if b in splinted else "") for b in fractures))
     level, _ = compute_effective_bleed_level(character)
     if level > 0:
-        lines.append("|rBleeding:|n " + BLEEDING_LEVELS[min(level, 4)])
+        lines.append(f"{MC['critical']}Bleeding:|n " + BLEEDING_LEVELS[min(level, 4)])
     organ_penalty_parts = []
     for organ_key, severity in (character.db.organ_damage or {}).items():
         if severity <= 0:
@@ -102,8 +121,8 @@ def get_medical_summary(character):
         part = (injury.get("body_part") or "wound").strip()
         infected.append(f"{part}: {ilabel} ({INFECTION_STAGE_LABELS.get(stage, 'progressing')})")
     if infected:
-        lines.append("|mInfection:|n " + "; ".join(infected))
-    return "\n".join(lines) if lines else "|gNo significant trauma. Vitals within acceptable parameters.|n"
+        lines.append(f"{MC['infection']}Infection:|n " + "; ".join(infected))
+    return "\n".join(lines) if lines else f"{MC['stable']}No significant trauma. Vitals within acceptable parameters.|n"
 
 
 def get_diagnose_trauma_for_skill(character, medicine_level):
@@ -127,40 +146,40 @@ def get_diagnose_trauma_for_skill(character, medicine_level):
         if fractures:
             bits.append("You notice possible fracture or serious limb injury.")
         if bits:
-            lines.append("|yPhysical exam:|n " + " ".join(bits))
+            lines.append(f"{MC['compensated']}Physical exam:|n " + " ".join(bits))
         if medicine_level < DIAGNOSE_TIER_2:
             return "\n".join(lines) if lines else ""
     if medicine_level >= DIAGNOSE_TIER_2:
         lines = []
         if bleeding_level > 0:
-            lines.append("|yBleeding:|n " + BLEEDING_LEVELS[min(bleeding_level, 4)])
+            lines.append(f"{MC['compensated']}Bleeding:|n " + BLEEDING_LEVELS[min(bleeding_level, 4)])
         if fractures:
             regions = sorted({BONE_TO_REGION.get(b, b) for b in fractures if BONE_TO_REGION.get(b, b)})
             if regions:
-                lines.append("|yPossible fracture / serious injury:|n " + ", ".join(regions))
+                lines.append(f"{MC['compensated']}Possible fracture / serious injury:|n " + ", ".join(regions))
         if medicine_level < DIAGNOSE_TIER_3:
             return "\n".join(lines) if lines else ""
     if medicine_level >= DIAGNOSE_TIER_3:
         lines = []
         if bleeding_level > 0:
-            lines.append("|yBleeding:|n " + BLEEDING_LEVELS[min(bleeding_level, 4)])
+            lines.append(f"{MC['compensated']}Bleeding:|n " + BLEEDING_LEVELS[min(bleeding_level, 4)])
         if fractures:
-            lines.append("|yFractures:|n " + ", ".join(BONE_INFO.get(b, b) + (" (splinted)" if b in splinted else "") for b in fractures))
+            lines.append(f"{MC['compensated']}Fractures:|n " + ", ".join(BONE_INFO.get(b, b) + (" (splinted)" if b in splinted else "") for b in fractures))
         if organ_damage:
             regions = sorted({ORGAN_TO_REGION.get(ok, "internal") for ok in organ_damage if organ_damage.get(ok, 0) > 0})
             if regions:
-                lines.append("|ySigns of internal trauma:|n " + ", ".join(regions) + " — scanner needed for detail.")
+                lines.append(f"{MC['compensated']}Signs of internal trauma:|n " + ", ".join(regions) + " — scanner needed for detail.")
         if medicine_level < DIAGNOSE_TIER_4:
             return "\n".join(lines) if lines else ""
     lines = []
     if bleeding_level > 0:
-        lines.append("|yBleeding:|n " + BLEEDING_LEVELS[min(bleeding_level, 4)])
+        lines.append(f"{MC['compensated']}Bleeding:|n " + BLEEDING_LEVELS[min(bleeding_level, 4)])
     if fractures:
-        lines.append("|yFractures:|n " + ", ".join(BONE_INFO.get(b, b) + (" (splinted)" if b in splinted else "") for b in fractures))
+        lines.append(f"{MC['compensated']}Fractures:|n " + ", ".join(BONE_INFO.get(b, b) + (" (splinted)" if b in splinted else "") for b in fractures))
     if organ_damage:
         regions = sorted({ORGAN_TO_REGION.get(ok, "internal") for ok in organ_damage if organ_damage.get(ok, 0) > 0})
         if regions:
-            lines.append("|yInternal trauma (by region):|n " + ", ".join(regions) + ". Use a bioscanner for precise assessment.")
+            lines.append(f"{MC['compensated']}Internal trauma (by region):|n " + ", ".join(regions) + ". Use a bioscanner for precise assessment.")
     return "\n".join(lines) if lines else ""
 
 
@@ -183,11 +202,30 @@ def get_medical_detail(character):
                     for i in (character.db.injuries or [])
                 )
                 if destroyed:
-                    out.append(f"  {names[0].title()}: |RDESTROYED - chrome replacement required|n")
+                    out.append(f"  {names[0].title()}: {MC['arrest']}DESTROYED - chrome replacement required|n")
                 else:
                     out.append(f"  {names[0].title()}: {names[min(severity, 3)]}")
     else:
         out.append("|wInternal / organ trauma:|n  None noted.")
+    from world.medical.limb_trauma import LIMB_INFO, LIMB_SLOTS
+    limb_damage = character.db.limb_damage or {}
+    if limb_damage:
+        out.append("|wLimb trauma:|n")
+        for limb_key in sorted(LIMB_SLOTS):
+            sev = int(limb_damage.get(limb_key, 0) or 0)
+            if sev <= 0:
+                continue
+            names = LIMB_INFO.get(limb_key, (limb_key,) * 4)
+            destroyed = any(
+                limb_key in (i.get("limb_damage") or {}) and i.get("fracture_destroyed")
+                for i in (character.db.injuries or [])
+            )
+            if destroyed:
+                out.append(f"  {names[0].title()}: {MC['arrest']}DESTROYED - chrome limb required|n")
+            else:
+                out.append(f"  {names[0].title()}: {names[min(sev, 3)]}")
+    else:
+        out.append("|wLimb trauma:|n  None noted.")
     fractures = character.db.fractures or []
     out.append("|wFractures:|n " + (", ".join(BONE_INFO.get(b, b) for b in fractures) if fractures else " None."))
     level, _ = compute_effective_bleed_level(character)

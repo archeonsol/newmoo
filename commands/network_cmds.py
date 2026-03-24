@@ -29,6 +29,32 @@ from world.matrix_accounts import get_alias
 
 
 MAX_SM_LEN = 400
+
+
+def _relay_msg(cmd, text):
+    """
+    Send feedback to the player controlling this command.
+
+    When a network command is executed via the multi-puppet relay (p2 sm ...),
+    self.caller is the NPC character which has no sessions of its own.  In that
+    case we send through self.session (the player's session) so the feedback
+    reaches the player.  For normal callers we fall back to self.caller.msg().
+    """
+    session = getattr(cmd, "session", None)
+    caller = cmd.caller
+    caller_sessions = []
+    try:
+        sh = getattr(caller, "sessions", None)
+        if sh and hasattr(sh, "get"):
+            caller_sessions = sh.get() or []
+    except Exception:
+        pass
+    if not caller_sessions and session:
+        session.msg(text)
+    else:
+        caller.msg(text)
+
+
 TABLE_WIDTH = 74
 # Visible character widths inside the "terminal box" (ignoring Evennia color codes).
 ID_COL_WIDTH = 14
@@ -188,8 +214,10 @@ def _iter_network_sessions_for_broadcast() -> Iterable[Character]:
     the message once, delivered through their currently-active session puppet.
     For characters without an account (e.g. NPCs), falls back to a direct
     coverage check on the session puppet.
+
+    Delivery target is always the character with live sessions attached to the
+    account — never a temporarily-swapped NPC puppet (e.g. during p2 relay).
     """
-    from commands.multipuppet_cmds import _multi_puppet_list
     from evennia.utils.search import search_object
     from typeclasses.matrix.avatars import MatrixAvatar
 
@@ -211,9 +239,54 @@ def _iter_network_sessions_for_broadcast() -> Iterable[Character]:
                 continue
             seen_account_ids.add(account_id)
 
+            # Build the full puppet ID list in a relay-safe way.
+            # _multi_puppet_list relies on session.puppet to find the main char,
+            # which is temporarily swapped to the NPC during p2/p3 relay — causing
+            # the real main character to be dropped from the list entirely.
+            # Instead: collect IDs from account.characters (all linked chars) plus
+            # account.db.multi_puppets (NPC slots), deduplicated.
+            all_mp_ids = []
+            try:
+                for ch in (account.characters or []):
+                    cid = getattr(ch, "id", None)
+                    if cid is not None and cid not in all_mp_ids:
+                        all_mp_ids.append(cid)
+            except Exception:
+                pass
+            for oid in (getattr(account.db, "multi_puppets", None) or []):
+                if oid not in all_mp_ids:
+                    all_mp_ids.append(oid)
+
+            # Find the character that actually has live sessions — this is the
+            # real delivery target regardless of any temporary session.puppet swap
+            # (e.g. during p2/p3 multi-puppet relay).
+            delivery_target = None
+            for oid in all_mp_ids:
+                try:
+                    result = search_object("#%s" % int(oid))
+                    char = result[0] if result else None
+                except (TypeError, ValueError):
+                    char = None
+                if not char or not isinstance(char, (Character, MatrixAvatar)):
+                    continue
+                char_sessions = []
+                try:
+                    sh = getattr(char, "sessions", None)
+                    if sh and hasattr(sh, "get"):
+                        char_sessions = sh.get() or []
+                except Exception:
+                    pass
+                if char_sessions:
+                    delivery_target = char
+                    break
+
+            # Fall back to session.puppet if no character with live sessions found.
+            if delivery_target is None:
+                delivery_target = puppet
+
             # Check every puppet in this account's multi-puppet set for coverage.
             has_coverage = False
-            for oid in _multi_puppet_list(account):
+            for oid in all_mp_ids:
                 try:
                     result = search_object("#%s" % int(oid))
                     char = result[0] if result else None
@@ -225,7 +298,7 @@ def _iter_network_sessions_for_broadcast() -> Iterable[Character]:
                         break
 
             if has_coverage:
-                yield puppet
+                yield delivery_target
         else:
             # No account (e.g. NPC): direct coverage check on the session puppet.
             if room_has_network_coverage(get_containing_room(puppet), include_matrix_nodes=True):
@@ -248,26 +321,26 @@ class CmdNetworkWho(ICBaseCommand):
     def func(self):
         caller = _resolve_meatspace_character(self.caller)  # resolve for alias + coverage
         if not caller:
-            self.msg("|rThe Network accepts only meatspace presence right now.|n")
+            _relay_msg(self, "|rThe Network accepts only meatspace presence right now.|n")
             return
 
         # Caller must have signal to query the network.
         room = get_containing_room(caller)
         if not room_has_network_coverage(room, include_matrix_nodes=True):
-            self.msg("|rYour signal is lost. The Network cannot reach you.|n")
+            _relay_msg(self, "|rYour signal is lost. The Network cannot reach you.|n")
             return
 
         filter_str = (self.args or "").strip().lower()
 
         # Staged "terminal" output for aesthetics.
-        caller.msg("|gReceiving data stream...|n")
+        _relay_msg(self, "|gReceiving data stream...|n")
         delay(2, self._who_stage2, caller, filter_str)
 
     def _who_stage2(self, caller, filter_str=""):
         caller = _resolve_meatspace_character(caller)
         if not caller:
             return
-        caller.msg("|gResolving data...|n")
+        _relay_msg(self, "|gResolving data...|n")
         delay(2, self._who_stage3, caller, filter_str)
 
     def _who_stage3(self, caller, filter_str=""):
@@ -278,7 +351,7 @@ class CmdNetworkWho(ICBaseCommand):
         # Re-check signal at time of display.
         room = get_containing_room(caller)
         if not room_has_network_coverage(room, include_matrix_nodes=True):
-            caller.msg("|rYour signal is lost. The Network cannot reach you.|n")
+            _relay_msg(self, "|rYour signal is lost. The Network cannot reach you.|n")
             return
 
         entries: list[tuple[str, str]] = []  # (alias, tag)
@@ -358,7 +431,7 @@ class CmdNetworkWho(ICBaseCommand):
         if len(entries) > 22:
             EvMore(caller, output)
         else:
-            caller.msg(output)
+            _relay_msg(self, output)
 
 
 class CmdNetworkSend(ICBaseCommand):
@@ -377,35 +450,91 @@ class CmdNetworkSend(ICBaseCommand):
     def func(self):
         raw = (self.args or "").strip()
         if not raw:
-            self.msg("Usage: sm <message>")
+            _relay_msg(self, "Usage: sm <message>")
             return
 
         if len(raw) > MAX_SM_LEN:
             raw = raw[:MAX_SM_LEN]
-            self.msg(f"|yMessage truncated to {MAX_SM_LEN} characters.|n")
+            _relay_msg(self, f"|yMessage truncated to {MAX_SM_LEN} characters.|n")
 
         sender_controller = _resolve_meatspace_character(self.caller)
+
         if not sender_controller:
-            self.msg("|rThe Network accepts only meatspace presence right now.|n")
+            _relay_msg(self, "|rThe Network accepts only meatspace presence right now.|n")
             return
 
         room = get_containing_room(sender_controller)
         if not room_has_network_coverage(room, include_matrix_nodes=True):
-            self.msg("|rYour signal is lost. You cannot send over The Network.|n")
+            _relay_msg(self, "|rYour signal is lost. You cannot send over The Network.|n")
             return
 
         sender_alias = _matrix_alias_for_character(sender_controller)
-        line = f"|431{sender_alias} |x>>|g {raw}"
+        network_line = f"|431{sender_alias} |x>>|g {raw}"
 
-        sent_anywhere = False
-        for puppet in _iter_network_sessions_for_broadcast():
-            puppet.msg(line)
-            sent_anywhere = True
+        # If the sender is an NPC puppet (p2/p3), prepend the relay prefix so
+        # the player sees "P2 Name: ^alias >> msg" instead of a bare network line.
+        npc_slot = getattr(getattr(sender_controller, "db", None), "_multi_puppet_slot", None)
+        if npc_slot:
+            relay_prefix = f"|cP{npc_slot} {sender_controller.name}|n: "
+            sender_player_line = relay_prefix + network_line
+        else:
+            sender_player_line = network_line
 
-        # Meatspace-only rule: the sender should always see their own
-        # broadcast even if nobody else has signal coverage right now.
-        if not sent_anywhere and hasattr(self.caller, "msg"):
-            self.caller.msg(line)
+        # Resolve the sender's account in a relay-safe way.
+        # session.account is always the real player account even when
+        # session.puppet is temporarily swapped to an NPC during p2/p3 relay.
+        _session = getattr(self, "session", None)
+        sender_account = (
+            getattr(_session, "account", None)
+            or getattr(sender_controller, "account", None)
+        )
+        sender_account_id = getattr(sender_account, "id", None)
+
+        from evennia.utils.search import search_object as _so
+
+        sender_account_reached = False
+        for target in _iter_network_sessions_for_broadcast():
+            target_account = getattr(target, "account", None)
+            target_account_id = getattr(target_account, "id", None) if target_account else None
+            is_sender_account = (
+                (sender_account_id is not None and target_account_id == sender_account_id)
+                or target is sender_controller
+                or target is self.caller
+            )
+
+            if is_sender_account:
+                sender_account_reached = True
+
+                # Always deliver the bare network line to the player (as a
+                # broadcast recipient, same as any other player on the network).
+                # Use _relay_msg so it reaches the player even when session.puppet
+                # is temporarily swapped to the NPC (Ash has zero sessions then).
+                _relay_msg(self, network_line)
+
+                # If sent via an NPC puppet, also send the P2-prefixed confirmation
+                # so the player can see which puppet transmitted the message.
+                if npc_slot:
+                    _relay_msg(self, sender_player_line)
+
+                # Also deliver to each covered NPC puppet so the network message
+                # appears in their feed with "P2 Name: " prefix via multi_puppet_relay.
+                for oid in (getattr(target_account.db, "multi_puppets", None) if target_account else None) or []:
+                    try:
+                        res = _so("#%s" % int(oid))
+                        npc = res[0] if res else None
+                    except (TypeError, ValueError):
+                        npc = None
+                    if npc and hasattr(npc, "msg") and npc is not sender_controller:
+                        if room_has_network_coverage(get_containing_room(npc), include_matrix_nodes=True):
+                            npc.msg(network_line)
+            else:
+                # Other players: bare network line, no relay prefix.
+                target.msg(network_line)
+
+        # Fallback: sender's account was not yielded at all (e.g. only one
+        # person online and the iterator missed them).
+        if not sender_account_reached:
+            _relay_msg(self, sender_player_line)
 
 
 class CmdNetworkNtag(ICBaseCommand):
@@ -426,7 +555,7 @@ class CmdNetworkNtag(ICBaseCommand):
     def func(self):
         caller = _resolve_meatspace_character(self.caller)
         if not caller:
-            self.msg("|rThe Network accepts only meatspace presence right now.|n")
+            _relay_msg(self, "|rThe Network accepts only meatspace presence right now.|n")
             return
 
         clear = "clear" in getattr(self, "switches", [])
@@ -438,19 +567,19 @@ class CmdNetworkNtag(ICBaseCommand):
                     del caller.db.network_tag
             except Exception:
                 caller.db.network_tag = ""
-            self.msg("|gNetwork tag cleared.|n")
+            _relay_msg(self, "|gNetwork tag cleared.|n")
             return
 
         if not raw:
             current = _network_tag_for_character(caller)
-            self.msg(f"Your current Network tag: |c{current if current else '(none)'}|n")
-            self.msg("Usage: ntag <tag text>   or   ntag/clear")
+            _relay_msg(self, f"Your current Network tag: |c{current if current else '(none)'}|n")
+            _relay_msg(self, "Usage: ntag <tag text>   or   ntag/clear")
             return
 
         cleaned = raw.replace("\r", " ").replace("\n", " ").strip()
         if len(cleaned) > TAG_COL_WIDTH:
             cleaned = cleaned[:TAG_COL_WIDTH]
-            self.msg(f"|yTag truncated to {TAG_COL_WIDTH} characters to fit the table.|n")
+            _relay_msg(self, f"|yTag truncated to {TAG_COL_WIDTH} characters to fit the table.|n")
 
         caller.db.network_tag = cleaned
-        self.msg("|gNetwork tag updated.|n")
+        _relay_msg(self, "|gNetwork tag updated.|n")

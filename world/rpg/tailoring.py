@@ -49,8 +49,8 @@ def get_quality_for_result(result):
     quality_score is used to average outfit quality when displaying "Their outfit is X."
     """
     result = max(0, min(100, int(result)))
-    adjective = "basic"
-    score = 70
+    # Defaults match the lowest tier (result 0); the loop always matches since tiers start at 0.
+    adjective, score = QUALITY_TIERS[0][1], QUALITY_TIERS[0][2]
     for min_result, adj, qscore in reversed(QUALITY_TIERS):
         if result >= min_result:
             adjective = adj
@@ -67,7 +67,10 @@ def roll_tailoring(caller, difficulty=0):
     if not hasattr(caller, "roll_check"):
         return False, 0, "shoddy", 25
     stats = SKILL_STATS.get(TAILORING_SKILL, ["intelligence", "charisma"])
-    outcome, result = caller.roll_check(stats, TAILORING_SKILL, difficulty=difficulty, modifier=-difficulty)
+    # roll_check formula: random(0, skill) + sum(stats) + modifier - difficulty.
+    # Pass difficulty once via the difficulty kwarg only; do not also pass modifier=-difficulty
+    # or the penalty is applied twice.
+    outcome, result = caller.roll_check(stats, TAILORING_SKILL, difficulty=difficulty)
     # result is the final_result from roll_check (effective_roll + strength_bonus + modifier - difficulty)
     adjective, quality_score = get_quality_for_result(result)
     success = outcome in ("Critical Success", "Full Success", "Marginal Success")
@@ -178,7 +181,7 @@ def get_outfit_quality_line(character, looker=None):
     Uses character's possessive pronoun (their/his/her).
     """
     from world.clothing import get_worn_items
-    from world.medical import _pronoun_sub_poss
+    from world.medical.descriptions import _pronoun_sub_poss
 
     worn = get_worn_items(character)
     if not worn:
@@ -207,6 +210,7 @@ def get_outfit_quality_line(character, looker=None):
 
 # Parse args for tailor command (migrated from command.py for one place to edit)
 TAILOR_SUBCMDS = [
+    "modify",
     "name",
     "aliases",
     "worn",

@@ -2,6 +2,8 @@
 Narrative injury description helpers split from world.medical.__init__.
 """
 
+from world.theme_colors import INJURY_COLORS as IC
+
 INJURY_SEVERITY_WORDING = {
     "cut": {1: "a minor cut", 2: "a weeping cut", 3: "a deep cut", 4: "a grievous laceration"},
     "bruise": {1: "a bruise", 2: "heavy bruising", 3: "a severe contusion", 4: "massive contusion"},
@@ -57,7 +59,7 @@ def format_body_part_injuries(character, body_part, part_entries):
             bits.append(f"multiple {plural_phrase}")
     if not bits:
         return ""
-    return f"|r{sub} {verb} {' and '.join(bits)} on {poss} {body_part}.|n"
+    return f"{IC['wound']}{sub} {verb} {' and '.join(bits)} on {poss} {body_part}.|n"
 
 
 def get_untreated_injuries_by_part(character):

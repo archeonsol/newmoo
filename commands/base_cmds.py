@@ -1,5 +1,5 @@
 """
-Base commands: Command (flatline/dead blocking), _command_character, CmdLook, CmdExamine, CmdGet, CmdPut, CmdOperate.
+Base commands: Command (flatline/dead blocking), _command_character, CmdLook, CmdExamine, CmdGet, CmdPut.
 """
 
 import re
@@ -26,13 +26,51 @@ def _command_character(self):
     return caller
 
 
+def _stealth_and_hide_at_pre_cmd(cmd_self):
+    """
+    Hide-cancel + stealth reveal. Used by Command and by CmdLook (which must stay
+    DefaultCmdLook-only so Evennia's parse/func chain is not replaced by Command.parse).
+    Returns True if the command should abort (caller blocked).
+    """
+    caller = cmd_self.caller
+    if not caller:
+        return False
+    char = _command_character(cmd_self)
+    try:
+        from world.rpg import stealth
+
+        if getattr(char.ndb, "hide_pending", False):
+            cmd_key = (getattr(cmd_self, "key", None) or "").strip().lower()
+            if not cmd_key:
+                raw = getattr(cmd_self, "raw_string", "") or ""
+                part = raw.strip().split(None, 1)
+                cmd_key = (part[0] if part else "").lower()
+            if cmd_key != "hide":
+                stealth.cancel_hide_pending(char, None)
+                return True
+        if getattr(char.db, "stealth_hidden", False) and stealth.command_breaks_stealth(cmd_self):
+            stealth.reveal(char, reason="action")
+    except Exception:
+        pass
+    return False
+
+
 class Command(BaseCommand):
-    """
-    Base command. Blocks all commands when character is flatlined (dying) or dead except for Admins/Builders.
-    """
+    # Flatline/dead blocking lives in at_pre_cmd (character_can_act). Subclasses must
+    # define their own docstring for help; __doc__ is empty so Evennia's CommandMeta does
+    # not copy this class's text onto children that omit one (see _init_command in
+    # evennia.commands.command).
+    __doc__ = ""
+
     def parse(self):
         """Extract switches and args from raw_string. Sets self.switches (list) and self.args (str)."""
         raw = self.raw_string or ""
+        try:
+            import ftfy
+            raw = ftfy.fix_text(raw)
+            self.raw_string = raw
+        except Exception:
+            pass
         self.switches = []
         parts = raw.split(None, 1)
         if parts:
@@ -56,6 +94,8 @@ class Command(BaseCommand):
         if not can_act and msg:
             caller.msg(msg)
             return True
+        if _stealth_and_hide_at_pre_cmd(self):
+            return True
         return super().at_pre_cmd()
 
     def at_post_cmd(self):
@@ -75,22 +115,27 @@ class CmdLook(DefaultCmdLook):
     """
 
     def at_pre_cmd(self):
-        """Block look when flatlined/dead so state-specific cmdset message can show."""
+        """Flatline/dead, hide-pending cancel, stealth break — keep DefaultCmdLook.parse."""
         from world.profiling import record_command_start
+
         record_command_start(self)
         caller = self.caller
         if not caller:
             return super().at_pre_cmd() if hasattr(super(), "at_pre_cmd") else None
         char = _command_character(self)
         from world.death import character_can_act
+
         can_act, msg = character_can_act(char, allow_builders=True)
         if not can_act and msg:
             caller.msg(msg)
+            return True
+        if _stealth_and_hide_at_pre_cmd(self):
             return True
         return super().at_pre_cmd() if hasattr(super(), "at_pre_cmd") else None
 
     def at_post_cmd(self):
         from world.profiling import record_command_end
+
         record_command_end(self)
 
     def func(self):
@@ -143,7 +188,7 @@ class CmdLook(DefaultCmdLook):
                             matches = resolve_sdesc_to_characters(caller, char_objs, target_spec)
                             if matches:
                                 if len(matches) > 1:
-                                    caller.msg("Multiple people in the photo match that. Be more specific (use 1-<sdesc>, 2-<sdesc>, etc).")
+                                    caller.msg("Multiple people in the photo match that. Be more specific (use 1-<sdesc> or <sdesc>-1, etc).")
                                     return
                                 target = matches[0]
                         except Exception:
@@ -261,6 +306,28 @@ class CmdLook(DefaultCmdLook):
                         target_exit = ex
                         break
                 if target_exit and target_exit.destination:
+                    # Door check: if the exit has a door, handle closed/open messaging.
+                    if getattr(target_exit.db, "door", None):
+                        if not getattr(target_exit.db, "door_open", None):
+                            # Determine what kind of door it is for the hint suffix.
+                            try:
+                                from world.rpg.rentable_doors import is_rentable, is_paired_with_rentable
+                                _is_keypad = is_rentable(target_exit) or is_paired_with_rentable(target_exit)
+                            except Exception:
+                                _is_keypad = False
+                            _is_bioscan = bool(getattr(target_exit.db, "bioscan", None))
+
+                            if _is_bioscan:
+                                suffix = " It requires a biometric scan to open."
+                            elif _is_keypad:
+                                suffix = " It requires a code to open."
+                            else:
+                                suffix = ""
+
+                            caller.msg(f"The door to the {direction} is |wclosed|n.{suffix}")
+                            return
+                        # Door is open — fall through to peek-through logic below.
+
                     dest = target_exit.destination
                     # Collect visible characters in the destination room (players and NPCs, but not corpses).
                     contents = getattr(dest, "contents", [])
@@ -278,6 +345,12 @@ class CmdLook(DefaultCmdLook):
                             o for o in contents
                             if getattr(o, "has_account", False) or bool(getattr(getattr(o, "db", None), "is_npc", False))
                         ]
+                    try:
+                        from world.rpg import stealth
+
+                        chars = [c for c in chars if not (stealth.is_hidden(c) and not stealth.has_spotted(caller, c))]
+                    except Exception:
+                        pass
                     if not chars:
                         caller.msg(f"To the {direction} you see |wnothing of note|n.")
                         return
@@ -298,7 +371,7 @@ class CmdLook(DefaultCmdLook):
 
 class CmdStopWalking(Command):
     """
-    Stop a pending staggered walk before it completes.
+    Stop a pending staggered walk and clear any queued compass steps.
 
     Usage:
       stop walking
@@ -314,14 +387,213 @@ class CmdStopWalking(Command):
         if not getattr(caller, "db", None):
             self.caller.msg("You must be in character to do that.")
             return
-        # Mark the next delayed walk to be cancelled; the delayed callback
-        # in `world.staggered_movement` will honour this flag.
-        already_set = bool(getattr(caller.db, "cancel_walking", False))
-        caller.db.cancel_walking = True
+        # Same as interrupt_staggered_walk (combat/grapple use that helper too).
+        try:
+            from world.rpg.staggered_movement import interrupt_staggered_walk
+
+            already_set = bool(getattr(caller.db, "cancel_walking", False))
+            interrupt_staggered_walk(caller, notify_msg=None)
+        except ImportError:
+            already_set = bool(getattr(caller.db, "cancel_walking", False))
+            try:
+                from world.rpg.staggered_movement import clear_stagger_walk_pending, clear_walk_queue
+
+                clear_stagger_walk_pending(caller)
+                clear_walk_queue(caller)
+            except ImportError:
+                pass
+            caller.db.cancel_walking = True
         if already_set:
             self.caller.msg("You steady yourself, keeping from walking off anywhere.")
         else:
             self.caller.msg("You stop walking.")
+
+
+class CmdStop(Command):
+    """
+    Stop one specific thing you are doing. Bare |wstop|n does nothing.
+
+    Usage:
+      stop following   — end follow/shadow
+      stop escorting   — end escort (leading or being led)
+      stop hiding      — cancel trying to hide, or step out if hidden
+      stop sneaking    — abort a pending sneak move
+      stop attacking   — stop combat swings (|wstop attacking <name>|n optional)
+      cease            — same as |wstop attacking|n with your current target
+    """
+
+    key = "stop"
+    aliases = ["cease"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def at_pre_cmd(self):
+        """Let |wstop hiding|n reach func without hide-pending cancel (that would abort the command)."""
+        raw_l = (self.raw_string or "").strip().lower()
+        if raw_l.startswith("stop hiding") or raw_l.startswith("stop hide"):
+            from world.profiling import record_command_start
+
+            record_command_start(self)
+            caller = self.caller
+            if not caller:
+                return super().at_pre_cmd()
+            char = _command_character(self)
+            from world.death import character_can_act
+
+            can_act, msg = character_can_act(char, allow_builders=True)
+            if not can_act and msg:
+                caller.msg(msg)
+                return True
+            return False
+        return super().at_pre_cmd()
+
+    def func(self):
+        caller = _command_character(self)
+        if not getattr(caller, "db", None):
+            self.caller.msg("You must be in character to do that.")
+            return
+
+        raw = (self.raw_string or "").strip()
+        parts = raw.split(None, 1)
+        verb = (parts[0] or "").lower() if parts else ""
+        tail = parts[1].strip() if len(parts) > 1 else ""
+
+        usage = (
+            "Stop what? Specify: |wstop following|n, |wstop escorting|n, |wstop hiding|n, "
+            "|wstop sneaking|n, or |wstop attacking|n (|wcease|n = stop attacking)."
+        )
+
+        if verb == "cease":
+            self._stop_attacking(caller, tail)
+            return
+
+        if verb != "stop":
+            return
+
+        if not tail:
+            caller.msg(usage)
+            return
+
+        mode = tail.split(None, 1)[0].lower()
+        rest = ""
+        tsplit = tail.split(None, 1)
+        if len(tsplit) > 1:
+            rest = tsplit[1].strip()
+
+        if mode in ("following", "follow"):
+            from commands.follow_cmds import stop_following_activity
+
+            stop_following_activity(caller)
+        elif mode in ("escorting", "escort"):
+            from commands.follow_cmds import stop_escorting_activity
+
+            stop_escorting_activity(caller)
+        elif mode in ("hiding", "hide"):
+            self._stop_hiding(caller)
+        elif mode in ("sneaking", "sneak"):
+            self._stop_sneaking(caller)
+        elif mode == "attacking":
+            self._stop_attacking(caller, rest)
+        else:
+            caller.msg(usage)
+
+    def _stop_hiding(self, caller):
+        from world.rpg import stealth
+
+        if getattr(caller.ndb, "hide_pending", False):
+            stealth.cancel_hide_pending(caller, "|xYou stop trying to hide.|n")
+            return
+        if stealth.is_hidden(caller):
+            stealth.reveal(caller, reason="action")
+            return
+        caller.msg("|xYou are not hiding.|n")
+
+    def _stop_sneaking(self, caller):
+        if not getattr(caller.ndb, "_stealth_move_sneak", False):
+            caller.msg("|xYou are not sneaking anywhere.|n")
+            return
+        try:
+            from world.rpg.staggered_movement import interrupt_staggered_walk
+
+            was = interrupt_staggered_walk(caller, notify_msg="|xYou abort your sneaking move.|n")
+        except ImportError:
+            was = False
+        try:
+            if hasattr(caller.ndb, "_stealth_move_sneak"):
+                del caller.ndb._stealth_move_sneak
+        except Exception:
+            pass
+        if not was:
+            caller.msg("|xYou are not sneaking anywhere.|n")
+
+    def _stop_attacking(self, caller, target_name: str):
+        from world.combat import stop_combat_ticker, _get_combat_target
+
+        tn = (target_name or "").strip()
+        if not tn:
+            current = _get_combat_target(caller)
+            if not current:
+                caller.msg("You're not in combat.")
+                return
+            stop_combat_ticker(caller, current)
+            return
+        target = caller.search(tn)
+        if not target:
+            return
+        stop_combat_ticker(caller, target)
+
+
+class CmdGo(Command):
+    """
+    Queue multiple compass steps (same staggered pacing as using exits).
+    If a walk is already in progress, new directions are appended to the queue.
+
+    Usage:
+      go w w w
+      go north east
+    """
+
+    key = "go"
+    aliases = ["walk", "queue walk", "walkqueue"]
+    locks = "cmd:all()"
+    help_category = "Movement"
+
+    def func(self):
+        caller = _command_character(self)
+        if not getattr(caller, "db", None):
+            self.caller.msg("You must be in character to do that.")
+            return
+        try:
+            from world.rpg.staggered_movement import (
+                extend_walk_queue,
+                is_staggered_walk_pending,
+                is_valid_compass_token,
+                normalize_move_direction,
+                seed_walk_queue_and_start_first,
+            )
+        except ImportError:
+            self.caller.msg("Movement queue is unavailable.")
+            return
+        parts = (self.args or "").strip().split()
+        if not parts:
+            self.caller.msg("Usage: |wgo <direction> [<direction> ...]|n  e.g. |wgo w w w|n")
+            return
+        norms = []
+        for tok in parts:
+            if not is_valid_compass_token(tok):
+                self.caller.msg(f"Unknown direction: {tok}")
+                return
+            norms.append(normalize_move_direction(tok))
+        if is_staggered_walk_pending(caller):
+            extend_walk_queue(caller, norms)
+            self.caller.msg(
+                "You add " + ", ".join(parts) + " to your route after your current step."
+            )
+            return
+        ok, err = seed_walk_queue_and_start_first(caller, norms)
+        if not ok:
+            self.caller.msg(err or "You can't go that way.")
+            return
 
 
 class CmdExamine(Command):
@@ -373,7 +645,7 @@ class CmdExamine(Command):
 
 
 class CmdGet(DefaultCmdGet if DefaultCmdGet else BaseCommand):
-    """Get: supports 'get <item> from <container>'; from logged-off/corpse only when allowed."""
+    """Get: supports 'get <item> from <container>'; from corpse, unconscious, or logged-off (30+ min) when allowed."""
     key = "get"
     aliases = ["take", "pick up"]
 
@@ -402,6 +674,36 @@ class CmdGet(DefaultCmdGet if DefaultCmdGet else BaseCommand):
             else:
                 caller.msg("Get what?")
             return
+
+        # Cash pile interception: if the target is a cash pile, convert it to
+        # wallet funds instead of moving it to inventory.
+        if " from " not in args:
+            try:
+                obj = caller.search(args, location=caller.location, quiet=True)
+                if obj:
+                    import evennia.utils.utils as _utils
+                    obj_list = _utils.make_iter(obj)
+                    if obj_list:
+                        candidate = obj_list[0]
+                        if candidate.tags.get("cash_pile", category="economy"):
+                            from world.rpg.economy import add_funds, format_currency, CURRENCY_NAME
+                            amount = int(getattr(candidate.db, "cash_amount", 0) or 0)
+                            if amount > 0:
+                                add_funds(caller, amount, party="ground", reason="picked up cash")
+                                caller.msg(
+                                    f"You scoop up {format_currency(amount)}."
+                                )
+                                caller.location.msg_contents(
+                                    f"|w{caller.key}|n picks up a pile of {CURRENCY_NAME}.",
+                                    exclude=[caller],
+                                )
+                            else:
+                                caller.msg("The pile is empty.")
+                            candidate.delete()
+                            return
+            except Exception:
+                pass
+
         if " from " not in args:
             if DefaultCmdGet:
                 super().func()
@@ -421,11 +723,22 @@ class CmdGet(DefaultCmdGet if DefaultCmdGet else BaseCommand):
             from evennia import DefaultCharacter
             from world.death import is_character_logged_off, character_logged_off_long_enough
             if isinstance(container, DefaultCharacter) and not isinstance(container, Corpse):
-                if not is_character_logged_off(container):
+                try:
+                    from world.medical import is_unconscious as _is_unconscious
+
+                    target_is_unconscious = _is_unconscious(container)
+                except ImportError as e:
+                    logger.log_trace("base_cmds.CmdGet is_unconscious: %s" % e)
+                    target_is_unconscious = False
+
+                if is_character_logged_off(container):
+                    if not character_logged_off_long_enough(container):
+                        caller.msg(
+                            "They haven't been gone long enough. You can only take from someone who's been logged off at least half an hour."
+                        )
+                        return
+                elif not target_is_unconscious:
                     caller.msg("You can't take from someone who's wide awake!")
-                    return
-                if not character_logged_off_long_enough(container):
-                    caller.msg("They haven't been gone long enough. You can only take from someone who's been logged off at least half an hour.")
                     return
         except ImportError as e:
             logger.log_trace("base_cmds.CmdGet get-from-container check: %s" % e)
@@ -505,9 +818,14 @@ class CmdPut(Command):
         if obj.location != caller:
             self.caller.msg("You're not holding that.")
             return
+        # Immovable fixtures use get:false() so they can't be picked up; they may still accept items.
         if not container.access(caller, "get"):
-            self.caller.msg("You can't put anything in that.")
-            return
+            allow_put = getattr(container.db, "allow_put_while_get_false", False) or getattr(
+                type(container), "fixture_allows_put_without_get", False
+            )
+            if not allow_put:
+                self.caller.msg("You can't put anything in that.")
+                return
         if hasattr(container, "at_pre_object_receive") and not container.at_pre_object_receive(obj, caller):
             return
         if obj.move_to(container, quiet=True):
@@ -522,60 +840,3 @@ class CmdPut(Command):
             )
         else:
             self.caller.msg("You can't put that in there.")
-
-
-class CmdOperate(Command):
-    """
-    Operate a networked device.
-
-    Usage:
-        operate <device>
-        op <device>
-
-    Opens an interactive menu for controlling networked devices like hubs,
-    cameras, terminals, etc. The menu shows device info, available commands,
-    and file storage (if applicable).
-
-    This is the meatspace equivalent of running 'patch cmd.exe' in the Matrix.
-    """
-
-    key = "operate"
-    aliases = ["op"]
-    locks = "cmd:all()"
-    help_category = "General"
-
-    def func(self):
-        caller = _command_character(self)
-
-        # If no args, check if we're in a device interface room
-        if not self.args:
-            room = caller.location
-            if room and hasattr(room.db, 'parent_object') and room.db.parent_object:
-                device = room.db.parent_object
-                from typeclasses.matrix.mixins import NetworkedMixin
-                if isinstance(device, NetworkedMixin):
-                    # We're in a device interface - open its menu
-                    from typeclasses.matrix.device_menu import start_device_menu
-                    # Check if caller is a Matrix avatar
-                    from typeclasses.matrix.avatars import MatrixAvatar
-                    from_matrix = isinstance(caller, MatrixAvatar)
-                    start_device_menu(caller, device, from_matrix=from_matrix)
-                    return
-
-            caller.msg("Usage: operate <device>")
-            return
-
-        # Find the device (check both location and inventory)
-        device = caller.search(self.args.strip())
-        if not device:
-            return
-
-        # Check if it's a networked device
-        from typeclasses.matrix.mixins import NetworkedMixin
-        if not isinstance(device, NetworkedMixin):
-            caller.msg(f"{device.get_display_name(caller)} is not a networked device.")
-            return
-
-        # Launch the device menu
-        from typeclasses.matrix.device_menu import start_device_menu
-        start_device_menu(caller, device, from_matrix=False)

@@ -7,7 +7,7 @@ from __future__ import annotations
 import random
 import time
 
-RANGED_COVER_DAMAGE_TYPES = {"penetrating", "burn", "freeze", "arc", "void"}
+from world.theme_colors import COMBAT_COLORS as CC
 
 COVER_EXPOSED = 0
 COVER_LIGHT = 1
@@ -64,16 +64,6 @@ def _room_cover_default_flavors(quality):
     if quality >= COVER_HEAVY:
         return ["solid cover nearby"]
     return ["whatever cover is available"]
-
-
-def _display_name(char, viewer):
-    if char is None:
-        return "Someone"
-    if viewer is not None and hasattr(char, "get_display_name"):
-        out = char.get_display_name(viewer)
-        if out:
-            return out
-    return getattr(char, "name", None) or getattr(char, "key", None) or "Someone"
 
 
 def _iter_room_characters(room):
@@ -271,23 +261,14 @@ def is_pinned_by_suppression(character):
     return is_suppressed(character) and not getattr(character.db, "in_cover", False)
 
 
-def get_cover_defense_bonus(defender, weapon_key, damage_type, current_range):
+def get_cover_defense_bonus(defender, weapon_key):
+    """Defense bonus from cover quality only (no nominal range or damage-type split)."""
     if not defender or not getattr(defender.db, "in_cover", False):
         return 0
     quality = _clamp_quality(getattr(defender.db, "cover_quality", COVER_EXPOSED))
     if quality <= COVER_EXPOSED:
         return 0
-    if damage_type not in RANGED_COVER_DAMAGE_TYPES:
-        # Melee attacks don't gain cover benefit in tight distances.
-        if current_range <= 1:
-            return 0
-        # Partial cover benefit at extended range.
-        if current_range == 2:
-            base = int(COVER_DEFENSE_BONUS[quality] * 0.5)
-        else:
-            return 0
-    else:
-        base = COVER_DEFENSE_BONUS[quality]
+    base = COVER_DEFENSE_BONUS[quality]
     if weapon_key == "automatic":
         base += COVER_AUTOMATIC_DEFENSE_BONUS[quality]
     if is_suppressed(defender):
@@ -345,11 +326,11 @@ def _handle_cover_degradation(defender):
             defender.db.cover_quality = quality
             defender.db.cover_hp = hp
             defender.db.cover_flavor_text = _pick_cover_flavor(room, quality, degraded=True)
-            defender.msg("|rYour cover is shot to pieces. You scramble to what's left.|n")
+            defender.msg(CC["miss"] + "Your cover is shot to pieces. You scramble to what's left.|n")
             if defender.db.cover_flavor_text:
                 defender.db.room_pose = f"crouching behind {defender.db.cover_flavor_text}"
         else:
             defender.db.cover_quality = COVER_EXPOSED
             defender.db.cover_hp = 0
-            force_leave_cover(defender, reason_msg="|rThe last of your cover disintegrates. You're exposed.|n")
+            force_leave_cover(defender, reason_msg=CC["miss"] + "The last of your cover disintegrates. You're exposed.|n")
             break

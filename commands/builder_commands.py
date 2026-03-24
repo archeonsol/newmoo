@@ -3,19 +3,68 @@ Builder QoL commands: butag, buhere, budig, budesc, etc.
 Prefixed with 'bu' to leave short names free. Locked to Builder only.
 """
 from evennia import Command
+from evennia.commands.default import building as evennia_building
 from evennia.utils.create import create_object
 from typeclasses.matrix.rooms import MatrixNode
 from typeclasses.matrix.exits import MatrixExit
 
 
+def _format_tag_list(obj):
+    """Human-readable tag list, including category when present."""
+    if not hasattr(obj, "tags"):
+        return ""
+    try:
+        pairs = obj.tags.all(return_key_and_category=True)
+    except TypeError:
+        pairs = None
+    if not pairs:
+        plain = obj.tags.all()
+        if not plain:
+            return ""
+        return ", ".join(str(t) for t in plain)
+    parts = []
+    for item in pairs:
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            key, cat = item[0], item[1]
+            if cat:
+                parts.append("%s|%s" % (key, cat))
+            else:
+                parts.append(str(key))
+        else:
+            parts.append(str(item))
+    return ", ".join(parts)
+
+
+def _parse_tag_and_category(tag_spec):
+    """
+    Split 'name' or 'name:category' into (name, category_or_None).
+    Category is optional; omit or leave empty for default (uncategorized) tags.
+    """
+    tag_spec = (tag_spec or "").strip()
+    if not tag_spec:
+        return None, None
+    if ":" in tag_spec:
+        name, cat = tag_spec.split(":", 1)
+        name, cat = name.strip(), cat.strip()
+        if not name:
+            return None, None
+        return name, (cat if cat else None)
+    return tag_spec, None
+
+
 class CmdTag(Command):
     """
-    Add, remove, or list tags on an object.
+    Add, remove, or list tags on a room or object.
     Usage:
       butag [obj] = tagname[/remove]
+      butag [obj] = tagname:category[/remove]
       butag [obj]                    (list tags on obj)
-      butag here = clone_spawn       (tag current room)
-    If obj is omitted, 'here' (current room) is used.
+      butag here = clone_spawn
+      butag here = sewer_water:specimen    (alchemy room specimen — key from world.alchemy.ingredients)
+    If obj is omitted, 'here' (current room) is used. Use any object name or #dbref for objects.
+
+    Use |w:category|n when the game expects a tag category (e.g. alchemy |wcollect|n checks
+    category |wspecimen|n on rooms). Uncategorized tags use |wbutag here = foo|n with no colon.
     """
     key = "butag"
     locks = "cmd:perm(Builder)"
@@ -25,7 +74,11 @@ class CmdTag(Command):
         caller = self.caller
         args = (self.args or "").strip()
         if not args:
-            caller.msg("Usage: |wbutag [obj] = tagname|n or |wbutag [obj] = tagname/remove|n or |wbutag [obj]|n to list.")
+            caller.msg(
+                "Usage: |wbutag [obj] = tagname|n or |wbutag [obj] = tagname:category|n "
+                "(append |w/remove|n to remove). |wbutag [obj]|n lists tags. "
+                "Omit obj for current room. Example: |wbutag here = coolant_runoff:specimen|n"
+            )
             return
         if "=" in args:
             left, right = args.split("=", 1)
@@ -55,21 +108,40 @@ class CmdTag(Command):
             caller.msg("That object doesn't support tags.")
             return
         if tag_spec is None:
-            tags = obj.tags.all()
-            if not tags:
+            formatted = _format_tag_list(obj)
+            if not formatted:
                 caller.msg("|w%s|n has no tags." % obj.get_display_name(caller))
             else:
-                caller.msg("|w%s|n tags: %s" % (obj.get_display_name(caller), ", ".join(tags)))
+                caller.msg("|w%s|n tags: %s" % (obj.get_display_name(caller), formatted))
+            return
+        tag_name, category = _parse_tag_and_category(tag_spec)
+        if not tag_name:
+            caller.msg("Invalid tag name.")
             return
         if remove:
-            if obj.tags.has(tag_spec):
-                obj.tags.remove(tag_spec)
-                caller.msg("Removed tag |w%s|n from %s." % (tag_spec, obj.get_display_name(caller)))
+            if category:
+                has_it = obj.tags.has(tag_name, category=category)
             else:
-                caller.msg("%s doesn't have that tag." % obj.get_display_name(caller))
+                has_it = obj.tags.has(tag_name)
+            if has_it:
+                if category:
+                    obj.tags.remove(tag_name, category=category)
+                else:
+                    obj.tags.remove(tag_name)
+                cat_note = " (%s)" % category if category else ""
+                caller.msg("Removed tag |w%s|n%s from %s." % (tag_name, cat_note, obj.get_display_name(caller)))
+            else:
+                caller.msg("%s doesn't have that tag (check name and category)." % obj.get_display_name(caller))
         else:
-            obj.tags.add(tag_spec)
-            caller.msg("Added tag |w%s|n to %s." % (tag_spec, obj.get_display_name(caller)))
+            if category:
+                obj.tags.add(tag_name, category=category)
+                caller.msg(
+                    "Added tag |w%s|n (category |w%s|n) to %s."
+                    % (tag_name, category, obj.get_display_name(caller))
+                )
+            else:
+                obj.tags.add(tag_name)
+                caller.msg("Added tag |w%s|n to %s." % (tag_name, obj.get_display_name(caller)))
 
 
 class CmdHere(Command):
@@ -89,8 +161,9 @@ class CmdHere(Command):
             return
         name = loc.get_display_name(caller)
         dbref = "#%s" % loc.id
-        tags = loc.tags.all() if hasattr(loc, "tags") else []
-        tags_str = ", ".join(tags) if tags else "none"
+        tags_str = _format_tag_list(loc) if hasattr(loc, "tags") else ""
+        if not tags_str:
+            tags_str = "none"
         exits = [e for e in (loc.exits or []) if e]
         caller.msg(
             "|w%s|n  %s\n  Tags: %s  Exits: %d"
@@ -290,10 +363,10 @@ class CmdSetAttr(Command):
             return
         if "=" in args:
             left, right = args.split("=", 1)
-            parts = left.strip().split(None, 1)
+            parts = left.strip().rsplit(None, 1)
             right = right.strip()
         else:
-            parts = args.strip().split(None, 1)
+            parts = args.strip().rsplit(None, 1)
             right = None
         if len(parts) < 2 and right is None:
             caller.msg("Usage: |wbusetattr <obj> <attr> [= value]|n")
@@ -315,20 +388,21 @@ class CmdSetAttr(Command):
             return
         if right == "" or right == "#":
             try:
-                del obj.db[attr]
+                delattr(obj.db, attr)
                 caller.msg("Cleared %s on %s." % (attr, obj.get_display_name(caller)))
             except Exception as e:
                 caller.msg("Could not clear: %s" % e)
             return
+        parsed = right
         if right.isdigit():
-            obj.db[attr] = int(right)
+            parsed = int(right)
         elif right.lower() in ("true", "false"):
-            obj.db[attr] = right.lower() == "true"
+            parsed = right.lower() == "true"
         else:
             if (right.startswith('"') and right.endswith('"')) or (right.startswith("'") and right.endswith("'")):
-                right = right[1:-1]
-            obj.db[attr] = right
-        caller.msg("Set %s.%s = %s" % (obj.get_display_name(caller), attr, repr(obj.db[attr])))
+                parsed = right[1:-1]
+        setattr(obj.db, attr, parsed)
+        caller.msg("Set %s.%s = %s" % (obj.get_display_name(caller), attr, repr(getattr(obj.db, attr, None))))
 
 
 class CmdName(Command):
@@ -539,6 +613,28 @@ class CmdOpen(Command):
             caller.msg("Error: %s" % e)
 
 
+class CmdAtOpen(evennia_building.CmdOpen):
+    """
+    Evennia's full |w@open|n exit builder. Plain |wopen|n is reserved for IC doors.
+
+    Stock |wbuilding.CmdOpen|n registers a no-|w@|n match so |wopen|n would
+    collide with |wcommands.door_cmds.CmdOpenDoor|n. This subclass only matches
+    when the prefixed form is used (parser's |winclude_prefixes=True|n pass).
+
+    Usage:
+        @open <new exit> ... = <destination>
+
+    Same as Evennia; you can also use |wbuopen|n.
+    """
+
+    key = "@open"
+
+    def match(self, cmdname, include_prefixes=True):
+        if not include_prefixes:
+            return None, None
+        return super().match(cmdname, include_prefixes=include_prefixes)
+
+
 class CmdDestroy(Command):
     """
     Permanently delete an object. Asks for confirmation unless /force.
@@ -667,3 +763,250 @@ class CmdMatrixLink(Command):
 
         if matrix_id:
             caller.msg(f"Access Point ID assigned: |m{matrix_id}|n")
+
+
+def _resolve_exit_for_builder(caller, spec, room=None):
+    """
+    Resolve an exit from a direction keyword/alias in *room* (default: caller's location),
+    or #dbref anywhere.
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    if spec.startswith("#"):
+        from evennia.utils.search import search_object
+
+        res = search_object(spec)
+        return res[0] if res else None
+    from commands.door_cmds import find_exit_by_direction_in_room
+
+    loc = room if room is not None else caller.location
+    return find_exit_by_direction_in_room(loc, spec)
+
+
+class CmdDoor(Command):
+    """
+    Configure door / bioscan attributes on an exit in your current room (or by #dbref).
+
+    Usage:
+        @door <direction|#dbref> = basic
+        @door <direction|#dbref> = locked <key_tag>
+        @door <direction|#dbref> = bioscan faction <FACTION_KEY>
+        @door <direction|#dbref> = bioscan rank <FACTION_KEY> <rank#>
+        @door <direction|#dbref> = bioscan whitelist
+        @door <direction|#dbref> = rentable [cost]
+
+    Examples:
+        @door east = basic
+        @door east = locked key_medbay
+        @door east = bioscan faction IMP
+        @door east = bioscan rank IMP 3
+        @door east = rentable 500
+
+    For rentable doors, only mark the *outside* exit as rentable. Set the
+    inside exit as a basic door and pair both with @doorpair. Closing from
+    either side will auto-lock; opening from inside requires the code too.
+    """
+
+    key = "@door"
+    aliases = ["budoor"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Building"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if "=" not in args:
+            caller.msg(
+                "Usage: |w@door <direction|#exit> = basic|n | |wlocked <key_tag>|n | "
+                "|wbioscan faction <KEY>|n | |wbioscan rank <KEY> <#>|n | |wbioscan whitelist|n"
+            )
+            return
+        left, right = args.split("=", 1)
+        exit_spec = left.strip()
+        rest = right.strip()
+        if not exit_spec or not rest:
+            caller.msg("Invalid arguments.")
+            return
+
+        ex = _resolve_exit_for_builder(caller, exit_spec)
+        if not ex:
+            caller.msg("No matching exit found.")
+            return
+        if not hasattr(ex, "destination"):
+            caller.msg("That object is not an exit.")
+            return
+
+        tokens = rest.split()
+        mode = (tokens[0] or "").lower()
+
+        if mode == "basic":
+            ex.db.door = True
+            ex.db.door_open = False
+            ex.db.door_name = getattr(ex.db, "door_name", None) or "door"
+            ex.db.door_locked = False
+            ex.db.door_key_tag = None
+            ex.db.door_auto_close = int(getattr(ex.db, "door_auto_close", None) or 0)
+            ex.db.bioscan = False
+            ex.db.bioscan_type = "faction"
+            ex.db.bioscan_faction = ""
+            ex.db.bioscan_rank = 1
+            ex.db.bioscan_whitelist = []
+            caller.msg(f"Set |w{ex.key}|n as a basic door (closed).")
+            return
+
+        if mode == "locked":
+            if len(tokens) < 2:
+                caller.msg("Usage: |w@door <exit> = locked <key_tag>|n (tag category |wkey|n on key items).")
+                return
+            key_tag = tokens[1]
+            ex.db.door = True
+            ex.db.door_open = False
+            ex.db.door_name = getattr(ex.db, "door_name", None) or "door"
+            ex.db.door_locked = True
+            ex.db.door_key_tag = key_tag
+            ex.db.door_auto_close = int(getattr(ex.db, "door_auto_close", None) or 0)
+            ex.db.bioscan = False
+            caller.msg(f"Set |w{ex.key}|n as a locked door (key tag |w{key_tag}|n).")
+            return
+
+        if mode == "bioscan":
+            if len(tokens) < 2:
+                caller.msg(
+                    "Usage: |w@door <exit> = bioscan faction <KEY>|n or |wbioscan rank <KEY> <#>|n or |wbioscan whitelist|n"
+                )
+                return
+            sub = tokens[1].lower()
+            ex.db.door = True
+            ex.db.door_open = False
+            ex.db.door_locked = False
+            ex.db.door_name = getattr(ex.db, "door_name", None) or "door"
+            ex.db.bioscan = True
+            ex.db.bioscan_auto_close = int(getattr(ex.db, "bioscan_auto_close", None) or 8)
+            ex.db.bioscan_sound_fail = True
+            if sub == "faction":
+                if len(tokens) < 3:
+                    caller.msg("Specify faction key, e.g. |w@door east = bioscan faction IMP|n")
+                    return
+                ex.db.bioscan_type = "faction"
+                ex.db.bioscan_faction = tokens[2].upper()
+                ex.db.bioscan_rank = 1
+                caller.msg(f"Bioscan door on |w{ex.key}|n: faction |w{ex.db.bioscan_faction}|n.")
+                return
+            if sub == "rank":
+                if len(tokens) < 4:
+                    caller.msg("Usage: |w@door <exit> = bioscan rank <FACTION_KEY> <rank#>|n")
+                    return
+                try:
+                    rnk = int(tokens[3])
+                except ValueError:
+                    caller.msg("Rank must be a number.")
+                    return
+                ex.db.bioscan_type = "rank"
+                ex.db.bioscan_faction = tokens[2].upper()
+                ex.db.bioscan_rank = rnk
+                caller.msg(
+                    f"Bioscan door on |w{ex.key}|n: |w{ex.db.bioscan_faction}|n rank >= {rnk}."
+                )
+                return
+            if sub == "whitelist":
+                ex.db.bioscan_type = "whitelist"
+                ex.db.bioscan_whitelist = []
+                ex.db.bioscan_faction = ""
+                caller.msg(
+                    f"Bioscan door on |w{ex.key}|n: whitelist (empty). Add character ids to |wbioscan_whitelist|n via @set."
+                )
+                return
+            caller.msg("Unknown bioscan mode. Use |wfaction|n, |wrank|n, or |wwhitelist|n.")
+            return
+
+        if mode == "rentable":
+            cost = 0
+            if len(tokens) >= 2:
+                try:
+                    cost = int(tokens[1].replace(",", ""))
+                except ValueError:
+                    caller.msg("Optional cost must be a number. e.g. |w@door east = rentable 500|n")
+                    return
+            ex.db.door = True
+            ex.db.door_open = False
+            ex.db.door_locked = True
+            ex.db.door_name = getattr(ex.db, "door_name", None) or "apartment door"
+            ex.db.door_key_tag = None
+            ex.db.door_auto_close = 0
+            ex.db.bioscan = False
+            ex.db.bioscan_type = "faction"
+            ex.db.bioscan_faction = ""
+            ex.db.rentable = True
+            ex.db.rent_cost = cost
+            ex.db.rent_tenant_id = None
+            ex.db.rent_tenant_name = None
+            ex.db.rent_expires = None
+            ex.db.rent_master_code = None
+            ex.db.rent_secondary_codes = []
+            cost_str = f" ({cost:,} script/week)" if cost else " (no cost set — use @rentset to set cost)"
+            caller.msg(f"Set |w{ex.key}|n as a rentable apartment door{cost_str}.")
+            return
+
+        caller.msg("Unknown type. Use |wbasic|n, |wlocked|n, |wbioscan|n, or |wrentable|n.")
+
+
+class CmdDoorPair(Command):
+    """
+    Link two exits as paired doors (opening/closing one syncs the other).
+
+    Usage:
+        @doorpair <exit1> = <exit2>
+
+    Each side can be a direction (from your current room) or #dbref of an exit.
+    If one side is only in the *other* room (typical apartment), stand in either
+    room and use both directions — e.g. |w@doorpair south = north|n from outside
+    resolves |wsouth|n here and |wnorth|n in the room across |wsouth|n.
+    """
+
+    key = "@doorpair"
+    aliases = ["budoorpair"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Building"
+
+    def func(self):
+        caller = self.caller
+        args = (self.args or "").strip()
+        if "=" not in args:
+            caller.msg("Usage: |w@doorpair <direction|#dbref> = <direction|#dbref>|n")
+            return
+        left, right = args.split("=", 1)
+        left_spec, right_spec = left.strip(), right.strip()
+        ex1 = _resolve_exit_for_builder(caller, left_spec)
+        ex2 = _resolve_exit_for_builder(caller, right_spec)
+        # Other side of a doorway is usually a different room — resolve missing exit there.
+        if ex1 and not ex2 and getattr(ex1, "destination", None):
+            ex2 = _resolve_exit_for_builder(caller, right_spec, room=ex1.destination)
+        if ex2 and not ex1 and getattr(ex2, "destination", None):
+            ex1 = _resolve_exit_for_builder(caller, left_spec, room=ex2.destination)
+        if not ex1 or not ex2:
+            caller.msg(
+                "Could not resolve one or both exits. "
+                "Use directions from your room, or |w#dbref|n for the far exit, "
+                "or |w@doorpair south = north|n from outside (north = return exit inside)."
+            )
+            return
+        if not hasattr(ex1, "destination") or not hasattr(ex2, "destination"):
+            caller.msg("Both sides must be exits.")
+            return
+        if ex1.id == ex2.id:
+            caller.msg("Cannot pair an exit with itself.")
+            return
+
+        ex1.db.door_pair = ex2.id
+        ex2.db.door_pair = ex1.id
+        for ex in (ex1, ex2):
+            try:
+                del ex.ndb._door_pair_obj
+            except Exception:
+                pass
+        caller.msg(
+            f"Door pair: |w{ex1.key}|n (#{ex1.id}) in {ex1.location.key if ex1.location else '?'} "
+            f"<-> |w{ex2.key}|n (#{ex2.id}) in {ex2.location.key if ex2.location else '?'}. "
+            "Open/close/verify syncs both sides."
+        )

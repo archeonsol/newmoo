@@ -3,11 +3,12 @@ EvMenu flow for corpse cyberware salvage.
 """
 
 from world.medical.salvage import get_assessment_entries, start_extraction
+from world.theme_colors import COMBAT_COLORS as CC
 
 
 _W = 58
 _BORDER_COLOR = "|x"
-_HEADER_COLOR = "|c"
+_HEADER_COLOR = CC["parry"]
 _LABEL_COLOR = "|w"
 _DIM = "|x"
 _N = "|n"
@@ -127,7 +128,8 @@ def node_salvage_result(caller, raw_string, **kwargs):
     ok, err = start_extraction(caller, corpse, cw)
     if not ok:
         caller.msg(err)
-    return node_salvage_main(caller, raw_string, target=corpse)
+        return node_salvage_main(caller, raw_string, target=corpse)
+    return "node_salvage_exit"
 
 
 def node_salvage_exit(caller, raw_string, **kwargs):

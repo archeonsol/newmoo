@@ -31,8 +31,8 @@ HELP_ENTRY_DICTS = [
         "category": "General",
         "text": """
             Pronoun and name tokens let you write one message that adapts to who sees it and to
-            the wearer's/target's pronouns. They work in |wtease|n messages, |wdescribe_bodypart|n
-            text, |wlp|n/|wpose|n (room pose), and clothing |wworndesc|n.
+            the wearer's/target's pronouns. They work in |wtease|n messages, |w@body|n
+            part lines, |wlp|n/|wpose|n (room pose), and clothing |wworndesc|n.
 
             # Wearer / first person (doer)
 
@@ -67,7 +67,7 @@ HELP_ENTRY_DICTS = [
 
             # Examples
 
-            describe_bodypart head = $S has a scar across $p brow.
+            @body head = $S has a scar across $p brow.
             lp leaning on the wall, $p arms crossed.
             tease message: $N .flash $p $I at $T and .grin.
         """,
@@ -140,6 +140,75 @@ HELP_ENTRY_DICTS = [
             There is also a discord channel for chatting - connect using the
             following link: https://discord.gg/AJJpcRUhtF
 
+        """,
+    },
+    {
+        "key": "authorization",
+        "aliases": [
+            "authorizations",
+            "authorize",
+            "deauthorize",
+            "vehicle authorization",
+            "vehicle permissions",
+            "biometric authorization",
+        ],
+        "category": "Vehicles",
+        "text": """
+            Vehicle biometrics let the owner share access with people they recognize. Each grant uses
+            a |wpermission keyword|n (below). You must |wrecognize|n someone (|wrecog|n) before you can
+            authorize them.
+
+            # Permission keywords
+
+            Use these exact words in |wauthorize|n and |wdeauthorize|n:
+
+            |wunlock|n
+                Lock and unlock the vehicle (doors / immobilizer).
+
+            |wenter|n
+                Enter an enclosed vehicle, or mount a motorcycle.
+
+            |wstart|n
+                Start the engine.
+
+            |wdrive|n
+                Drive or fly the vehicle.
+
+            |wmodify|n
+                Swap parts, paint, and customize (where that work is allowed on this vehicle).
+
+            |wauthorize|n
+                Add or remove other people’s permissions (delegate). Does not transfer ownership.
+
+            |wfull|n
+                All of the above—same as full access, except only the owner can transfer the vehicle.
+
+            # authorize
+
+            |wauthorize <name> to <permission> on <vehicle>|n
+                One or more permissions, comma-separated, e.g. |wunlock, enter, start|n.
+
+            |wauthorize <name> full on <vehicle>|n
+                Grants |wfull|n to that person.
+
+            From inside a vehicle cabin you can use the vehicle’s name, |where|n, or no argument where
+            the command already targets “this” vehicle.
+
+            # deauthorize
+
+            |wdeauthorize <name> from <vehicle>|n
+                Revokes every permission you gave them.
+
+            |wdeauthorize <name> from <permission> on <vehicle>|n
+                Revokes only the listed permission(s).
+
+            # authorizations
+
+            |wauthorizations <vehicle>|n
+                Shows security status and who has which permissions. From inside the vehicle you can
+                omit the name or use |where|n.
+
+            Aliases: |wauths|n, |wvehicle access|n.
         """,
     },
     # -------------------------------------------------------------------------

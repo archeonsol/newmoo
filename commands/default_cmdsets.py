@@ -25,6 +25,8 @@ from evennia.commands.default.account import (
 )
 from evennia.utils import search, utils, logger
 
+from commands.base_cmds import CmdGo, Command as _BaseCommand
+
 
 class SplinterPodCmdSet(CmdSet):
     """
@@ -102,6 +104,29 @@ class GrappledCmdSet(CmdSet):
         self.add(CmdNoMatchGrappled())
 
 
+class GrapplingCmdSet(CmdSet):
+    """
+    When character is holding someone in a grapple: only look, attack (strangle),
+    grapple/letgo, stop walking, and exits (movement). Hands are occupied.
+    Added/removed by world.combat.grapple when grappling state changes.
+    """
+    key = "GrapplingCmdSet"
+    priority = 180
+
+    def at_cmdset_creation(self):
+        from commands.base_cmds import CmdLook, CmdStopWalking
+        from commands.combat_cmds import CmdGrapplingAttack, CmdGrapple, CmdLetGo
+        from commands.death_cmds import CmdNoMatchGrappling
+
+        self.add(CmdLook())
+        self.add(CmdGrapplingAttack())
+        self.add(CmdGrapple())
+        self.add(CmdLetGo())
+        self.add(CmdStopWalking())
+        self.add(CmdGo())
+        self.add(CmdNoMatchGrappling())
+
+
 class CharacterCmdSet(default_cmds.CharacterCmdSet):
     """
     The `CharacterCmdSet` contains general in-game commands like `look`,
@@ -116,11 +141,16 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         """
         super().at_cmdset_creation()
 
-        from commands.base_cmds import CmdLook, CmdExamine, CmdGet, CmdPut, CmdStopWalking, CmdOperate
+        # ExtendedRoom detail/state commands: `look <detail>`, `detail`, `roomdesc`, `roomstate`, `gametime`
+        from evennia.contrib.grid.extended_room.extended_room import ExtendedRoomCmdSet
+        self.add(ExtendedRoomCmdSet)
+
+        from commands.base_cmds import CmdLook, CmdExamine, CmdGet, CmdPut, CmdStopWalking, CmdStop
+        from commands.stealth_cmds import CmdHide, CmdSneak, CmdSearch, CmdUnhide
+        from commands.follow_cmds import CmdFollow, CmdShadow, CmdEscort
         from commands.matrix_cmds import CmdMacl
         from commands.combat_cmds import (
             CmdAttack,
-            CmdStop,
             CmdFlee,
             CmdStance,
             CmdExecute,
@@ -128,40 +158,118 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdLetGo,
             CmdResist,
         )
-        from commands.range_cmds import CmdAdvance, CmdRetreat, CmdRange
         from commands.cover_commands import CmdCover, CmdLeaveCover, CmdPeek, CmdSuppress
         from commands.scavenge_cmds import CmdScavenge, CmdSkin, CmdButcher, CmdSever, CmdLoot
         from commands.salvage_cmds import CmdSalvage
-        from commands.medical_cmds import CmdHt, CmdPatient, CmdUse, CmdApply, CmdStabilize, CmdSedate, CmdWakePatient, CmdSurgery, CmdDefib
+        from commands.medical_cmds import CmdHt, CmdPatient, CmdApply, CmdStabilize, CmdSedate, CmdWakePatient, CmdSurgery, CmdDefib
+        from commands.use_cmds import CmdUse
         from commands.survival_cmds import CmdEat, CmdDrink
         from commands.inventory_cmds import CmdWield, CmdUnwield, CmdFreehands, CmdInventory, CmdReload, CmdUnload, CmdCheckAmmo, CmdWear, CmdRemove, CmdStrip, CmdFrisk
         from commands.crafting_cmds import CmdSurvey, CmdRepairArmor, CmdTailor
+        from commands.alchemy_cmds import (
+            CmdAlchemyCheck,
+            CmdAnalyze,
+            CmdBrew,
+            CmdClaim,
+            CmdCollect,
+            CmdDose,
+            CmdLoad,
+            CmdRefine,
+            CmdTend,
+        )
         from commands.media_cmds import CmdCamera, CmdTuneTelevision, CmdLabel
-        from commands.roleplay_cmds import CmdTease, CmdDescribeBodypart, CmdDescribeMeAs, CmdBody, CmdVoice, CmdSmellSet, CmdLanguage, CmdSdesc, CmdPending, CmdLookPlace, CmdTempPlace, CmdSleepPlace, CmdWakeMsg, CmdFlatlineMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch, CmdCount, CmdRecog, CmdMemorize, CmdMemory, CmdSmell
+        from commands.trust_cmds import CmdTrust, CmdUntrust, CmdTrusted
+        from commands.roleplay_cmds import CmdTease, CmdDescribeMeAs, CmdBody, CmdVoice, CmdSmellSet, CmdLanguage, CmdSdesc, CmdPending, CmdLookPlace, CmdTempPlace, CmdSleepPlace, CmdWakeMsg, CmdFlatlineMsg, CmdSetPlace, CmdPose, CmdPronoun, CmdEmote, CmdNoMatch, CmdCount, CmdRecog, CmdMemorize, CmdMemory, CmdSmell
+        from commands.skintone_cmd import CmdSkintone
         from commands.roleplay_cmds import CmdSit, CmdLieOnTable, CmdGetOffTable
         from commands.performance_cmds import CmdPerformance
-        from typeclasses.perfume import CmdUsePerfume
         from commands.death_cmds import CmdGoOOC, CmdReturnIC, CmdEnterPod, CmdLeavePod, CmdSplinterMe
-        from commands.vehicle_cmds import CmdEnterVehicle, CmdExitVehicle, CmdStartEngine, CmdStopEngine, CmdShutoffEngine, CmdDrive, CmdVehicleStatus, CmdRepairPart
+        from commands.lock_cmds import CmdLock, CmdUnlock
+        from commands.vehicle_cmds import (
+            CmdEnterVehicle,
+            CmdExitVehicle,
+            CmdMount,
+            CmdDismount,
+            CmdControlVehicle,
+            CmdReleaseControls,
+            CmdHaltVehicleMovement,
+            CmdStartEngine,
+            CmdStopEngine,
+            CmdShutoffEngine,
+            CmdDrive,
+            CmdFly,
+            CmdTakeoff,
+            CmdLand,
+            CmdEvaluateVehicle,
+            CmdRepairPart,
+            CmdRefuel,
+            CmdSwapVehiclePart,
+            CmdPaintVehicle,
+            CmdCustomizeVehicle,
+        )
+        from commands.vehicle_security_cmds import (
+            CmdAuthorize,
+            CmdDeauthorize,
+            CmdAuthorizations,
+            CmdTransferVehicle,
+            CmdBreakIn,
+            CmdHotwire,
+        )
+        from commands.vehicle_combat_cmds import (
+            CmdFire,
+            CmdRam,
+            CmdManGunner,
+            CmdLeaveGunner,
+            CmdEject,
+            CmdInstallVehicleWeapon,
+            CmdUninstallVehicleWeapon,
+            CmdReloadVehicleWeapon,
+            CmdDislodgeHarpoon,
+        )
+        from commands.tunnel_cmds import CmdAutopilot
         from commands.matrix_cmds import CmdJackIn, CmdJackOut, CmdRoute
         from commands.network_cmds import CmdNetworkWho, CmdNetworkSend, CmdNetworkNtag
         from commands.handset_cmds import CmdHandset
         from commands.cyberware_cmds import CmdCyberware, CmdSkinWeave, CmdSurge, CmdClaws
         from commands.staff_cmds import (
             CmdGiveXp, CmdStaffSheet, CmdStaffSetStat, CmdStaffSetSkill,
-            CmdCreateItem, CmdTypeclasses, CmdSpawnItem, CmdSpawnArmor, CmdSpawnVehicle, CmdSpawnMedical, CmdSpawnOR,
+            CmdCreateItem, CmdTypeclasses, CmdSpawnItem, CmdSpawnArmor, CmdSpawnVehicle, CmdSpawnMedical, CmdSpawnOR, CmdSpawnCyberwareStation,
             CmdSpawnCreature, CmdCreatureSet, CmdDespawn, CmdNpc, CmdMakeNpc, CmdNpcSet, CmdSpawnPerfume, CmdBadSmellRoom,
             CmdGoto, CmdGotoRoom, CmdSummon, CmdSetVoid, CmdVoid, CmdRelease, CmdBoot, CmdFind, CmdAnnounce, CmdRestore, CmdDebugKill,
             CmdSpawnSeat, CmdSpawnBed, CmdSpawnPod, CmdSpawnDiveRig, CmdSpawnCamera, CmdSpawnTelevision,
-            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling
+            CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling, CmdBuffDebug, CmdClimate,
+            CmdMigrateTraits, CmdGrantScript,
         )
+        from commands.staff_vehicle_cmds import (
+            CmdVmod,
+            CmdVmodtypes,
+            CmdVrepair,
+            CmdVweaponInstall,
+            CmdVweaponKeys,
+            CmdVweaponRemove,
+        )
+        from commands.rpg.faction_cmds import CmdFaction
+        from commands.economy_cmds import (
+            CmdPay, CmdDropMoney, CmdShopList, CmdBuy, CmdWire, CmdWireConfirm,
+            CmdBankMenu, CmdShopSet, CmdShopItem, CmdSpawnBank, CmdTagBank,
+        )
+        from commands.rentable_door_cmds import CmdRent, CmdPayRent, CmdPush, CmdDoorCode as CmdProgramDoor, CmdRentSet, CmdCheckDoor
         from commands.sheet_cmds import CmdStats
         from commands.player_cmds import CmdXp
         from commands.notes_cmds import CmdAddNote, CmdNotes, CmdNoteSearch
         from commands.builder_commands import (
             CmdTag, CmdHere, CmdListCmds, CmdCloneSpawn, CmdDig, CmdMatrixDig, CmdDesc,
-            CmdSetAttr, CmdName, CmdOpen, CmdDestroy, CmdMatrixLink,
+            CmdSetAttr, CmdName, CmdOpen, CmdAtOpen, CmdDestroy, CmdMatrixLink, CmdDoor, CmdDoorPair,
         )
+        from commands.city_grid_cmds import (
+            CmdAirRoom,
+            CmdCityCoord,
+            CmdCityLevel,
+            CmdCityMap,
+            CmdShaftConnect,
+        )
+        from commands.freight_cmds import CmdFreight
+        from commands.bulkhead_cmds import CmdBulkheadAdmin, CmdBulkheadStatus, CmdSeal, CmdUnseal
         try:
             from evennia.commands.default.general import CmdGet as DefaultCmdGet
         except ImportError:
@@ -172,6 +280,18 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
 
         # Use our custom CmdLook instead of Evennia's default
         self.remove(default_general.CmdLook)
+        # Evennia's building CmdOpen matches plain "open" via prefix strip; use CmdAtOpen
+        # so only |w@open|n matches building, and |wopen|n stays the IC door command.
+        from evennia.commands.default import building as default_building
+
+        self.remove(default_building.CmdOpen)
+        self.add(CmdAtOpen())
+        from commands.door_cmds import CmdOpenDoor, CmdCloseDoor, CmdVerify, CmdUnlockDoor
+
+        self.add(CmdOpenDoor())
+        self.add(CmdCloseDoor())
+        self.add(CmdVerify())
+        self.add(CmdUnlockDoor())
         # Replace Evennia's built-in `who` with our `@who`.
         try:
             from evennia.commands.default.account import CmdWho as DefaultCmdWho
@@ -179,7 +299,16 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         except Exception:
             pass
         self.add(CmdLook())
+        self.add(CmdHide())
+        self.add(CmdSneak())
+        self.add(CmdSearch())
+        self.add(CmdUnhide())
+        self.add(CmdFollow())
+        self.add(CmdShadow())
+        self.add(CmdEscort())
         self.add(CmdStopWalking())
+        self.add(CmdStop())
+        self.add(CmdGo())
         self.add(CmdScavenge())
         self.add(CmdSkin())
         self.add(CmdButcher())
@@ -198,9 +327,6 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdGrapple())
         self.add(CmdLetGo())
         self.add(CmdResist())
-        self.add(CmdAdvance())
-        self.add(CmdRetreat())
-        self.add(CmdRange())
         self.add(CmdCover())
         self.add(CmdLeaveCover())
         self.add(CmdPeek())
@@ -233,17 +359,36 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             self.remove(DefaultCmdGet)
             self.add(CmdGet())
         self.add(CmdPut())
-        self.add(CmdOperate())
         self.add(CmdHandset())
         self.add(CmdMacl())
         self.add(CmdCamera())
         self.add(CmdTuneTelevision())
         self.add(CmdTailor())
+        self.add(CmdCollect())
+        self.add(CmdLoad())
+        self.add(CmdBrew())
+        self.add(CmdTend())
+        self.add(CmdRefine())
+        self.add(CmdAlchemyCheck())
+        self.add(CmdClaim())
+        self.add(CmdAnalyze())
+        self.add(CmdDose())
         self.add(CmdTease())
-        self.add(CmdUsePerfume())
         self.add(CmdXp())
-        self.add(CmdDescribeBodypart())
+        self.add(CmdPay())
+        self.add(CmdDropMoney())
+        self.add(CmdShopList())
+        self.add(CmdBuy())
+        self.add(CmdRent())
+        self.add(CmdPayRent())
+        self.add(CmdPush())
+        self.add(CmdProgramDoor())
+        self.add(CmdCheckDoor())
+        self.add(CmdWire())
+        self.add(CmdWireConfirm())
+        self.add(CmdBankMenu())
         self.add(CmdDescribeMeAs())
+        self.add(CmdSkintone())
         self.add(CmdBody())
         self.add(CmdVoice())
         self.add(CmdSmellSet())
@@ -263,6 +408,9 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdEmote())
         self.add(CmdCount())
         self.add(CmdRecog())
+        self.add(CmdTrust())
+        self.add(CmdUntrust())
+        self.add(CmdTrusted())
         self.add(CmdNoMatch())
         self.add(CmdPerformance())
         self.add(CmdExamine())
@@ -278,21 +426,53 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdDesc())
         self.add(CmdSetAttr())
         self.add(CmdName())
-        self.add(CmdOpen())
+        self.add(CmdOpen())  # buopen
         self.add(CmdDestroy())
         self.add(CmdMatrixLink())
+        self.add(CmdDoor())
+        self.add(CmdDoorPair())
         self.add(CmdEnterPod())
         self.add(CmdSplinterMe())
         self.add(SplinterPodCmdSet())  # CmdLeavePod here so it beats exits (priority 110)
         self.add(CombatGrappleCmdSet())  # grapple/letgo/resist above exits (priority 120)
         self.add(CmdEnterVehicle())
         self.add(CmdExitVehicle())
+        self.add(CmdMount())
+        self.add(CmdDismount())
+        self.add(CmdLock())
+        self.add(CmdUnlock())
+        self.add(CmdControlVehicle())
+        self.add(CmdReleaseControls())
+        self.add(CmdHaltVehicleMovement())
         self.add(CmdStartEngine())
         self.add(CmdStopEngine())
         self.add(CmdShutoffEngine())
         self.add(CmdDrive())
-        self.add(CmdVehicleStatus())
+        self.add(CmdFly())
+        self.add(CmdTakeoff())
+        self.add(CmdLand())
+        self.add(CmdAutopilot())
+        self.add(CmdEvaluateVehicle())
         self.add(CmdRepairPart())
+        self.add(CmdRefuel())
+        self.add(CmdSwapVehiclePart())
+        self.add(CmdPaintVehicle())
+        self.add(CmdCustomizeVehicle())
+        self.add(CmdAuthorize())
+        self.add(CmdDeauthorize())
+        self.add(CmdAuthorizations())
+        self.add(CmdTransferVehicle())
+        self.add(CmdBreakIn())
+        self.add(CmdHotwire())
+        self.add(CmdFire())
+        self.add(CmdRam())
+        self.add(CmdManGunner())
+        self.add(CmdLeaveGunner())
+        self.add(CmdEject())
+        self.add(CmdInstallVehicleWeapon())
+        self.add(CmdUninstallVehicleWeapon())
+        self.add(CmdReloadVehicleWeapon())
+        self.add(CmdDislodgeHarpoon())
         self.add(CmdJackIn())
         self.add(CmdJackOut())
         self.add(CmdNetworkWho())
@@ -315,12 +495,26 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSpawnArmor())
         self.add(CmdSpawnVehicle())
         self.add(CmdDamageVehicle())
+        self.add(CmdVweaponKeys())
+        self.add(CmdVweaponInstall())
+        self.add(CmdVweaponRemove())
+        self.add(CmdVmod())
+        self.add(CmdVmodtypes())
+        self.add(CmdVrepair())
         self.add(CmdSpawnMedical())
         self.add(CmdSpawnOR())
+        self.add(CmdSpawnCyberwareStation())
         self.add(CmdSpawnPerfume())
+        self.add(CmdShopSet())
+        self.add(CmdShopItem())
+        self.add(CmdSpawnBank())
+        self.add(CmdTagBank())
+        self.add(CmdRentSet())
+        self.add(CmdGrantScript())
         self.add(CmdStaffSheet())
         self.add(CmdStaffSetStat())
         self.add(CmdStaffSetSkill())
+        self.add(CmdMigrateTraits())
         self.add(CmdMakeNpc())
         self.add(CmdNpcSet())
         self.add(CmdGoto())
@@ -347,6 +541,58 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdMusic())
         self.add(CmdCyberware())
         self.add(CmdProfiling())
+        self.add(CmdBuffDebug())
+        self.add(CmdClimate())
+        self.add(CmdFaction())
+        self.add(CmdCityMap())
+        self.add(CmdCityLevel())
+        self.add(CmdCityCoord())
+        self.add(CmdAirRoom())
+        self.add(CmdShaftConnect())
+        self.add(CmdFreight())
+        self.add(CmdSeal())
+        self.add(CmdUnseal())
+        self.add(CmdBulkheadStatus())
+        self.add(CmdBulkheadAdmin())
+        # Whoosh-powered full-text help search
+        self.add(CmdHelpSearch())
+
+
+class CmdHelpSearch(_BaseCommand):
+    """
+    Search help entries using full-text matching.
+
+    Usage:
+      helpsearch <query>
+      hs <query>
+
+    Returns ranked help topics that match the query, even if
+    the exact command name is not known.
+    """
+    key = "helpsearch"
+    aliases = ["hs"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def func(self):
+        query = (self.args or "").strip()
+        if not query:
+            self.caller.msg("Usage: helpsearch <query>")
+            return
+        try:
+            from world.help_search import search_help
+            results = search_help(query, limit=7)
+        except Exception:
+            results = []
+        if not results:
+            self.caller.msg(f"No help entries found for '{query}'.")
+            return
+        lines = [f"|wHelp search results for:|n {query}"]
+        for hit in results:
+            lines.append(f"  |w{hit['key']}|n ({hit['category']})")
+        lines.append("\nUse |whelp <topic>|n to read an entry.")
+        self.caller.msg("\n".join(lines))
+
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
     """
@@ -391,7 +637,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(StaffCharDelete())
         from commands.sheet_cmds import CmdStats
         from commands.staff_cmds import CmdNextNote, CmdGmViewNotes
-        from commands.death_cmds import CmdGoLight, CmdGoShard
+        from commands.death_cmds import CmdGoLight, CmdGoShard, CmdReturnIC
         from commands.multipuppet_cmds import CmdAddPuppet, CmdPuppetList, CmdPuppetSlot
         from commands.channel_cmds import CmdChannelSub, CmdChannelUnsub, CmdHelpReply, CmdHelp, CmdOocName
         from commands.media_cmds import CmdTuneTelevision, CmdTelevisionApp, CmdLabel
@@ -401,6 +647,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         self.add(CmdGmViewNotes())
         self.add(CmdGoLight())
         self.add(CmdGoShard())
+        self.add(CmdReturnIC())
         self.add(CmdAddPuppet())
         self.add(CmdPuppetList())
         self.add(CmdPuppetSlot())

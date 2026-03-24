@@ -43,6 +43,12 @@ class MatrixAvatar(RoleplayMixin, FurnitureMixin, DefaultCharacter):
         proxy_router (Router): Optional proxy tunnel router (persists across sessions)
     """
 
+    def at_post_puppet(self, **kwargs):
+        """Same as DefaultCharacter puppet feedback but no room-wide 'has entered the game' line."""
+        from typeclasses.characters import _puppet_become_and_look_no_room_broadcast
+
+        _puppet_become_and_look_no_room_broadcast(self)
+
     def at_object_creation(self):
         """Called when avatar is first created."""
         super().at_object_creation()

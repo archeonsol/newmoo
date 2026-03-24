@@ -5,6 +5,8 @@ Patient must be lying on an operating table; surgeon runs the surgery <organ> co
 from evennia.utils import delay
 import time
 
+from world.theme_colors import MEDICAL_COLORS as MC
+
 # Delays in seconds (longer than defib: ~5, 12, 20, 28 then finish)
 SURGERY_MSG1, SURGERY_MSG2, SURGERY_MSG3, SURGERY_MSG4 = 5, 12, 20, 28
 
@@ -199,14 +201,9 @@ def _surgery_finish(ids, organ_key):
 
     names = ORGAN_INFO.get(organ_key, (organ_key,) * 4)
     difficulty = _splint_difficulty(organ_key) + 8 if is_bone_case else _organ_difficulty(severity)
-    now_ts = time.time()
-    sedated = (
-        float(getattr(target.db, "sedated_until", 0.0) or 0.0) > now_ts
-        or (
-            bool(getattr(target.db, "medical_unconscious", False))
-            and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts
-        )
-    )
+    from world.medical import is_sedated_for_surgery
+
+    sedated = is_sedated_for_surgery(target)
     if not sedated:
         # Awake surgery is much harder due to movement/pain response.
         difficulty += 18
@@ -215,7 +212,7 @@ def _surgery_finish(ids, organ_key):
     success_level, _ = _medicine_roll(caller, max(0, difficulty - table_mod), table_mod)
 
     if success_level == 0:
-        caller.msg("|rYou do what you can. The damage is too deep, or your hands betray you. The organ does not hold. They will need more — or they will not make it.|n")
+        caller.msg(f"{MC['critical']}You do what you can. The damage is too deep, or your hands betray you. The organ does not hold. They will need more — or they will not make it.|n")
         if target != caller and target.location and hasattr(target.location, "contents_get"):
             for v in target.location.contents_get(content_type="character"):
                 if v in (caller, target):
@@ -228,6 +225,15 @@ def _surgery_finish(ids, organ_key):
 
     injuries = getattr(target.db, "injuries", None) or []
     if is_bone_case:
+        from world.medical.limb_trauma import body_part_to_limb_slot, is_limb_destroyed
+        for inj in injuries:
+            if inj.get("fracture") != organ_key or (inj.get("hp_occupied", 0) or 0) <= 0:
+                continue
+            slot = body_part_to_limb_slot((inj.get("body_part") or "").strip())
+            if slot and is_limb_destroyed(target, slot):
+                caller.msg(f"{MC['critical']}The bone won't hold hardware. The limb is pulp. They need chrome — not plates.|n")
+                return
+            break
         target.db.fractures = [b for b in fractures if b != organ_key]
         target.db.splinted_bones = [b for b in (target.db.splinted_bones or []) if b != organ_key]
         for i in injuries:
@@ -264,14 +270,14 @@ def _surgery_finish(ids, organ_key):
     target.db.injuries = injuries
     rebuild_derived_trauma_views(target)
 
-    caller.msg("|gThe organ holds. You have done what you could. They may yet live.|n")
+    caller.msg(f"{MC['stable']}The organ holds. You have done what you could. They may yet live.|n")
     if target != caller:
-        target.msg("|gYou drift back. The pain is still there, but the worst has passed. Someone has pulled you through.|n")
+        target.msg(f"{MC['stable']}You drift back. The pain is still there, but the worst has passed. Someone has pulled you through.|n")
         if target.location and hasattr(target.location, "contents_get"):
             for v in target.location.contents_get(content_type="character"):
                 if v in (caller, target):
                     continue
-                v.msg("|g%s finishes the procedure. %s lies still on the table — alive.|n" % (
+                v.msg(f"{MC['stable']}%s finishes the procedure. %s lies still on the table — alive.|n" % (
                     caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name,
                     target.get_display_name(v) if hasattr(target, "get_display_name") else target.name,
                 ))
@@ -291,26 +297,36 @@ def start_surgery_sequence(caller, target, table, organ_key):
         return False, "They are not on the operating table."
     if caller.location != table.location:
         return False, "You must be at the operating table to perform surgery."
+    if caller != target:
+        from world.rpg.trust import check_trust_or_incapacitated
+
+        ok, _reason = check_trust_or_incapacitated(target, caller, "operate", operate_strict=True)
+        if not ok:
+            return False, "They don't trust you enough for that. They need to @trust you to operate."
     from world.medical import rebuild_derived_trauma_views
+    from world.medical.limb_trauma import body_part_to_limb_slot, is_limb_destroyed
     rebuild_derived_trauma_views(target)
     organ_damage = target.db.organ_damage or {}
     fractures = target.db.fractures or []
     if organ_damage.get(organ_key, 0) <= 0 and organ_key not in fractures:
         return False, "That target does not require surgery."
+    if organ_key in fractures:
+        for inj in (target.db.injuries or []):
+            if inj.get("fracture") != organ_key or (inj.get("hp_occupied", 0) or 0) <= 0:
+                continue
+            slot = body_part_to_limb_slot((inj.get("body_part") or "").strip())
+            if slot and is_limb_destroyed(target, slot):
+                return False, "That limb is shattered beyond repair. They need a chrome replacement, not pinning."
+            break
     from world.medical.medical_treatment import ORGAN_INFO
     if organ_key not in ORGAN_SURGERY_NARRATIVES and organ_key not in BONE_SURGERY_NARRATIVES:
         return False, "No surgical procedure for that organ."
 
-    now_ts = time.time()
-    sedated = (
-        float(getattr(target.db, "sedated_until", 0.0) or 0.0) > now_ts
-        or (
-            bool(getattr(target.db, "medical_unconscious", False))
-            and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts
-        )
-    )
+    from world.medical import is_sedated_for_surgery
+
+    sedated = is_sedated_for_surgery(target)
     if not sedated and hasattr(caller, "msg"):
-        caller.msg("|yWarning: patient is not sedated. The surgery will be harder.|n")
+        caller.msg(f"{MC['compensated']}Warning: patient is not sedated. The surgery will be harder.|n")
 
     caller.db.surgery_in_progress = True
     ids = (caller.id, target.id, table.id)

@@ -159,6 +159,50 @@ class StaffPendingScript(Script):
         self.db.pending = []
 
 
+class GlobalClimateScript(Script):
+    """
+    Global weather + time-of-day for street-room ambient prose (per-district matrix + overrides).
+    db.weather, db.time_of_day, db.time_auto_utc (bool: follow real UTC when True),
+    db.line_overrides (dict: \"district:weather:time\" -> text).
+    """
+
+    def at_script_creation(self):
+        from world.global_climate import GLOBAL_CLIMATE_KEY, TIMES, WEATHERS, utc_time_phase
+
+        self.key = GLOBAL_CLIMATE_KEY
+        self.interval = 0
+        self.repeats = 0
+        self.persistent = True
+        w = getattr(self.db, "weather", None)
+        self.db.weather = w if w in WEATHERS else "fog"
+        if getattr(self.db, "time_auto_utc", None) is None:
+            self.db.time_auto_utc = True
+        t = getattr(self.db, "time_of_day", None)
+        if t not in TIMES:
+            self.db.time_of_day = utc_time_phase()
+        if not isinstance(getattr(self.db, "line_overrides", None), dict):
+            self.db.line_overrides = {}
+
+
+class AddictionWithdrawalScript(Script):
+    """
+    Every 30 minutes: addiction withdrawal onset, recovery steps, echoes.
+    """
+
+    def at_script_creation(self):
+        self.key = "addiction_withdrawal"
+        self.interval = 1800
+        self.repeats = 0
+        self.persistent = True
+
+    def at_repeat(self):
+        from world.profiling import timed_tick
+        from world.alchemy.addiction import tick_online_characters
+
+        with timed_tick("addiction_withdrawal", self.interval):
+            tick_online_characters()
+
+
 class HandsetMessageCleanupScript(Script):
     """
     Global cleanup: prune handset message buffers to last 24 hours.

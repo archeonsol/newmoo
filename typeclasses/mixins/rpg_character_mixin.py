@@ -27,8 +27,8 @@ class RPGCharacterMixin:
         '<stat>_display' identifier, e.g. 'charisma_display'.
 
         Note: buffs.check() can push the result above 150. This is
-        intentional — cyberware and other buffs are allowed to exceed
-        the natural cap.
+        intentional — cyberware, drugs, and other buffs are allowed to exceed
+        the natural cap (all use BuffHandler ``Mod`` lists).
         """
         from world.rpg.xp import _stat_level
 
@@ -41,7 +41,6 @@ class RPGCharacterMixin:
                 value = base_display
         else:
             value = base_display
-        value += self.get_cyberware_stat_modifier(stat_name)
         value += self._get_surge_stat_modifier(stat_name)
         # Olfactory booster overload in harsh smell-heavy environments.
         if stat_name == "perception" and self._is_olfactory_overload_room():
@@ -71,58 +70,15 @@ class RPGCharacterMixin:
                 value = base
         else:
             value = base
-        value += self.get_cyberware_skill_modifier(skill_key)
         return int(value)
 
     def get_cyberware_stat_modifier(self, stat_name):
-        """Sum stat_mods from active buffs for this stat."""
-        total = 0
-        if not hasattr(self, "buffs"):
-            return 0
-        buffs_obj = self.buffs
-        all_attr = getattr(buffs_obj, "all", None)
-        if callable(all_attr):
-            buff_iter = all_attr()
-        elif isinstance(all_attr, dict):
-            buff_iter = all_attr.values()
-        elif all_attr is not None:
-            buff_iter = all_attr
-        else:
-            return 0
-        for buff in buff_iter:
-            mods = getattr(buff, "stat_mods", None) or {}
-            total += int(mods.get(stat_name, 0))
-        return total
+        """Legacy hook. Stat/skill deltas from cyberware use BuffHandler Mods via buffs.check()."""
+        return 0
 
     def get_cyberware_skill_modifier(self, skill_key):
-        """Sum skill_mods from active buffs for this skill."""
-        total = 0
-        if not hasattr(self, "buffs"):
-            return 0
-        buffs_obj = self.buffs
-        all_attr = getattr(buffs_obj, "all", None)
-        if callable(all_attr):
-            buff_iter = all_attr()
-        elif isinstance(all_attr, dict):
-            buff_iter = all_attr.values()
-        elif all_attr is not None:
-            buff_iter = all_attr
-        else:
-            return 0
-        for buff in buff_iter:
-            if getattr(buff, "key", "") == "retractable_claws":
-                from typeclasses.cyberware_catalog import RetractableClaws
-                deployed = any(
-                    isinstance(cw, RetractableClaws)
-                    and bool(getattr(cw.db, "claws_deployed", False))
-                    and not bool(getattr(cw.db, "malfunctioning", False))
-                    for cw in (getattr(self.db, "cyberware", None) or [])
-                )
-                if not deployed:
-                    continue
-            mods = getattr(buff, "skill_mods", None) or {}
-            total += int(mods.get(skill_key, 0))
-        return total
+        """Legacy hook. Skill deltas from cyberware use BuffHandler Mods via buffs.check()."""
+        return 0
 
     def _get_surge_stat_modifier(self, stat_name):
         """Apply adrenal pump active/crash stat modifiers and crash stamina hit."""

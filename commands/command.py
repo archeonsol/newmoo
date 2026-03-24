@@ -16,25 +16,19 @@ from commands.base_cmds import (
     CmdExamine,
     CmdGet,
     CmdPut,
+    CmdStop,
 )
 
 # combat_cmds
 from commands.combat_cmds import (
     _combat_caller,
     CmdAttack,
-    CmdStop,
     CmdFlee,
     CmdStance,
     CmdGrapple,
     CmdLetGo,
     CmdResist,
     CmdExecute,
-)
-
-from commands.range_cmds import (
-    CmdAdvance,
-    CmdRetreat,
-    CmdRange,
 )
 
 from commands.cover_commands import (
@@ -47,13 +41,13 @@ from commands.cover_commands import (
 # medical_cmds
 from commands.medical_cmds import (
     CmdHt,
-    CmdUse,
     CmdApply,
     CmdStabilize,
     CmdSedate,
     CmdSurgery,
     CmdDefib,
 )
+from commands.use_cmds import CmdUse
 
 # scavenge_cmds
 from commands.scavenge_cmds import (
@@ -100,18 +94,31 @@ from commands.survival_cmds import (
     CmdDrink,
 )
 
+# lock_cmds
+from commands.lock_cmds import CmdLock, CmdUnlock
+
 # vehicle_cmds
 from commands.vehicle_cmds import (
     _get_vehicle_from_caller,
     CmdEnterVehicle,
     CmdExitVehicle,
+    CmdMount,
+    CmdDismount,
+    CmdControlVehicle,
+    CmdReleaseControls,
+    CmdStopDriving,
+    CmdHaltVehicleMovement,
     CmdStartEngine,
     CmdStopEngine,
     CmdShutoffEngine,
     CmdDrive,
-    CmdVehicleStatus,
+    CmdFly,
+    CmdTakeoff,
+    CmdLand,
+    CmdEvaluateVehicle,
     CmdRepairPart,
 )
+from commands.tunnel_cmds import CmdAutopilot
 
 # roleplay_cmds
 from commands.roleplay_cmds import (
@@ -122,7 +129,6 @@ from commands.roleplay_cmds import (
     CmdEmote,
     CmdNoMatch,
     CmdTease,
-    CmdDescribeBodypart,
     CmdDescribeMeAs,
     CmdVoice,
     CmdLanguage,
@@ -287,9 +293,6 @@ __all__ = [
     "CmdLetGo",
     "CmdResist",
     "CmdExecute",
-    "CmdAdvance",
-    "CmdRetreat",
-    "CmdRange",
     "CmdCover",
     "CmdLeaveCover",
     "CmdPeek",
@@ -324,17 +327,28 @@ __all__ = [
     "CmdDrink",
     "CmdEnterVehicle",
     "CmdExitVehicle",
+    "CmdMount",
+    "CmdDismount",
+    "CmdLock",
+    "CmdUnlock",
+    "CmdControlVehicle",
+    "CmdReleaseControls",
+    "CmdStopDriving",
+    "CmdHaltVehicleMovement",
     "CmdStartEngine",
     "CmdStopEngine",
     "CmdShutoffEngine",
     "CmdDrive",
-    "CmdVehicleStatus",
+    "CmdFly",
+    "CmdTakeoff",
+    "CmdLand",
+    "CmdEvaluateVehicle",
     "CmdRepairPart",
+    "CmdAutopilot",
     "CmdPose",
     "CmdEmote",
     "CmdNoMatch",
     "CmdTease",
-    "CmdDescribeBodypart",
     "CmdDescribeMeAs",
     "CmdVoice",
     "CmdLanguage",

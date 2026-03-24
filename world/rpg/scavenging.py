@@ -25,6 +25,38 @@ import time
 
 from evennia.utils.create import create_object
 
+try:
+    from noise import snoise2 as _snoise2
+    _NOISE_AVAILABLE = True
+except ImportError:
+    _snoise2 = None
+    _NOISE_AVAILABLE = False
+
+# Perlin noise scale for coordinate-based loot quality modifier.
+_SCAVENGE_NOISE_SCALE = 0.05
+# Maximum ±modifier applied to the roll from noise (±15 points on 0-200 scale).
+_SCAVENGE_NOISE_MAX = 15
+
+
+def _coord_loot_modifier(room) -> int:
+    """
+    Return a ±15 point modifier to the scavenge roll based on room coordinates.
+    Uses Perlin noise so adjacent tiles have similar richness, creating natural
+    'hot spots' and 'dead zones' in the wilderness.
+    Returns 0 if noise is unavailable or room has no coordinates.
+    """
+    if not _NOISE_AVAILABLE:
+        return 0
+    try:
+        coords = getattr(room, "coordinates", None)
+        if not coords:
+            return 0
+        x, y = coords
+        val = _snoise2(x * _SCAVENGE_NOISE_SCALE, y * _SCAVENGE_NOISE_SCALE)
+        return int(round(val * _SCAVENGE_NOISE_MAX))
+    except Exception:
+        return 0
+
 
 # Max scavenges per 24h by scavenging skill level (0-150). Server date resets at midnight UTC.
 # (level_min_inclusive, max_per_day); first matching tier wins (order low to high).
@@ -126,32 +158,8 @@ LOOT_BY_TIER_URBAN = {
 
 
 # Wilderness biome loot tables (used when room has scavenge_<biome> tag)
-LOOT_BY_TIER_GRASSLANDS = {
-    "grey": [
-        "|xCracked Filter Mask|n",
-        "|xRust-Flaked Machete Blade|n",
-        "|xBundle of Moldy Rations|n",
-    ],
-    "green": [
-        "|gField-Dressed Medkit Shell|n",
-        "|gPurified Water Cartridge|n",
-        "|gReinforced Canvas Satchel|n",
-    ],
-    "blue": [
-        "|cStabilized Mutagen Sample|n",
-        "|cRefined Herb Distillate|n",
-        "|cHardened Survival Harness|n",
-    ],
-    "purple": [
-        "|mAncient Root Idol|n",
-        "|mLiving Spore Phial|n",
-        "|mWitcher's Bone Charm|n",
-    ],
-    "yellow": [
-        "|yRelic of the First Expedition|n",
-        "|yHeart of the Pale Tree|n",
-    ],
-}
+# Grasslands uses the same table as generic wild — alias rather than duplicate.
+LOOT_BY_TIER_GRASSLANDS = LOOT_BY_TIER_WILD
 
 LOOT_BY_TIER_HARSHLANDS = {
     "grey": [
@@ -309,9 +317,14 @@ def _pick_loot_table(room):
     return None, None
 
 
+# roll_check returns values on a 0-200 scale. All thresholds and probability bands
+# below are calibrated for that range. Fumble threshold: ~25% of rolls produce nothing.
+_FUMBLE_THRESHOLD = 50
+
+
 def _determine_rarity(env, final_roll):
     """
-    Map final_roll (from roll_check) to a rarity tier, with a chance of no loot.
+    Map final_roll (from roll_check, 0-200 scale) to a rarity tier, with a chance of no loot.
 
     We bias slightly by environment:
     - Urban: slightly more forgiving (small bonus to effective roll)
@@ -321,7 +334,7 @@ def _determine_rarity(env, final_roll):
     with occasional purple and extremely rare yellow (legendary) results.
     """
     # Fumbles: come up empty-handed on very low effective results.
-    if final_roll <= 50:
+    if final_roll <= _FUMBLE_THRESHOLD:
         return None
 
     effective = final_roll
@@ -434,7 +447,10 @@ def perform_scavenge(caller, room, final_roll):
 
     Returns the created object or None.
     """
-    rarity, name = _pick_loot_item(room, final_roll)
+    # Apply coordinate-based noise modifier for organic loot variation.
+    noise_mod = _coord_loot_modifier(room)
+    adjusted_roll = max(0, min(200, final_roll + noise_mod))
+    rarity, name = _pick_loot_item(room, adjusted_roll)
     if not name:
         return None
 

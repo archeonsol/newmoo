@@ -4,6 +4,16 @@ Injury-state helpers split from world.medical.__init__.
 import time
 import uuid
 
+try:
+    from boltons.mathutils import clamp as _clamp
+except ImportError:
+    def _clamp(val, lower=None, upper=None):
+        if lower is not None:
+            val = max(lower, val)
+        if upper is not None:
+            val = min(upper, val)
+        return val
+
 BLEED_DAMPENING_FACTOR = 0.45
 BLEED_RATE_TO_LEVEL = (
     (0.5, 0),
@@ -17,7 +27,7 @@ BLEED_RATE_TO_LEVEL = (
 def _set_injury_treatment_quality(injury, quality):
     if not injury:
         return
-    q = max(0, min(3, int(quality or 0)))
+    q = _clamp(int(quality or 0), 0, 3)
     cur = int(injury.get("treatment_quality", 0) or 0)
     if q > cur:
         injury["treatment_quality"] = q
@@ -33,6 +43,19 @@ def _set_injury_treatment_quality(injury, quality):
 def ensure_injury_schema(injury):
     if not isinstance(injury, dict):
         return None
+    # Validate via cattrs structure/unstructure to catch type mismatches early.
+    # Falls back silently — the setdefault logic below is always authoritative.
+    try:
+        from world.structs import structure_injury, unstructure_injury
+        entry = structure_injury(injury)
+        if entry is not None:
+            validated = unstructure_injury(entry)
+            # Merge validated values back, preserving any extra keys not in the schema.
+            for k, v in validated.items():
+                if k not in injury:
+                    injury[k] = v
+    except Exception:
+        pass
     injury.setdefault("injury_id", str(uuid.uuid4()))
     injury.setdefault("hp_occupied", int(injury.get("hp_occupied", 0) or 0))
     injury.setdefault("severity", int(injury.get("severity", 1) or 1))
@@ -41,6 +64,7 @@ def ensure_injury_schema(injury):
     injury.setdefault("treated", bool(injury.get("treated", False)))
     injury.setdefault("created_at", float(injury.get("created_at", time.time()) or time.time()))
     injury.setdefault("organ_damage", {})
+    injury.setdefault("limb_damage", {})
     injury.setdefault("fracture", None)
     injury.setdefault("bleed_rate", 0.0)
     injury.setdefault("vessel_type", "none")
@@ -56,12 +80,20 @@ def ensure_injury_schema(injury):
     injury.setdefault("antibiotic_until", 0.0)
     injury.setdefault("antibiotic_potency", 0.0)
     injury.setdefault("antibiotic_profile", None)
+    injury.setdefault("immunosuppressant_until", 0.0)
+    injury.setdefault("immunosuppressant_potency", 0.0)
+    injury.setdefault("immunosuppressant_profile", None)
+    injury.setdefault("pill_last_dose", {})
+    if not isinstance(injury.get("pill_last_dose"), dict):
+        injury["pill_last_dose"] = {}
     injury["hp_occupied"] = max(0, int(injury.get("hp_occupied", 0) or 0))
-    injury["severity"] = max(1, min(4, int(injury.get("severity", 1) or 1)))
+    injury["severity"] = _clamp(int(injury.get("severity", 1) or 1), 1, 4)
     injury["bleed_rate"] = max(0.0, float(injury.get("bleed_rate", 0.0) or 0.0))
     if not isinstance(injury.get("organ_damage"), dict):
         injury["organ_damage"] = {}
-    injury["treatment_quality"] = max(0, min(3, int(injury.get("treatment_quality", 0) or 0)))
+    if not isinstance(injury.get("limb_damage"), dict):
+        injury["limb_damage"] = {}
+    injury["treatment_quality"] = _clamp(int(injury.get("treatment_quality", 0) or 0), 0, 3)
     return injury
 
 
@@ -85,6 +117,7 @@ def _normalize_injuries(character):
 def rebuild_derived_trauma_views(character):
     injuries = _normalize_injuries(character)
     organ_damage = {}
+    limb_damage = {}
     fractures = []
     for injury in injuries:
         if (injury.get("hp_occupied", 0) or 0) <= 0:
@@ -93,12 +126,22 @@ def rebuild_derived_trauma_views(character):
             if sev <= 0:
                 continue
             organ_damage[organ_key] = max(organ_damage.get(organ_key, 0), int(sev))
+        for limb_key, sev in (injury.get("limb_damage") or {}).items():
+            if sev <= 0:
+                continue
+            limb_damage[limb_key] = max(limb_damage.get(limb_key, 0), int(sev))
         bone = injury.get("fracture")
         if bone and bone not in fractures:
             fractures.append(bone)
     character.db.organ_damage = organ_damage
+    character.db.limb_damage = limb_damage
     character.db.fractures = fractures
-    return organ_damage, fractures
+    try:
+        from world.medical.limb_trauma import enforce_limb_hand_restrictions
+        enforce_limb_hand_restrictions(character)
+    except Exception:
+        pass
+    return organ_damage, limb_damage, fractures
 
 
 def get_active_bleed_wounds(character):
@@ -125,6 +168,9 @@ def compute_effective_bleed_level(character):
     for idx, injury in enumerate(active):
         rate = float(injury.get("bleed_rate", 0.0) or 0.0)
         weighted += rate if idx == 0 else (rate * BLEED_DAMPENING_FACTOR)
+    resist = float(getattr(character.db, "drug_bleed_resistance", 0.0) or 0.0)
+    if resist > 0:
+        weighted *= max(0.0, 1.0 - resist)
     level = 4
     for threshold, lvl in BLEED_RATE_TO_LEVEL:
         if weighted <= threshold:

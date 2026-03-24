@@ -43,11 +43,14 @@ class SplinterPodInterior(DefaultRoom):
 
     def at_init(self):
         # Ensure this room never contributes a replacing cmdset (fix old pod interiors).
-        # Use list form so handler loads empty default; clear in-memory stack.
-        self.cmdset_storage = [""]
+        # Guard both writes so at_init (which fires on every server reload for every object
+        # in memory) doesn't issue unnecessary DB writes on clean instances.
+        if self.cmdset_storage != [""]:
+            self.cmdset_storage = [""]
         self.cmdset.remove_default()
         # Keep desc in sync with current INTERIOR_DESC (e.g. after "To leave" text changes).
-        self.db.desc = INTERIOR_DESC
+        if self.db.desc != INTERIOR_DESC:
+            self.db.desc = INTERIOR_DESC
 
     def get_extra_display_name_info(self, looker=None, **kwargs):
         return ""

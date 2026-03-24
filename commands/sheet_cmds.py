@@ -5,7 +5,7 @@ Character sheet-style commands available to all players.
 from commands.base_cmds import Command
 from evennia.utils import logger
 from evennia.utils.utils import inherits_from
-from world.ui_utils import fade_rule
+from world.ui_utils import fade_rule, display_ljust, naturaltime
 
 
 class CmdStats(Command):
@@ -25,7 +25,7 @@ class CmdStats(Command):
     def func(self):
         from world.rpg.chargen import STAT_KEYS
         from world.skills import SKILL_KEYS, SKILL_DISPLAY_NAMES
-        from world.levels import get_stat_grade, get_skill_grade
+        from world.levels import MAX_STAT_LEVEL, get_stat_grade, get_skill_grade
         from world.rpg.xp import _stat_level, _skill_level
 
         caller = self.caller
@@ -59,7 +59,12 @@ class CmdStats(Command):
 
         _db = data_source.db
         skills = _db.skills or {}
-        bg = _db.background or "Unknown"
+        race_key = (getattr(_db, "race", None) or "human").lower()
+        if race_key == "splicer":
+            animal = (getattr(_db, "splicer_animal", None) or "unknown").title()
+            race_line = f"Splicer ({animal})"
+        else:
+            race_line = "Human"
         display_name = data_source.name or "Unknown"
         xp = int(getattr(_db, "xp", 0) or 0)
 
@@ -71,18 +76,36 @@ class CmdStats(Command):
 
                 ts = snapshot["fragmented_at"]
                 dt = datetime.utcfromtimestamp(ts) if isinstance(ts, (int, float)) else ts
-                fragmented_str = dt.strftime("%Y-%m-%d %H:%M") + " UTC"
+                fragmented_str = naturaltime(dt)
             except Exception as e:
                 logger.log_trace("sheet_cmds.CmdStats fragmented_at format: %s" % e)
 
         w = 50
         output = "|x┌" + fade_rule(w - 2, "─") + "|n\n"
-        output += "|x│|n |R■|n |wSOUL READOUT|n  |x—|n  " + display_name.ljust(18) + "\n"
-        output += "|x│|n   |wOrigin|n " + (bg or "Unknown").ljust(w - 18) + "\n"
+        output += "|x│|n |R■|n |wSOUL READOUT|n  |x—|n  " + display_ljust(display_name, 18) + "\n"
+        output += "|x│|n   |wRace|n " + display_ljust(race_line, w - 12) + "\n"
+        try:
+            age_y = getattr(_db, "age_years", None)
+            if age_y is not None:
+                output += "|x│|n   |wAge|n " + str(int(age_y)).ljust(w - 12) + "\n"
+        except Exception as e:
+            logger.log_trace("sheet_cmds.CmdStats age: %s" % e)
+        try:
+            h_cm = int(getattr(_db, "height_cm", 0) or 0)
+            w_kg = int(getattr(_db, "weight_kg", 0) or 0)
+            if h_cm and w_kg:
+                output += "|x│|n   |wHeight|n {} cm   |wWeight|n {} kg\n".format(h_cm, w_kg)
+        except Exception as e:
+            logger.log_trace("sheet_cmds.CmdStats height/weight: %s" % e)
         output += "|x├" + fade_rule(w - 2, "─") + "|n\n"
-        output += "|x│|n |wXP|n " + str(xp).ljust(w - 10) + "\n"
+        output += "|x│|n |wXP|n " + display_ljust(str(xp), w - 10) + "\n"
         if fragmented_str:
-            output += "|x│|n |wLast fragmented|n " + fragmented_str.ljust(w - 21) + "\n"
+            output += "|x│|n |wLast fragmented|n " + display_ljust(fragmented_str, w - 21) + "\n"
+        try:
+            if hasattr(data_source, "get_faction_display"):
+                output += "|x│|n |wFactions|n " + str(data_source.get_faction_display()) + "\n"
+        except Exception as e:
+            logger.log_trace("sheet_cmds.CmdStats factions: %s" % e)
         output += "|x├" + fade_rule(w - 2, "─") + "|n\n"
         output += "|x│|n |R CORE|n" + " ".ljust(w - 9) + "\n"
 
@@ -106,8 +129,13 @@ class CmdStats(Command):
                 effective_stat_display[key] = base_stat_display.get(key, 0)
 
         for key in STAT_KEYS:
-            stored = data_source.get_stat_level(key) if hasattr(data_source, "get_stat_level") else 0
-            letter = get_stat_grade(stored)
+            # Grade/adjective from effective display (buffs included), same ladder as stored 0–300.
+            eff = effective_stat_display.get(key, 0)
+            try:
+                equiv_stored = min(MAX_STAT_LEVEL, max(0, int(eff) * 2))
+            except (TypeError, ValueError):
+                equiv_stored = 0
+            letter = get_stat_grade(equiv_stored)
             adj = (
                 data_source.get_stat_grade_adjective(letter, key)
                 if hasattr(data_source, "get_stat_grade_adjective")
@@ -115,7 +143,7 @@ class CmdStats(Command):
             )
             label = key.capitalize()
             delta = effective_stat_display.get(key, 0) - base_stat_display.get(key, 0)
-            marker = " |g+|n" if delta > 0 else (" |r-|n" if delta < 0 else "")
+            marker = "|g+|n" if delta > 0 else ("|r-|n" if delta < 0 else "")
             output += "|x│|n   |w{}|n  |R[{}]|n {}{}\n".format(label.ljust(12), letter, adj, marker)
 
         output += "|x├" + fade_rule(w - 2, "─") + "|n\n"
@@ -152,7 +180,7 @@ class CmdStats(Command):
             )
             label = SKILL_DISPLAY_NAMES.get(key, key.replace("_", " ").title())
             delta = level - base_skill_levels.get(key, 0)
-            marker = " |g+|n" if delta > 0 else (" |r-|n" if delta < 0 else "")
+            marker = "|g+|n" if delta > 0 else ("|r-|n" if delta < 0 else "")
             output += "|x│|n   |w{}|n  |R[{}]|n {}{}\n".format(label.ljust(skill_label_width), letter, adj, marker)
 
         output += "|x└" + fade_rule(w - 2, "─") + "|n\n"

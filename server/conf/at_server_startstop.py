@@ -55,6 +55,15 @@ def at_server_start():
             persistent=True,
         )
 
+    from world.global_climate import GLOBAL_CLIMATE_KEY
+
+    if not ScriptDB.objects.filter(db_key=GLOBAL_CLIMATE_KEY).first():
+        create_script(
+            "typeclasses.scripts.GlobalClimateScript",
+            key=GLOBAL_CLIMATE_KEY,
+            persistent=True,
+        )
+
     # Matrix scripts
     if not ScriptDB.objects.filter(db_key="matrix_cleanup").first():
         create_script(
@@ -73,6 +82,12 @@ def at_server_start():
         create_script(
             "typeclasses.scripts.HandsetMessageCleanupScript",
             key="handset_message_cleanup",
+            persistent=True,
+        )
+    if not ScriptDB.objects.filter(db_key="addiction_withdrawal").first():
+        create_script(
+            "typeclasses.scripts.AddictionWithdrawalScript",
+            key="addiction_withdrawal",
             persistent=True,
         )
     # Staff pending channel: so staff can subscribe and see new requests
@@ -115,6 +130,22 @@ def at_server_start():
     if not ScriptDB.objects.filter(db_key="profiling").first():
         create_script("world.profiling.ProfilingScript", key="profiling", persistent=True)
 
+    # APScheduler: start global scheduler and register recurring jobs
+    try:
+        from world.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as _sched_exc:
+        import logging as _logging
+        _logging.getLogger("evennia").warning(f"[at_server_start] APScheduler failed to start: {_sched_exc}")
+
+    # Whoosh: build/rebuild help search index
+    try:
+        from world.help_search import build_help_index
+        build_help_index()
+    except Exception as _help_exc:
+        import logging as _logging
+        _logging.getLogger("evennia").warning(f"[at_server_start] Help index build failed: {_help_exc}")
+
     # Set ndb baselines (always rebuild — ndb is cleared on every reload)
     try:
         import time
@@ -139,14 +170,32 @@ def at_server_stop():
     This is called just before the server is shut down, regardless
     of it is for a reload, reset or shutdown.
     """
-    pass
+    try:
+        from world.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
 
 
 def at_server_reload_start():
     """
     This is called only when server starts back up after a reload.
+
+    Evennia invokes this inside run_init_hooks() before portal_sessions_sync() in the
+    same PSYNC handler. Schedule a follow-up broadcast on the next reactor tick so it
+    runs after sessions are rebuilt and after the default "... Server restarted." line,
+    which helps web/telnet clients that otherwise appear stuck on the pre-reload banner.
     """
-    pass
+    from twisted.internet import reactor
+
+    def _after_full_psync():
+        from django.conf import settings
+        from evennia import SESSION_HANDLER
+
+        if getattr(settings, "BROADCAST_SERVER_RESTART_MESSAGES", True):
+            SESSION_HANDLER.announce_all(" |gReload complete.|n")
+
+    reactor.callLater(0, _after_full_psync)
 
 
 def at_server_reload_stop():

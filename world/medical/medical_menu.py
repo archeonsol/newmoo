@@ -13,22 +13,49 @@ from world.medical import _ensure_medical_db, get_medical_summary, BLEEDING_LEVE
 from world.medical.injuries import compute_effective_bleed_level
 from world.medical.medical_treatment import get_treatment_options, TOOL_SCANNER
 from typeclasses.medical_tools import get_medical_tools_from_inventory
+from world.theme_colors import COMBAT_COLORS as CC, MEDICAL_COLORS as MC
  
 # ── Visual constants ─────────────────────────────────────────────────────────
  
 _W = 58  # inner width
 _BORDER_COLOR = "|x"  # dim grey for frame
-_HEADER_COLOR = "|c"  # cyan for section titles
+_HEADER_COLOR = CC["parry"]  # cyan for section titles
 _LABEL_COLOR = "|w"   # white for field labels
 _DIM = "|x"           # grey for secondary info
-_WARN = "|y"           # yellow for caution
-_CRIT = "|r"           # red for danger
-_GOOD = "|g"           # green for stable/ok
+_WARN = MC["compensated"]           # yellow for caution
+_CRIT = MC["critical"]           # red for danger
+_GOOD = MC["stable"]           # green for stable/ok
 _N = "|n"
  
  
 def _line(char="-"):
     return f"{_BORDER_COLOR}{''.ljust(_W, char)}{_N}"
+
+
+def _trust_heal_ok(caller, target):
+    if target == caller:
+        return True
+    from world.rpg.trust import check_trust_or_incapacitated
+
+    ok, _reason = check_trust_or_incapacitated(target, caller, "heal")
+    if not ok:
+        caller.msg(
+            f"{_CRIT}They haven't given you permission to treat them.{_N}"
+        )
+    return ok
+
+
+def _trust_operate_ok(caller, target):
+    if target == caller:
+        return True
+    from world.rpg.trust import check_trust_or_incapacitated
+
+    ok, _reason = check_trust_or_incapacitated(target, caller, "operate")
+    if not ok:
+        caller.msg(
+            f"{_CRIT}They haven't given you permission to operate on them.{_N}"
+        )
+    return ok
  
  
 def _heavy_line():
@@ -109,7 +136,7 @@ def _trauma_summary_ic(target):
         "liver": "hepatic", "spleen": "splenic", "stomach": "gastric",
         "kidneys": "renal", "pelvic_organs": "pelvic",
     }
-    severity_words = {1: "bruised", 2: "damaged", 3: "|RDESTROYED|n"}
+    severity_words = {1: "bruised", 2: "damaged", 3: f"{MC['arrest']}DESTROYED{_N}"}
     if organ_damage:
         parts = []
         for organ_key, sev in organ_damage.items():
@@ -121,6 +148,25 @@ def _trauma_summary_ic(target):
             parts.append(f"{_CRIT}{label}{_N}: {word}{stab}")
         if parts:
             lines.append(f"  {_LABEL_COLOR}Internal:{_N} " + "; ".join(parts))
+
+    from world.medical.limb_trauma import LIMB_INFO, LIMB_SLOTS
+    limb_damage = target.db.limb_damage or {}
+    if limb_damage:
+        limb_labels = {"left_arm": "L arm", "right_arm": "R arm", "left_leg": "L leg", "right_leg": "R leg"}
+        lparts = []
+        for limb_key in sorted(LIMB_SLOTS):
+            sev = int(limb_damage.get(limb_key, 0) or 0)
+            if sev <= 0:
+                continue
+            label = limb_labels.get(limb_key, limb_key)
+            destroyed = any(
+                limb_key in (i.get("limb_damage") or {}) and i.get("fracture_destroyed")
+                for i in (target.db.injuries or [])
+            )
+            word = f"{MC['arrest']}UNSALVAGEABLE{_N}" if destroyed else severity_words.get(min(sev, 3), "injured")
+            lparts.append(f"{_CRIT}{label}{_N}: {word}")
+        if lparts:
+            lines.append(f"  {_LABEL_COLOR}Limbs:{_N} " + "; ".join(lparts))
  
     fractures = target.db.fractures or []
     splinted = target.db.splinted_bones or []
@@ -150,7 +196,7 @@ def _trauma_summary_ic(target):
         itype = injury.get("infection_type") or "surface_cellulitis"
         ilabel = INFECTION_CATALOG.get(itype, {}).get("label", itype.replace("_", " "))
         part = (injury.get("body_part") or "wound").strip()
-        color = _CRIT if stage >= 3 else "|m"
+        color = _CRIT if stage >= 3 else MC["infection"]
         infected.append(f"{color}{part}: {ilabel}{_N}")
     if infected:
         lines.append(f"  {_LABEL_COLOR}Infection:{_N} " + "; ".join(infected))
@@ -172,7 +218,6 @@ def _action_label(action_id, display_name, tool_type):
         "hemostatic": "hemostatic",
         "surgical_kit": "instruments",
         "tourniquet": "tourniquet",
-        "antibiotics": "antibiotics",
         "splint": "splint",
         "scanner": "scanner",
     }
@@ -341,7 +386,9 @@ def node_medical_main(caller, raw_string, **kwargs):
     if not target:
         caller.msg("Invalid target.")
         return None, None
- 
+    if not _trust_heal_ok(caller, target):
+        return None, None
+
     compact = kwargs.get("compact", False)
     operating_table = kwargs.get("operating_table") or _find_operating_table(caller)
  
@@ -403,6 +450,8 @@ def node_do_scan(caller, raw_string, **kwargs):
     target = kwargs.get("target") or _get_menu_target(caller, kwargs)
     scanner = kwargs.get("scanner")
     operating_table = kwargs.get("operating_table")
+    if target and not _trust_heal_ok(caller, target):
+        return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
     if not scanner or not hasattr(scanner, "use_for_scan"):
         caller.msg(f"{_CRIT}No scanner.{_N}")
         return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
@@ -465,7 +514,14 @@ def node_do_treatment(caller, raw_string, **kwargs):
     display_name = kwargs.get("display_name") or action_id or "intervention"
     if not action_id:
         return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
- 
+
+    if action_id in ("cyber_install", "cyber_remove", "chrome_replace", "cyber_repair"):
+        if not _trust_operate_ok(caller, target):
+            return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
+    elif target != caller:
+        if not _trust_heal_ok(caller, target):
+            return node_medical_main(caller, raw_string, target=target, compact=True, operating_table=operating_table)
+
     tools = get_medical_tools_from_inventory(caller)
     tool_list = tools.get(tool_type, [])
     if not tool_list:
@@ -609,7 +665,7 @@ def node_wound_detail(caller, raw_string, **kwargs):
             if inf_stage > 0:
                 inf_words = {1: "localised", 2: "spreading", 3: "systemic", 4: "septic"}
                 inf_word = inf_words.get(min(inf_stage, 4), "infected")
-                color = _CRIT if inf_stage >= 3 else "|m"
+                color = _CRIT if inf_stage >= 3 else MC["infection"]
                 inf_type = inj.get("infection_type") or ""
                 from world.medical.infection import INFECTION_CATALOG
                 inf_label = INFECTION_CATALOG.get(inf_type, {}).get("label", "")

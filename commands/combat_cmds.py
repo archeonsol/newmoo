@@ -1,10 +1,18 @@
 """
-Combat commands: CmdAttack, CmdStop, CmdFlee, CmdStance, CmdGrapple, CmdLetGo, CmdResist, CmdExecute, _combat_caller.
+Combat commands: CmdAttack, CmdFlee, CmdStance, CmdGrapple, CmdLetGo, CmdResist, CmdExecute, _combat_caller.
 """
+
+import random
 
 from evennia.utils import logger
 from commands.base_cmds import Command, _command_character
 from world.combat import start_combat_ticker, stop_combat_ticker, _get_combat_target, _combat_display_name
+from world.combat.utils import (
+    get_combat_external_location,
+    is_vehicle_interior_room,
+    melee_brawl_blocked_in_vehicle_cabin,
+    melee_target_blocked_enclosed_cabin,
+)
 
 
 def _combat_caller(cmd_self):
@@ -18,6 +26,27 @@ def _combat_caller(cmd_self):
         except Exception as e:
             logger.log_trace("combat_cmds._combat_caller: %s" % e)
     return caller
+
+
+def _is_valid_combat_target(target):
+    """Characters, combat creatures, or intact vehicles in the same room."""
+    try:
+        from typeclasses.characters import Character
+
+        if isinstance(target, Character):
+            return True
+    except ImportError:
+        pass
+    if bool(getattr(getattr(target, "db", None), "is_creature", False)):
+        return True
+    try:
+        from typeclasses.vehicles import Vehicle
+
+        if isinstance(target, Vehicle) and not getattr(target.db, "vehicle_destroyed", False):
+            return True
+    except ImportError:
+        pass
+    return False
 
 
 class CmdStance(Command):
@@ -56,27 +85,75 @@ class CmdStance(Command):
 
 class CmdAttack(Command):
     """
-    Start an automated combat sequence.
+    Start an automated combat sequence (same ticker for foot or vehicle-mounted weapons).
+    From inside a vehicle cabin, targets are resolved in the outside room (field of fire).
     """
     key = "attack"
     aliases = ["kill", "hit"]
     locks = "cmd:all()"
     help_category = "Combat"
     usage_typeclasses = ["typeclasses.characters.Character"]
-    usage_hint = "|wattack <them>|n (when wielding a weapon)"
+    usage_hint = "|wattack <them>|n — includes mounted vehicle weapons when crewing"
 
     def func(self):
         caller = _combat_caller(self)
-        target = caller.search(self.args)
+        raw = (self.args or "").strip()
+        if not raw:
+            caller.msg("Attack whom?")
+            return
+        try:
+            from typeclasses.vehicles import Vehicle
+        except ImportError:
+            Vehicle = ()
+
+        loc = get_combat_external_location(caller)
+        toks = raw.split()
+        target = None
+        aim_part = None
+        if len(toks) >= 2:
+            cand = caller.search(" ".join(toks[:-1]), location=loc)
+            if cand and isinstance(cand, Vehicle):
+                target = cand
+                aim_part = toks[-1]
+        if target is None:
+            target = caller.search(raw, location=loc)
+            aim_part = None
         if not target:
             return
+        if isinstance(target, Vehicle) and aim_part:
+            caller.db.combat_vehicle_aim_part = aim_part
+        else:
+            if getattr(caller.db, "combat_vehicle_aim_part", None) is not None:
+                caller.attributes.remove("combat_vehicle_aim_part")
         if target == caller:
             caller.msg("You can't attack yourself.")
+            return
+        held = getattr(caller.db, "grappling", None)
+        if held and held != target:
+            caller.msg("Both hands are on your captive. You can't attack anyone else. |wletgo|n first.")
             return
         try:
             from typeclasses.corpse import Corpse
             if isinstance(target, Corpse):
                 caller.msg("You can't attack a corpse.")
+                return
+        except ImportError:
+            pass
+        if not _is_valid_combat_target(target):
+            caller.msg("Why are you trying to fight that?")
+            return
+        cabin_brawl = melee_brawl_blocked_in_vehicle_cabin(caller, target)
+        if cabin_brawl:
+            caller.msg(cabin_brawl)
+            return
+        blocked = melee_target_blocked_enclosed_cabin(caller, target, loc)
+        if blocked:
+            caller.msg(blocked)
+            return
+        try:
+            from world.combat.vehicle_combat import get_attacker_vehicle_weapon_context, is_crew_in_enclosed_vehicle
+            if is_crew_in_enclosed_vehicle(caller) and not get_attacker_vehicle_weapon_context(caller):
+                caller.msg("|rNo weapon available from this seat. Use the vehicle's weapons or get out to fight on foot.|n")
                 return
         except ImportError:
             pass
@@ -134,60 +211,73 @@ class CmdAttack(Command):
                 logger.log_trace("combat_cmds.CmdAttack creature_combat: %s" % e)
 
 
-class CmdStop(Command):
+class CmdGrapplingAttack(Command):
     """
-    Stop your attack swings against someone; you stay engaged (range, cover) until they stop too.
-    When neither of you is pressing an attack anymore, the fight ends for both.
-    Usage: stop attacking [target]
+    While holding someone in a grapple: attack only them (strangle). Same keys as attack;
+    used by GrapplingCmdSet so other targets are rejected.
     """
-    key = "stop"
-    aliases = ["cease"]
+
+    key = "attack"
+    aliases = ["kill", "hit"]
     locks = "cmd:all()"
     help_category = "Combat"
 
     def func(self):
-        caller = self.caller
+        caller = _combat_caller(self)
+        if is_vehicle_interior_room(getattr(caller, "location", None)):
+            caller.msg("You can't fight inside a vehicle cabin.")
+            return
+        held = getattr(caller.db, "grappling", None)
         args = (self.args or "").strip()
-        from world.combat import stop_combat_ticker, _get_combat_target
-
-        # No arguments: stop attacking your current combat target, if any.
         if not args:
-            current = _get_combat_target(caller)
-            if not current:
-                caller.msg("You're not in combat.")
-                return
-            stop_combat_ticker(caller, current)
+            caller.msg("Strangle who? Usage: |wattack <them>|n")
             return
-
-        # Expect "attacking [name]" if arguments are given.
-        if not args.lower().startswith("attacking"):
-            caller.msg("Usage: stop attacking [name]")
-            return
-
-        # Strip off the word "attacking" and any following whitespace to get an optional name.
-        target_name = args[len("attacking"):].strip()
-
-        # "stop attacking" with no name: fall back to current combat target.
-        if not target_name:
-            current = _get_combat_target(caller)
-            if not current:
-                caller.msg("You're not in combat.")
-                return
-            stop_combat_ticker(caller, current)
-            return
-
-        # "stop attacking <name>": look up that target and stop only your attacks on them.
-        target = caller.search(target_name)
+        target = caller.search(args)
         if not target:
             return
+        if held != target:
+            caller.msg("Both hands are on your captive. You can't swing at anyone else. |wletgo|n first.")
+            return
+        try:
+            from typeclasses.corpse import Corpse
+            if isinstance(target, Corpse):
+                caller.msg("You can't attack a corpse.")
+                return
+        except ImportError:
+            pass
+        if not _is_valid_combat_target(target):
+            caller.msg("Why are you trying to fight that?")
+            return
+        try:
+            from world.death import is_permanently_dead, is_flatlined, is_character_logged_off
+            if is_character_logged_off(target):
+                caller.msg("You can drag them, but you cannot attack someone who is not here.")
+                return
+            if is_permanently_dead(target):
+                caller.msg(f"|r{_combat_display_name(target, caller)} is already dead.|n")
+                return
+            if is_flatlined(target):
+                tname = _combat_display_name(target, caller)
+                caller.msg(f"|r{tname} is down and dying.|n")
+                return
+        except ImportError:
+            if getattr(target.db, "current_hp", None) is not None and target.db.current_hp <= 0:
+                caller.msg(f"|r{_combat_display_name(target, caller)} is already dead.|n")
+                return
+        from world.combat.grapple import grapple_strike, start_grapple_strike_ticker
 
-        stop_combat_ticker(caller, target)
+        success, msg = grapple_strike(caller, target)
+        if success:
+            caller.msg("|g%s|n" % msg)
+            start_grapple_strike_ticker(caller, target)
+        else:
+            caller.msg("|r%s|n" % msg)
 
 
 class CmdFlee(Command):
     """
     Try to break away from combat and run. Contested evasion roll vs your opponent.
-    Once per combat turn: using flee commits you and skips your next strike (same as advance/retreat).
+    Once per combat turn: using flee commits you and skips your next strike.
     Without a direction you flee to a random exit; with a direction you try that exit.
     Usage: flee [direction]
     """
@@ -200,6 +290,10 @@ class CmdFlee(Command):
         caller = _combat_caller(self)
         if not getattr(caller, "db", None) or not hasattr(caller.db, "stats"):
             self.caller.msg("You must be in character to do that.")
+            return
+        if not caller.cooldowns.ready("flee"):
+            secs = caller.cooldowns.time_left("flee")
+            caller.msg(f"|yYou're still catching your breath. Try again in {int(secs)}s.|n")
             return
         if getattr(caller.db, "grappled_by", None):
             caller.msg("You're locked in someone's grasp. Use |wresist|n to break free.")
@@ -237,7 +331,6 @@ class CmdFlee(Command):
                 caller.msg("No exit in that direction.")
                 return
         else:
-            import random
             exit_obj = random.choice(exits)
         dest = getattr(exit_obj, "destination", None)
         if not dest or not hasattr(caller, "move_to"):
@@ -268,7 +361,8 @@ class CmdFlee(Command):
         remove_both_combat_tickers(caller, opponent)
         victim = getattr(caller.db, "grappling", None)
         dir_name = (getattr(exit_obj, "key", None) or "away").strip()
-        caller.move_to(dest)
+        caller.cooldowns.add("flee", 30)
+        caller.move_to(dest, quiet=True)
         if victim and hasattr(victim, "move_to"):
             victim.move_to(dest)
             if dest and hasattr(dest, "contents_get"):

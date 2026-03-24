@@ -3,7 +3,7 @@ Staff commands: givexp, charsheet, setstat, setskill, create, typeclasses,
 spawn (item/armor/vehicle/medical/or/seat/bed/pod/camera/tv/creature),
 creatureset, despawn, npc, makenpc, npcset, @goto, @gotoroom, @summon,
 @setvoid, @void, release (@release), boot, @find, announce, restore,
-debugkill, emotedebug, damagevehicle. CmdPending imported from roleplay_cmds.
+debugkill, emotedebug, damagevehicle, @climate, @grantscript. CmdPending imported from roleplay_cmds.
 """
 
 from datetime import datetime
@@ -46,7 +46,6 @@ class CmdStaffSheet(Command):
         _db = target.db
         stats = _db.stats or {}
         skills = _db.skills or {}
-        bg = _db.background or "Unknown"
         try:
             hp_str = "{} / {}".format(target.hp, target.max_hp)
             st_str = "{} / {}".format(target.stamina, target.max_stamina)
@@ -62,7 +61,18 @@ class CmdStaffSheet(Command):
         npc_tag = " |r[NPC]|n" if getattr(_db, "is_npc", False) else ""
         output = line + "\n"
         output += "|c||n  |W STAFF READOUT |w {}|n{}\n".format((target.name or "Unknown"), npc_tag)
-        output += "|c|||n  |wOrigin|n " + bg + "\n"
+        rk = (getattr(_db, "race", None) or "human").lower()
+        if rk == "splicer":
+            an = (getattr(_db, "splicer_animal", None) or "unknown").title()
+            output += "|c|||n  |wRace|n Splicer (" + an + ")\n"
+        else:
+            output += "|c|||n  |wRace|n Human\n"
+        try:
+            ay = getattr(_db, "age_years", None)
+            if ay is not None:
+                output += "|c|||n  |wAge|n {} years\n".format(int(ay))
+        except Exception as e:
+            logger.log_trace("staff_cmds.CmdStaffSheet age: %s" % e)
         output += thin + "\n"
         output += "|c|||n  |rVitality|n " + hp_str.ljust(12) + " |yStamina|n " + st_str.ljust(12) + " |gLoad|n " + load_str + "\n"
         output += thin + "\n"
@@ -121,6 +131,8 @@ class CmdStaffSetStat(Command):
         if not target.db.stats:
             target.db.stats = {}
         target.db.stats[stat_key] = value
+        from world.rpg.trait_sync import sync_single_stat
+        sync_single_stat(target, stat_key, value)
         caller.msg("|g{}'s {} set to {}.|n".format(target.name, stat_key, value))
         try:
             _ = target.max_hp
@@ -166,6 +178,8 @@ class CmdStaffSetSkill(Command):
         if not target.db.skills:
             target.db.skills = {}
         target.db.skills[skill_key] = value
+        from world.rpg.trait_sync import sync_single_skill
+        sync_single_skill(target, skill_key, value)
         label = SKILL_DISPLAY_NAMES.get(skill_key, skill_key)
         caller.msg("|g{}'s {} set to {}.|n".format(target.name, label, value))
 
@@ -590,17 +604,20 @@ class CmdRestore(Command):
         if not target or not hasattr(target, "db"):
             return
         try:
-            from world.death import is_flatlined, clear_flatline
-            if is_flatlined(target):
-                clear_flatline(target)
-            from world.medical import reset_medical
-            reset_medical(target)
+            # Heal first, then clear flatline. If death_state is cleared while HP is still 0,
+            # character_can_act() still blocks on hp <= 0 with the same "dying" message.
             mx = target.max_hp
             target.db.current_hp = mx
             target.db.current_stamina = target.max_stamina
-            caller.msg("|g{} restored to full HP, stamina, and trauma cleared (no bleeding/fractures/organ damage).|n".format(target.name))
+            from world.death import clear_flatline
+
+            clear_flatline(target)
+            from world.medical import reset_medical
+
+            reset_medical(target)
+            caller.msg("|g{} restored to full HP, stamina, and trauma cleared; flatline/dying state cleared.|n".format(target.name))
             if target != caller:
-                target.msg("|gYou have been restored to full health; all trauma has been cleared.|n")
+                target.msg("|gYou have been restored to full health; all trauma and flatline state have been cleared.|n")
         except Exception as e:
             caller.msg("|rCould not restore: {}|n".format(e))
 
@@ -768,7 +785,12 @@ class CmdSpawnItem(Command):
       spawnitem list                      - list all prototype keys
       spawnitem list <category>           - list keys that have that tag (e.g. spawnitem list combat)
       spawnitem list <category> <subtag>  - list keys that have both tags (e.g. spawnitem list combat weapon)
+      spawnitem list drug                 - alchemy drugs (also: drugs, alchemy drug, …)
+      spawnitem list alchemy              - stations, chemicals, drugs, recipes, etc.
+      spawnitem list vehicle              - vehicles (ground / motorcycle / aerial)
+      spawnitem list vehicle ground       - enclosed ground vehicles only
       spawnitem <prototype_key>           - spawn into your inventory (e.g. spawnitem bolt_of_silk)
+      spawnitem <vehicle_key>             - spawns vehicle in your current room (not inventory)
 
     For typeclass-only items use |wtypeclasses|n and |wcreate <typeclass> = <key>|n.
     """
@@ -792,9 +814,19 @@ class CmdSpawnItem(Command):
             if not rest:
                 self._show_list(caller, tag_filters=None)
             else:
-                self._show_list(caller, tag_filters=[x.lower() for x in rest])
+                self._show_list(
+                    caller,
+                    tag_filters=[self._normalize_spawnitem_tag(x) for x in rest],
+                )
             return
         self._spawn_prototype(caller, args)
+
+    @staticmethod
+    def _normalize_spawnitem_tag(token):
+        from world.prototypes.categories import SPAWNITEM_TAG_ALIASES
+
+        t = token.lower()
+        return SPAWNITEM_TAG_ALIASES.get(t, t)
 
     def _show_list(self, caller, tag_filters):
         from evennia.prototypes import prototypes as protlib
@@ -866,10 +898,37 @@ class CmdSpawnItem(Command):
         if not objs:
             caller.msg("|rNo object spawned (prototype key may be wrong).|n")
             return
+        try:
+            from typeclasses.vehicles import Vehicle
+        except ImportError:
+            Vehicle = None
+        names = []
+        any_vehicle = False
         for obj in objs:
-            obj.location = caller
-        names = [o.get_display_name(caller) for o in objs]
-        caller.msg("|gSpawned into your inventory:|n %s" % ", ".join(names))
+            if Vehicle and isinstance(obj, Vehicle):
+                any_vehicle = True
+                loc = caller.location
+                if not loc:
+                    caller.msg("|rYou must be in a room to spawn a vehicle.|n")
+                    obj.delete()
+                    return
+                obj.location = loc
+                try:
+                    from world.vehicles.vehicle_security import set_owner
+
+                    set_owner(obj, caller)
+                except Exception:
+                    pass
+            else:
+                obj.location = caller
+            names.append(obj.get_display_name(caller))
+        if any_vehicle:
+            caller.msg(
+                "|gSpawned in your current room:|n %s — you are registered as |wbiometric owner|n."
+                % ", ".join(names)
+            )
+        else:
+            caller.msg("|gSpawned into your inventory:|n %s" % ", ".join(names))
 
 
 class CmdSpawnArmor(Command):
@@ -936,7 +995,7 @@ class CmdSpawnArmor(Command):
 class CmdSpawnVehicle(Command):
     """
     Create a test vehicle in the current room. (Admin/Builder only.)
-    Usage: spawnvehicle [name]
+    Usage: spawnvehicle [prototype_key|name]  — e.g. spawnvehicle rattler, spawnvehicle test sedan
     """
     key = "spawnvehicle"
     aliases = ["spawn vehicle", "testvehicle"]
@@ -945,15 +1004,52 @@ class CmdSpawnVehicle(Command):
 
     def func(self):
         caller = self.caller
-        name = self.args.strip() or "test sedan"
+        arg = self.args.strip()
         loc = caller.location
         if not loc:
             caller.msg("You need to be in a room to spawn a vehicle.")
             return
         from evennia.utils.create import create_object
         try:
+            from typeclasses.vehicles import _room_allows_vehicle_tags
+            from world.prototypes.vehicle_prototypes import ALL_VEHICLE_PROTOTYPES
+        except Exception:
+            ALL_VEHICLE_PROTOTYPES = {}
+            _room_allows_vehicle_tags = lambda r: True
+
+        if not _room_allows_vehicle_tags(loc):
+            caller.msg(
+                "|yThis room has no drivable-surface tag with category |wvehicle_access|n "
+                "(|wstreet|n / |wtunnel|n / |waerial|n / |woffroad|n). "
+                "Example: |w@tag here = street:vehicle_access|n or |woffroad:vehicle_access|n|n"
+            )
+
+        proto = ALL_VEHICLE_PROTOTYPES.get(arg.lower()) if arg else None
+        if proto:
+            try:
+                vehicle = create_object(
+                    proto["typeclass"],
+                    key=proto["key"],
+                    location=loc,
+                )
+                for attr_name, val in proto.get("attrs", []):
+                    setattr(vehicle.db, attr_name, val)
+                caller.msg(
+                    f"|gCreated|n |w{vehicle.key}|n (|w{proto['prototype_key']}|n). "
+                    f"|wenter|n / |wmount|n, |wstart|n, |wdrive|n or |wfly|n."
+                )
+            except Exception as e:
+                caller.msg(f"|rCould not create vehicle: {e}|n")
+            return
+
+        name = arg or "test sedan"
+        try:
             vehicle = create_object("typeclasses.vehicles.Vehicle", key=name, location=loc)
-            caller.msg(f"|gCreated vehicle|n |w{vehicle.key}|n here. Use |wenter {vehicle.key}|n to get in, then |wstart|n and |wdrive <direction>|n.")
+            caller.msg(
+                f"|gCreated vehicle|n |w{vehicle.key}|n here. Use |wenter {vehicle.key}|n to get in, "
+                f"then |wstart|n and |wdrive <direction>|n. "
+                f"Prototypes: |w{', '.join(sorted(ALL_VEHICLE_PROTOTYPES.keys()))}|n."
+            )
         except Exception as e:
             caller.msg(f"|rCould not create vehicle: {e}|n")
 
@@ -977,7 +1073,7 @@ class CmdDamageVehicle(Command):
             return
         try:
             from typeclasses.vehicles import Vehicle
-            from world.vehicle_parts import VEHICLE_PART_IDS, PART_DISPLAY_NAMES
+            from world.vehicle_parts import get_part_display_name, get_part_ids
         except ImportError:
             caller.msg("Vehicle parts not available.")
             return
@@ -986,14 +1082,15 @@ class CmdDamageVehicle(Command):
             caller.msg("No such vehicle here.")
             return
         part_id = args[1].lower().replace(" ", "_")
-        if part_id not in VEHICLE_PART_IDS:
-            caller.msg(f"Unknown part. Valid: {', '.join(VEHICLE_PART_IDS)}")
+        valid = get_part_ids(vehicle)
+        if part_id not in valid:
+            caller.msg(f"Unknown part for this vehicle. Valid: {', '.join(valid)}")
             return
         amount = int(args[2]) if len(args) > 2 else 20
         amount = max(1, min(100, amount))
         old_c = vehicle.get_part_condition(part_id)
         new_c = vehicle.damage_part(part_id, amount)
-        part_name = PART_DISPLAY_NAMES.get(part_id, part_id)
+        part_name = get_part_display_name(part_id)
         caller.msg(f"Damaged {vehicle.key}'s {part_name}: {old_c}% -> {new_c}%.")
 
 
@@ -1021,6 +1118,9 @@ class CmdSpawnMedical(Command):
             ("typeclasses.medical_tools.HemostaticAgent", "hemostatic agent"),
             ("typeclasses.medical_tools.Tourniquet", "tourniquet"),
             ("typeclasses.medical_tools.Defibrillator", "defibrillator"),
+            ("typeclasses.med_pills.TacrolimusBottle", "tacrolimus"),
+            ("typeclasses.med_pills.MycophenolateBottle", "mycophenolate"),
+            ("typeclasses.med_pills.CoAmoxiclavBottle", "co-amoxiclav"),
             ("typeclasses.items.Item", "scalpel"),
         ]:
             try:
@@ -1062,6 +1162,39 @@ class CmdSpawnOR(Command):
             caller.msg("|gOperating table created here. Patients: |wlie on operating table|n. Surgeon: |wsurgery <organ>|n (patient must be on the table).|n")
         except Exception as e:
             caller.msg(f"|rCould not create operating table: {e}|n")
+
+
+class CmdSpawnCyberwareStation(Command):
+    """
+    Create a cyberware customization station in the current room. Builder/Admin only.
+    Put cyberware in it, then use it to customize color and descriptions (requires EE 75).
+    Usage: spawnstation [name]
+    """
+    key = "spawnstation"
+    aliases = ["spawn station", "spawn cyberware station", "spawn chromework station"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Admin"
+
+    def func(self):
+        caller = self.caller
+        name = (self.args or "cyberware customization station").strip()
+        loc = caller.location
+        if not loc:
+            caller.msg("You need to be in a room to spawn a station.")
+            return
+        from evennia.utils.create import create_object
+        try:
+            obj = create_object(
+                "typeclasses.cyberware_station.CyberwareCustomizationStation",
+                key=name,
+                location=loc,
+            )
+            caller.msg(
+                f"|gCyberware customization station |w{name}|n created here. "
+                f"|wPut|n cyberware in it, then |wuse {name}|n to customize.|n"
+            )
+        except Exception as e:
+            caller.msg(f"|rCould not create station: {e}|n")
 
 
 class CmdSpawnSeat(Command):
@@ -1375,12 +1508,22 @@ class CmdNpc(Command):
     def _do_summon(self, caller, rest):
         from world.rpg.npc_templates import create_npc_from_template, get_npc_template
         name = None
-        if "=" in rest:
-            template_part, name = rest.split("=", 1)
-            template_key = template_part.strip().lower()
-            name = name.strip()
-        else:
-            template_key = rest.strip().lower()
+        # Try lark grammar parser first; fall back to manual split.
+        try:
+            from world.command_grammars import parse_npc_summon
+            parsed = parse_npc_summon(rest)
+            if parsed:
+                template_key = parsed["template"].strip().lower()
+                name = parsed["name"].strip() or None
+            else:
+                raise ValueError("lark parse returned None")
+        except Exception:
+            if "=" in rest:
+                template_part, name = rest.split("=", 1)
+                template_key = template_part.strip().lower()
+                name = name.strip()
+            else:
+                template_key = rest.strip().lower()
         if not template_key:
             caller.msg("Usage: @npc/summon <template> or @npc/summon <template>=<name>")
             return
@@ -1499,17 +1642,79 @@ class CmdNpc(Command):
         if attr in STAT_KEYS:
             if not hasattr(target.db, "stats") or target.db.stats is None:
                 target.db.stats = {}
-            target.db.stats[attr] = max(0, min(300, value))
+            clamped_stat = max(0, min(300, value))
+            target.db.stats[attr] = clamped_stat
+            from world.rpg.trait_sync import sync_single_stat
+            sync_single_stat(target, attr, clamped_stat)
             caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, target.db.stats[attr]))
             return
         if attr in SKILL_KEYS:
             if not hasattr(target.db, "skills") or target.db.skills is None:
                 from world.skills import SKILL_KEYS as SK
                 target.db.skills = {k: 0 for k in SK}
-            target.db.skills[attr] = max(0, min(150, value))
+            clamped_skill = max(0, min(150, value))
+            target.db.skills[attr] = clamped_skill
+            from world.rpg.trait_sync import sync_single_skill
+            sync_single_skill(target, attr, clamped_skill)
             caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, target.db.skills[attr]))
             return
         caller.msg("|rUnknown attribute. Use a stat (%s) or skill (e.g. evasion, medicine).|n" % ", ".join(STAT_KEYS))
+
+
+class CmdMigrateTraits(Command):
+    """
+    Backfill Evennia TraitHandler mirrors for all existing characters. Admin only.
+
+    Reads each character's db.stats, db.skills, and db.stat_caps and writes them
+    into the trait_stats / trait_skills TraitHandlers. Safe to run multiple times.
+
+    Usage:
+      @migratetraits          - migrate all Character objects
+      @migratetraits #dbref   - migrate a single character by dbref
+    """
+
+    key = "@migratetraits"
+    locks = "cmd:perm(Admin)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        from evennia.objects.models import ObjectDB
+        from world.rpg.trait_sync import sync_stats_to_traits, sync_skills_to_traits
+
+        target_dbref = (self.args or "").strip()
+        if target_dbref:
+            from evennia.utils.search import search_object
+            results = search_object(target_dbref)
+            if not results:
+                caller.msg(f"|rNo object found for {target_dbref}.|n")
+                return
+            targets = results
+        else:
+            from typeclasses.characters import Character
+            targets = Character.objects.all()
+
+        count = 0
+        errors = 0
+        for char in targets:
+            try:
+                stats = getattr(char.db, "stats", None) or {}
+                caps  = getattr(char.db, "stat_caps", None) or {}
+                skills = getattr(char.db, "skills", None) or {}
+                if stats:
+                    sync_stats_to_traits(char, stats, caps if caps else None)
+                if skills:
+                    sync_skills_to_traits(char, skills)
+                count += 1
+            except Exception as exc:
+                logger.log_err(f"@migratetraits: error on {char} ({char.dbref}): {exc}")
+                errors += 1
+
+        caller.msg(
+            f"|gTrait migration complete: {count} character(s) updated"
+            + (f", {errors} error(s) — check server log." if errors else ".")
+            + "|n"
+        )
 
 
 class CmdSpawnPerfume(Command):
@@ -1788,6 +1993,58 @@ class CmdGiveXp(Command):
         else:
             caller.msg(f"|g[ADMIN]|n Granted |w{added}|n XP to |w{target.name}|n. Their total: |w{new_total}|n / {cap}.")
             target.msg(f"|g[ADMIN]|n You received |w{added}|n XP. Total: |w{new_total}|n / {cap}.")
+
+
+class CmdBuffDebug(Command):
+    """
+    Inspect BuffHandler state and the stat/skill check chain (staff).
+
+    Usage:
+      @buffdebug
+      @buffdebug <stat>
+    """
+
+    key = "@buffdebug"
+    aliases = ["buffdebug"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        caller = self.caller
+        stat = (self.args or "").strip() or "strength"
+        from world.rpg.xp import _stat_level
+
+        raw = _stat_level(caller, stat)
+        base = min(max((raw or 0) // 2, 0), 150)
+
+        if not hasattr(caller, "buffs"):
+            caller.msg("|rNo BuffHandler on this character.|n")
+            return
+
+        try:
+            buffed = caller.buffs.check(base, f"{stat}_display")
+        except Exception as err:
+            caller.msg(f"|rafter buffs.check: {err}|n")
+            buffed = base
+
+        final = caller.get_display_stat(stat) if hasattr(caller, "get_display_stat") else base
+
+        caller.msg(f"|wRaw stored:|n {raw}")
+        caller.msg(f"|wBase display (raw//2):|n {base}")
+        caller.msg(f"|wAfter buffs.check:|n {buffed}")
+        caller.msg(f"|wFinal get_display_stat:|n {final}")
+
+        try:
+            buff_list = list(caller.buffs.get_all().values())
+            caller.msg(f"|wActive buffs ({len(buff_list)}):|n")
+            for b in buff_list:
+                key = getattr(b, "key", "?")
+                dur = getattr(b, "duration", "?")
+                mods = getattr(b, "mods", [])
+                sm = getattr(type(b), "stat_mods", {})
+                caller.msg(f"  {key}: duration={dur}, mods={mods}, stat_mods={sm}")
+        except Exception as e:
+            caller.msg(f"|rError listing buffs: {e}|n")
 
 
 class CmdEmoteDebug(Command):
@@ -2302,6 +2559,186 @@ class CmdProfiling(Command):
                     )
 
         caller.msg(rule)
+
+
+class CmdClimate(Command):
+    """
+    View or set global weather and time-of-day (street room ambient prose).
+
+    Usage:
+      @climate
+      @climate weather <rain|sun|fog|snow>
+      @climate time <dusk|night|morning|afternoon|evening>   (manual; turns off UTC auto)
+      @climate time auto|utc   — narrative time follows real UTC (persistent)
+      @climate time manual    — freeze at current UTC phase; edit with @climate time <phase>
+      @climate override <district> <weather> <time> = <plain text>
+      @climate clearoverride <district> <weather> <time>
+
+    Districts: slums, guild, bourgeois, elite
+    """
+    key = "@climate"
+    aliases = ["climate"]
+    locks = "cmd:perm(Builder)"
+    help_category = "Staff"
+
+    def func(self):
+        from world import global_climate as gc
+
+        raw = (self.args or "").strip()
+        if not raw:
+            try:
+                import arrow as _arrow
+                now = _arrow.utcnow().datetime
+            except ImportError:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+
+            w = gc.get_global_weather()
+            t = gc.get_global_time_of_day()
+            auto = gc.get_time_auto_utc()
+            auto_str = "|gON|n (UTC)" if auto else "|rOFF|n (manual)"
+            self.caller.msg(
+                f"Global climate: |wweather|n={w}  |wtime|n={t}  |wUTC auto|n={auto_str}\n"
+                f"  Now UTC: {now.strftime('%Y-%m-%d %H:%M:%S')} → phase |w{gc.utc_time_phase(now)}|n\n"
+                f"Use |w@climate weather <...>|n or |w@climate time <...>|n or |w@climate time auto|n / |wmanual|n"
+            )
+            return
+
+        parts = raw.split()
+        sub = parts[0].lower()
+
+        if sub == "weather" and len(parts) >= 2:
+            val = parts[1].lower()
+            try:
+                ok = gc.set_global_weather(val)
+            except Exception as err:
+                self.caller.msg(str(err))
+                return
+            if not ok:
+                self.caller.msg("Global climate script is missing (server not initialized?).")
+                return
+            self.caller.msg(f"Global weather set to |w{gc.get_global_weather()}|n.")
+            return
+
+        if sub == "time" and len(parts) >= 2:
+            val = parts[1].lower()
+            if val in ("auto", "utc"):
+                ok = gc.set_time_auto_utc(True)
+                if not ok:
+                    self.caller.msg("Global climate script is missing (server not initialized?).")
+                    return
+                self.caller.msg(
+                    f"UTC auto time |gON|n. Current phase: |w{gc.get_global_time_of_day()}|n."
+                )
+                return
+            if val == "manual":
+                ok = gc.set_time_auto_utc(False)
+                if not ok:
+                    self.caller.msg("Global climate script is missing (server not initialized?).")
+                    return
+                self.caller.msg(
+                    f"UTC auto |rOFF|n; time frozen at |w{gc.get_global_time_of_day()}|n "
+                    f"(change with |w@climate time <phase>|n)."
+                )
+                return
+            try:
+                ok = gc.set_global_time_of_day(val)
+            except Exception as err:
+                self.caller.msg(str(err))
+                return
+            if not ok:
+                self.caller.msg("Global climate script is missing (server not initialized?).")
+                return
+            self.caller.msg(
+                f"Global time-of-day set to |w{gc.get_global_time_of_day()}|n (UTC auto |roff|n)."
+            )
+            return
+
+        if sub == "clearoverride" and len(parts) >= 4:
+            district, weather, tod = parts[1], parts[2], parts[3]
+            try:
+                gc.clear_line_override(district, weather, tod)
+            except Exception as err:
+                self.caller.msg(str(err))
+                return
+            self.caller.msg("Override cleared for that cell.")
+            return
+
+        if sub == "override":
+            rest = raw[len("override") :].strip()
+            if "=" not in rest:
+                self.caller.msg(
+                    'Usage: @climate override <district> <weather> <time> = <text>'
+                )
+                return
+            left, _, right = rest.partition("=")
+            left_toks = left.strip().split()
+            if len(left_toks) < 3:
+                self.caller.msg(
+                    'Usage: @climate override <district> <weather> <time> = <text>'
+                )
+                return
+            district, weather, tod = left_toks[0], left_toks[1], left_toks[2]
+            text = right.strip()
+            try:
+                key = gc.set_line_override(district, weather, tod, text)
+            except Exception as err:
+                self.caller.msg(str(err))
+                return
+            self.caller.msg(f"Stored override |w{key}|n ({len(text)} chars).")
+            return
+
+        self.caller.msg(
+            "Usage: @climate | @climate weather <rain|sun|fog|snow> | "
+            "@climate time <phase> | @climate time auto|utc | @climate time manual | "
+            "@climate override <district> <weather> <time> = <text> | "
+            "@climate clearoverride <district> <weather> <time>"
+        )
+
+
+class CmdGrantScript(Command):
+    """
+    Grant on-hand currency to yourself (staff / testing).
+
+    Usage:
+      @grantscript <amount>
+
+    Adds to your wallet as a normal credit (logged in your transaction history).
+    Builder or Admin only.
+
+    Example:
+      @grantscript 5000
+    """
+
+    key = "@grantscript"
+    aliases = ["grantscript"]
+    locks = ADMIN_LOCK
+    help_category = "Staff"
+
+    def func(self):
+        from world.rpg.economy import add_funds, format_currency, get_balance
+
+        caller = self.caller
+        raw = (self.args or "").strip()
+        if not raw:
+            caller.msg("Usage: |w@grantscript <amount>|n")
+            return
+        try:
+            amount = int(raw.replace(",", ""))
+        except ValueError:
+            caller.msg("Amount must be a whole number.")
+            return
+        if amount <= 0:
+            caller.msg("Amount must be positive.")
+            return
+        if not getattr(caller, "db", None) or not hasattr(caller.db, "currency"):
+            caller.msg("You must be puppeting a character with a wallet.")
+            return
+
+        add_funds(caller, amount, party="staff", reason="staff self-grant")
+        caller.msg(
+            f"Granted {format_currency(amount)}. On hand: {format_currency(get_balance(caller))}."
+        )
 
 
 class CmdMusic(Command):

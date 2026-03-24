@@ -146,6 +146,22 @@ ARMOR_TEMPLATES = [
         "worn_desc": "Scrapleather pants cover $P legs and groin, thick hide creaking with movement.",
     },
     {
+        "key": "scav_splicer_tail_wrap",
+        "name": "Splice-tail wrap",
+        "level": ARMOR_LEVEL_SCAVENGER,
+        "layer": ARMOR_LAYER_PANTS_SHIRT,
+        "covered_parts": ["tail"],
+        "protection": _prot(slashing=1, impact=1),
+        "stacking_score": 1,
+        "mobility_impact": 0,
+        "desc": (
+            "A narrow sleeve of hardened hide and wire mesh sized for a tail — "
+            "tunnel salvage, cut for someone the colony pretends not to have built. "
+            "It will not save a limb. It might save a tail from a glancing cut."
+        ),
+        "worn_desc": "A reinforced wrap covers $P tail.",
+    },
+    {
         "key": "scav_hide_hood",
         "name": "Tunnel-hide hood",
         "level": ARMOR_LEVEL_SCAVENGER,
@@ -1085,12 +1101,13 @@ ARMOR_TEMPLATES = [
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Module-level index for O(1) key lookups (built once at import time).
+_ARMOR_TEMPLATE_BY_KEY: dict = {t["key"]: t for t in ARMOR_TEMPLATES}
+
+
 def get_armor_template(key):
     """Return the template dict for key, or None."""
-    for t in ARMOR_TEMPLATES:
-        if t.get("key") == key:
-            return t
-    return None
+    return _ARMOR_TEMPLATE_BY_KEY.get(key)
 
 
 def get_templates_by_level(level):

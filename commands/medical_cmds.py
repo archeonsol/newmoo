@@ -1,11 +1,14 @@
 """
-Medical commands: CmdHt, CmdPatient, CmdUse, CmdApply, CmdStabilize, CmdSedate, CmdSurgery, CmdDefib.
+Medical commands: CmdHt, CmdPatient, CmdApply, CmdStabilize, CmdSedate, CmdSurgery, CmdDefib.
+(CmdUse is in use_cmds.py as global use command.)
 """
 
 from commands.base_cmds import Command
 from commands.inventory_cmds import _obj_in_hands
 from evennia.utils import logger
 from evennia.utils.ansi import strip_ansi
+
+from world.theme_colors import MEDICAL_COLORS as MC
 
 
 def _norm_name(text):
@@ -113,101 +116,6 @@ class CmdPatient(Command):
         start_medical_menu(caller, target)
 
 
-class CmdUse(Command):
-    """
-    Use a medical tool on a target. The tool must be held in your hands (wield it first).
-
-    Usage:
-      use <tool> on <target>
-      use <tool>
-
-    Examples:
-      wield scanner
-      use scanner on Bob   - run bioscanner readout on Bob (detect damage type)
-      wield bandage
-      apply bandage to Bob  - then use apply to treat (after scanning)
-
-    Scanner gives a readout only; treat with the correct tool using |wapply <item> to <target>|n.
-    """
-    key = "use"
-    locks = "cmd:all()"
-    help_category = "General"
-
-    def func(self):
-        caller = self.caller
-        args = (self.args or "").strip()
-        if not args:
-            caller.msg("Usage: use <tool> [on <target>]")
-            return
-        # Parse "tool on target" or "tool"
-        parts = args.split(None, 2)
-        tool_name = parts[0]
-        target = caller
-        if len(parts) >= 3 and parts[1].lower() == "on":
-            target = _resolve_medical_target(caller, parts[2], location=caller.location)
-            if not target:
-                return
-            if not hasattr(target, "db"):
-                caller.msg("You cannot use that on them.")
-                return
-
-        try:
-            from typeclasses.medical_tools import MedicalTool, Bioscanner, get_medical_tools_from_inventory
-        except ImportError as e:
-            logger.log_trace("medical_cmds.CmdUse import medical_tools: %s" % e)
-            caller.msg("That is not a medical tool.")
-            return
-        tool = caller.search(tool_name, location=caller)
-        if not tool:
-            return
-        # Item must be held in either hand to use
-        if not _obj_in_hands(caller, tool):
-            caller.msg("You need to hold that in your hands to use it. Wield it first (|wwield %s|n)." % tool_name)
-            return
-        from typeclasses.medical_tools import Defibrillator
-        if isinstance(tool, Defibrillator):
-            if not target or target == caller:
-                caller.msg("Use the defibrillator on who? Usage: use defibrillator on <target>")
-                return
-            if getattr(target, "hp", 1) > 0:
-                caller.msg("They are not in arrest. The defibrillator is for the dead.")
-                return
-            from world.medical.medical_defib import start_defib_sequence
-            started, err = start_defib_sequence(caller, target, tool)
-            if not started:
-                caller.msg(err or "You cannot do that right now.")
-            return
-
-        if not isinstance(tool, MedicalTool):
-            caller.msg("You can't use that for medical procedures.")
-            return
-        if getattr(tool.db, "uses_remaining", 1) is not None and (tool.db.uses_remaining or 0) <= 0:
-            caller.msg(f"{tool.get_display_name(caller)} is used up.")
-            return
-
-        if isinstance(tool, Bioscanner):
-            success, out = tool.use_for_scan(caller, target)
-            if not success:
-                caller.msg(out if isinstance(out, str) else "Scan failed.")
-                return
-            if isinstance(out, dict) and out.get("formatted"):
-                caller.msg(out["formatted"])
-            elif isinstance(out, dict):
-                caller.msg(out.get("detail", "No readout."))
-            else:
-                caller.msg(out)
-            if target != caller:
-                target.msg(f"{(caller.get_display_name(target) if hasattr(caller, 'get_display_name') else caller.name)} runs a scanner over you.")
-            return
-
-        # Other medical tools: treatment is done via "apply <item> to <target>" with tool wielded
-        caller.msg("To treat, keep the tool in your hands and use: |wapply to %s|n (e.g. apply bandage to %s, apply splint to %s arm)." % (
-            target.key if hasattr(target, "key") else target.name,
-            target.key if hasattr(target, "key") else target.name,
-            target.key if hasattr(target, "key") else target.name,
-        ))
-
-
 class CmdSedate(Command):
     """
     Induce anesthesia on the patient currently lying on an operating table.
@@ -245,11 +153,18 @@ class CmdSedate(Command):
         if table.get_patient() != target:
             caller.msg("They must be the patient lying on the operating table first.")
             return
+        if target != caller:
+            from world.rpg.trust import check_trust_or_incapacitated
+
+            ok, _r = check_trust_or_incapacitated(target, caller, "heal")
+            if not ok:
+                caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+                return
         success, msg = table.use_for_sedation(caller, target)
         if success:
-            caller.msg("|g" + msg + "|n")
+            caller.msg(MC["stable"] + msg + "|n")
         else:
-            caller.msg("|r" + (msg or "Sedation failed.") + "|n")
+            caller.msg(MC["critical"] + (msg or "Sedation failed.") + "|n")
 
 
 class CmdWakePatient(Command):
@@ -291,9 +206,9 @@ class CmdWakePatient(Command):
             return
         success, msg = table.wake_patient(caller, target)
         if success:
-            caller.msg("|g" + msg + "|n")
+            caller.msg(MC["stable"] + msg + "|n")
         else:
-            caller.msg("|r" + (msg or "Wake attempt failed.") + "|n")
+            caller.msg(MC["critical"] + (msg or "Wake attempt failed.") + "|n")
 
 
 class CmdStabilize(Command):
@@ -364,13 +279,13 @@ class CmdStabilize(Command):
         success, msg = attempt_stop_bleeding(caller, target, tool_type)
         tool.consume_use()  # consume a use whether the roll succeeds or fails
         if success:
-            caller.msg("|g" + msg + "|n")
+            caller.msg(MC["stable"] + msg + "|n")
             if target != caller:
-                target.msg("|g%s works to control the bleeding: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
+                target.msg(MC["stable"] + "%s works to control the bleeding: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
         else:
-            caller.msg("|r" + msg + "|n")
+            caller.msg(MC["critical"] + msg + "|n")
             if target != caller:
-                target.msg("|r%s tries to stem the bleed: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
+                target.msg(MC["critical"] + "%s tries to stem the bleed: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:60] + ("..." if len(msg) > 60 else "")))
 
 
 class CmdApply(Command):
@@ -448,6 +363,14 @@ class CmdApply(Command):
         except ImportError as e:
             logger.log_trace("medical_cmds.CmdApply is_flatlined: %s" % e)
 
+        if target != caller:
+            from world.rpg.trust import check_trust_or_incapacitated
+
+            ok, _r = check_trust_or_incapacitated(target, caller, "heal")
+            if not ok:
+                caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+                return
+
         tool_type = tool.medical_tool_type
         tools_by_type = {tool_type: [tool]}
         options = get_treatment_options(caller, target, tools_by_type)
@@ -466,7 +389,11 @@ class CmdApply(Command):
                 if action_id == "organ" and target_info == bodypart_key:
                     choice = (action_id, target_info)
                     break
-                if action_id in ("clean", "infection") and target_info == bodypart.replace(" ", "_"):
+                if (
+                    action_id in ("clean", "infection")
+                    and target_info == bodypart.replace(" ", "_")
+                    and _t == tool_type
+                ):
                     choice = (action_id, target_info)
                     break
                 if action_id == "bleeding" and not bodypart_key:
@@ -496,13 +423,13 @@ class CmdApply(Command):
         success, msg = tool.use_for_treatment(caller, target, action_id, target_info)
         tool.consume_use()  # consume a use whether the roll succeeds or fails
         if success:
-            caller.msg("|g" + msg + "|n")
+            caller.msg(MC["stable"] + msg + "|n")
             if target != caller:
-                target.msg("|g%s works on you: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
+                target.msg(MC["stable"] + "%s works on you: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
         else:
-            caller.msg("|r" + msg + "|n")
+            caller.msg(MC["critical"] + msg + "|n")
             if target != caller:
-                target.msg("|r%s tries to help: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
+                target.msg(MC["critical"] + "%s tries to help: %s|n" % ((caller.get_display_name(target) if hasattr(caller, "get_display_name") else caller.name), msg[:70] + ("..." if len(msg) > 70 else "")))
 
 
 class CmdSurgery(Command):
@@ -510,8 +437,9 @@ class CmdSurgery(Command):
     Perform surgical procedures on a patient on an operating table.
 
     This command covers standard trauma surgery and cyberware procedures.
-    Place the patient on the operating table first, then use one of the
-    forms below.
+    Place the patient on the operating table first (they use |wlie on operating table|n),
+    then use one of the forms below. All surgery including |wreplace|n requires that table,
+    a patient on it, and you in the room — there is no field chrome install for replacement limbs/organs.
 
     Usage:
       surgery <organ|bone>
@@ -527,6 +455,7 @@ class CmdSurgery(Command):
       surgery install chrome arm on Vex
       surgery remove chrome arm from Vex
       surgery replace heart on Vex
+      surgery replace left arm on Vex
       surgery repair chrome arm on Vex
       surgery list Vex
     """
@@ -557,6 +486,13 @@ class CmdSurgery(Command):
         if not patient:
             caller.msg("No one is on the operating table. They must use 'lie on operating table' first.")
             return
+        if patient != caller:
+            from world.rpg.trust import check_trust_or_incapacitated
+
+            ok, _r = check_trust_or_incapacitated(patient, caller, "operate", operate_strict=True)
+            if not ok:
+                caller.msg("They don't trust you enough for that. They need to @trust you to operate.")
+                return
         if verb in ("install", "remove", "replace", "repair", "list"):
             from world.medical.cybersurgery import (
                 start_cybersurgery_install,
@@ -620,16 +556,11 @@ class CmdSurgery(Command):
                         cw.db.surgery_difficulty = int(getattr(cw, "surgery_difficulty", 12) or 12) + diff_bonus
                     except Exception:
                         pass
-                now_ts = __import__("time").time()
-                sedated = (
-                    float(getattr(target.db, "sedated_until", 0.0) or 0.0) > now_ts
-                    or (
-                        bool(getattr(target.db, "medical_unconscious", False))
-                        and float(getattr(target.db, "medical_unconscious_until", 0.0) or 0.0) > now_ts
-                    )
-                )
+                from world.medical import is_sedated_for_surgery
+
+                sedated = is_sedated_for_surgery(target)
                 if getattr(cw, "surgery_requires_sedation", True) and not sedated:
-                    caller.msg("|yPatient is not sedated. Surgery difficulty will be significantly higher.|n")
+                    caller.msg(f"{MC['compensated']}Patient is not sedated. Surgery difficulty will be significantly higher.|n")
                 started, err = start_cybersurgery_install(caller, target, table, cw)
                 if not started:
                     caller.msg(err or "You cannot perform that surgery now.")
@@ -656,8 +587,13 @@ class CmdSurgery(Command):
                     return
                 organ_arg = left.strip().lower()
                 normalized = organ_arg.replace(" ", "_")
-                organ_key = ORGAN_ALIASES.get(organ_arg, ORGAN_ALIASES.get(normalized, normalized))
-                started, err = start_cybersurgery_replace(caller, target, table, organ_key)
+                from world.medical.limb_trauma import LIMB_ALIASES
+                limb_key = LIMB_ALIASES.get(organ_arg) or LIMB_ALIASES.get(normalized)
+                if limb_key:
+                    rep_key = limb_key
+                else:
+                    rep_key = ORGAN_ALIASES.get(organ_arg, ORGAN_ALIASES.get(normalized, normalized))
+                started, err = start_cybersurgery_replace(caller, target, table, rep_key)
                 if not started:
                     caller.msg(err or "You cannot perform that surgery now.")
                 return
@@ -718,6 +654,13 @@ class CmdDefib(Command):
         if not defib:
             caller.msg("You need a defibrillator in your inventory.")
             return
+        if target != caller:
+            from world.rpg.trust import check_trust_or_incapacitated
+
+            ok, _r = check_trust_or_incapacitated(target, caller, "heal")
+            if not ok:
+                caller.msg("They don't trust you enough for that. They need to @trust you to heal.")
+                return
         from world.medical.medical_defib import start_defib_sequence
         started, err = start_defib_sequence(caller, target, defib)
         if not started:

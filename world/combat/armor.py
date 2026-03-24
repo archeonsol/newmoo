@@ -6,6 +6,7 @@ import random
 
 from world.clothing import get_worn_items
 from world.combat.damage_types import DAMAGE_TYPES
+from world.races import ARMOR_SLOTS
 
 # Maximum total stacking_score a character can wear. Exceeding blocks wear.
 MAX_ARMOR_STACKING_SCORE = 24
@@ -37,6 +38,10 @@ def get_armor_protection_for_location(character, body_part, damage_type):
     where cyberware_pieces includes armor-model cyberware contributors for
     deterministic chrome durability wear.
     """
+    from world.body import get_character_body_parts
+
+    if not character or body_part not in get_character_body_parts(character):
+        return 0, [], []
     total = 0
     pieces = []
     cyberware_pieces = []
@@ -77,14 +82,18 @@ def degrade_armor(armor_pieces, damage_type, reduction_amount):
     """
     When armor blocks damage, reduce quality on each piece that contributed.
     reduction_amount is how much was actually blocked; spread degradation across pieces.
+    Uses the same base+remainder distribution as degrade_cyberware_armor to avoid
+    over-penalising when many pieces share a small reduction.
     """
     if not armor_pieces or reduction_amount <= 0:
         return
-    # Each piece that contributed takes some quality loss (e.g. 1 point per 5 blocked, min 1)
-    loss_per_piece = max(1, reduction_amount // max(1, len(armor_pieces)))
-    for obj in armor_pieces:
-        q = max(0, int(getattr(obj.db, "quality", 100) or 100) - loss_per_piece)
-        obj.db.quality = max(0, q)
+    count = len(armor_pieces)
+    base = max(1, reduction_amount // count)
+    remainder = reduction_amount % count
+    for idx, obj in enumerate(armor_pieces):
+        loss = base + (1 if idx < remainder else 0)
+        q = max(0, int(getattr(obj.db, "quality", 100) or 100) - loss)
+        obj.db.quality = q
 
 
 def degrade_cyberware_armor(character, cyberware_pieces, reduction_amount):

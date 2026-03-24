@@ -10,6 +10,23 @@ from evennia.utils import delay
 
 RING_TIMEOUT = 30.0
 RING_ECHO_INTERVAL = 3.5
+RINGTONE_MAX_LEN = 20
+
+
+def ringtone_suffix(handset) -> str:
+    """
+    Return ', <text>' for custom ringtone, or '' for default.
+    Stored on handset.db.ringtone (None or empty = default).
+    """
+    raw = getattr(getattr(handset, "db", None), "ringtone", None)
+    if raw is None:
+        return ""
+    s = str(raw).strip().replace("\r", " ").replace("\n", " ")
+    if len(s) > RINGTONE_MAX_LEN:
+        s = s[:RINGTONE_MAX_LEN].rstrip()
+    if not s:
+        return ""
+    return f", {s}"
 
 
 def get_call_peer(handset):
@@ -94,7 +111,15 @@ def ring_echo_callback(handset_id, session_id):
         return
     holder = h.get_authenticated_user() if hasattr(h, "get_authenticated_user") else None
     if holder:
-        holder.msg("|yYour handset is still ringing.|n")
+        suf = ringtone_suffix(h)
+        holder.msg(f"|yYour handset is still ringing{suf}.|n")
+        room = getattr(holder, "location", None)
+        if room:
+            hname = holder.get_display_name(room) if hasattr(holder, "get_display_name") else holder.key
+            try:
+                room.msg_contents(f"|y{hname}'s handset is still ringing{suf}.|n", exclude=holder)
+            except Exception:
+                pass
     delay(RING_ECHO_INTERVAL, ring_echo_callback, handset_id, session_id)
 
 
@@ -108,7 +133,14 @@ def ring_timeout_callback(dialer_id, target_id, session_id):
         target = tr[0] if tr else None
     except Exception:
         dialer = target = None
-    if not dialer or not target:
+    if not dialer:
+        return
+    if not target:
+        # Target handset was deleted; clean up dialer so it doesn't stay in "dialing" forever.
+        clear_call(dialer)
+        d_holder = dialer.get_authenticated_user() if hasattr(dialer, "get_authenticated_user") else None
+        if d_holder:
+            d_holder.msg("|yNo answer.|n")
         return
     try:
         if getattr(dialer.ndb, "call_session_id", None) != session_id:

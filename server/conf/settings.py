@@ -32,7 +32,7 @@ from evennia.settings_default import *
 ######################################################################
 
 # This is the name of your game. Make it catchy!
-SERVERNAME = "mootest"
+SERVERNAME = "UNDERSPIRE"
 
 # Command set for Characters (must be the game's CharacterCmdSet so stats/heal etc. are available).
 CMDSET_CHARACTER = "commands.default_cmdsets.CharacterCmdSet"
@@ -116,8 +116,12 @@ PROTOTYPE_MODULES = [
     "world.prototypes.alcohol_prototypes",
     "world.prototypes.performance_prototypes",
     "world.prototypes.medical_prototypes",
+    "world.prototypes.alchemy_prototypes",
     "world.prototypes.cyberware_prototypes",
     "world.prototypes.armor_prototypes",
+    "world.prototypes.faction_prototypes",
+    "world.prototypes.vehicle_prototypes",
+    "evennia.contrib.grid.xyzgrid.prototypes",
 ]
 
 ######################################################################
@@ -127,4 +131,8 @@ try:
     from server.conf.secret_settings import *
 except ImportError:
     print("secret_settings.py file not found or failed to import.")
+
+# Launcher: `evennia xyzgrid init|add|spawn` (see Evennia xyzgrid contrib README).
+EXTRA_LAUNCHER_COMMANDS = dict(EXTRA_LAUNCHER_COMMANDS)
+EXTRA_LAUNCHER_COMMANDS["xyzgrid"] = "evennia.contrib.grid.xyzgrid.launchcmd.xyzcommand"
 # mygame/server/conf/settings.py

@@ -1,17 +1,25 @@
 """
-Multi-puppet session relay: when a character is in an account's multi-puppet set
-but not the current puppet (or has no sessions), relay messages to the account
-with a "P1 Name: " prefix so the player sees slot feed and slot-command output.
+Multi-puppet session relay: when an NPC puppet (p2, p3, ...) is in an account's
+multi-puppet set, relay their messages to the account with a "P2 Name: " prefix
+so the player sees the NPC feed alongside their own output.
+
+The main character (p1 = current session puppet) is never relayed — their output
+goes directly to the player through the normal session channel.
 """
 from evennia.utils import logger
 
 
 def multi_puppet_relay(character, text, session=None, **kwargs):
     """
-    If this character is in an account's multi-puppet set, send the message to that
-    account's session(s) with "P1 Name: " prefix. When they are temporarily the current
-    puppet with no sessions (e.g. p2 look, p3 attack), we relay and return True so the
-    caller passes session=None to the parent (user sees only the prefixed feed).
+    If this character is an NPC puppet (p2+) in an account's multi-puppet set, send
+    the message to that account's session(s) with "P2 Name: " prefix so the player
+    sees the NPC's feed.
+
+    When the NPC is temporarily the session puppet (e.g. during p2 <cmd> execution),
+    we relay and return True so the caller passes session=None to the parent — the
+    player sees only the prefixed relay, not a duplicate bare message.
+
+    The main character (p1 = current session puppet) is never relayed here.
     """
     account_id = getattr(character.db, "_multi_puppet_account_id", None)
     slot = getattr(character.db, "_multi_puppet_slot", None)
@@ -50,6 +58,20 @@ def multi_puppet_relay(character, text, session=None, **kwargs):
         logger.log_trace("multipuppet: check multi_puppets list: %s" % err)
         return False
 
+    # Don't relay for dead/flatlined/corpse characters — they can't act.
+    try:
+        from world.death import is_flatlined, is_permanently_dead
+        if is_flatlined(character) or is_permanently_dead(character):
+            return False
+    except Exception:
+        pass
+    try:
+        from typeclasses.corpse import Corpse
+        if isinstance(character, Corpse):
+            return False
+    except Exception:
+        pass
+
     if not hasattr(account, "sessions"):
         return False
     sess_list = account.sessions.get()
@@ -57,7 +79,9 @@ def multi_puppet_relay(character, text, session=None, **kwargs):
         return False
 
     main_sess = sess_list[0]
-    # If the player is currently puppeting THIS character AND it has its own sessions, no relay needed
+    # The main character (p1) is never stored in multi_puppets and never has relay markers set,
+    # so it will have already returned False above (no account_id/slot). This check is a safety
+    # net in case stale markers exist: never relay for whoever is the real current session puppet.
     own_list = (getattr(character, "sessions", None) or [])
     if hasattr(own_list, "get"):
         own_list = own_list.get() or (own_list.all() if hasattr(own_list, "all") else [])
@@ -76,5 +100,6 @@ def multi_puppet_relay(character, text, session=None, **kwargs):
         account.msg(prefix + raw, session=sess_list)
     except Exception as err:
         logger.log_trace("multipuppet: account.msg relay: %s" % err)
-    # When we relayed for a slot puppet (current puppet with no sessions), don't also send via parent
+    # When an NPC is temporarily the session puppet for a p2/p3 command, suppress the bare
+    # output so the player only sees the prefixed relay line (not a duplicate unprefixed line).
     return getattr(main_sess, "puppet", None) == character and not has_own_sessions

@@ -40,7 +40,11 @@ def _at_say_whisper_overhear(location, speaker, message, receivers):
             if viewer in exclude or viewer == speaker:
                 continue
             heard = process_language_for_viewer(speaker, message, lang_key, viewer)
-            obj_name = speaker.get_display_name(viewer)
+            from world.rp_features import get_display_name_for_viewer
+            from world.skin_tones import format_ic_character_name
+
+            plain = get_display_name_for_viewer(speaker, viewer)
+            obj_name = format_ic_character_name(speaker, viewer, plain)
             line = '%s whispers something to someone... "%s"' % (obj_name, heard)
             viewer.msg(text=(line, {"type": "whisper"}), from_obj=speaker)
     except Exception as err:
@@ -132,7 +136,18 @@ class RoleplayMixin:
         if not exits:
             super().announce_move_from(destination, msg=msg, mapping=mapping, move_type=move_type, **kwargs)
             return
-        direction = exits[0].key.strip()
+        exi = exits[0]
+        direction = exi.key.strip()
+        custom_depart = getattr(getattr(exi, "db", None), "move_depart_others", None)
+        if custom_depart and str(custom_depart).strip():
+            from world.rp_features import format_exit_move_line_for_viewer
+
+            action = str(custom_depart).strip()
+            for viewer in viewers:
+                line = format_exit_move_line_for_viewer(action, self, viewer)
+                if line:
+                    viewer.msg(line)
+            return
         from world.rp_features import get_move_display_for_viewer
         for viewer in viewers:
             display = get_move_display_for_viewer(self, viewer)
@@ -152,12 +167,29 @@ class RoleplayMixin:
         if not exits:
             super().announce_move_to(source_location, msg=msg, mapping=mapping, move_type=move_type, **kwargs)
             return
-        direction = exits[0].key.strip()
+        exi = exits[0]
+        direction = exi.key.strip()
         viewers = [c for c in self.location.contents_get(content_type="character") if c != self]
-        from world.rp_features import get_move_display_for_viewer
-        for viewer in viewers:
-            display = get_move_display_for_viewer(self, viewer)
-            viewer.msg(f"{display} arrives from the {direction}.")
+        custom_arrive = getattr(getattr(exi, "db", None), "move_arrive_others", None)
+        if custom_arrive and str(custom_arrive).strip():
+            from world.rp_features import format_exit_move_line_for_viewer
+
+            action = str(custom_arrive).strip()
+            for viewer in viewers:
+                line = format_exit_move_line_for_viewer(action, self, viewer)
+                if line:
+                    viewer.msg(line)
+        else:
+            from world.rp_features import get_move_display_for_viewer
+            for viewer in viewers:
+                display = get_move_display_for_viewer(self, viewer)
+                viewer.msg(f"{display} arrives from the {direction}.")
+        arr_self = getattr(getattr(exi, "db", None), "move_arrive_self", None)
+        if arr_self and str(arr_self).strip():
+            try:
+                self.msg(str(arr_self).strip().format(direction=direction))
+            except Exception:
+                self.msg(str(arr_self).strip())
 
     def at_say(self, message, msg_self=None, msg_location=None, receivers=None, msg_receivers=None, **kwargs):
         """
@@ -239,7 +271,11 @@ class RoleplayMixin:
             if viewer == self:
                 continue
             speech = process_language_for_viewer(self, message, lang_key, viewer)
-            obj_name = self.get_display_name(viewer)
+            from world.rp_features import get_display_name_for_viewer
+            from world.skin_tones import format_ic_character_name
+
+            plain = get_display_name_for_viewer(self, viewer)
+            obj_name = format_ic_character_name(self, viewer, plain)
             if voice_phrase and voice_perception_check(viewer, self):
                 line = '%s says in a %s, "*speaking in a %s* %s"' % (obj_name, voice_phrase, voice_phrase, speech)
             else:
@@ -249,3 +285,18 @@ class RoleplayMixin:
             viewer.msg(text=(line, {"type": msg_type}), from_obj=self)
 
         _feed_room_cameras(location, self, message, improvise)
+        try:
+            from world.rp_features import get_display_name_for_viewer
+            from world.skin_tones import format_ic_character_name
+            plain_neutral = get_display_name_for_viewer(self, None)
+            obj_neutral = format_ic_character_name(self, None, plain_neutral)
+            if voice_phrase:
+                relay_line = '%s says in a %s, "*speaking in a %s* %s"' % (obj_neutral, voice_phrase, voice_phrase, message)
+            else:
+                relay_line = '%s says, "%s"' % (obj_neutral, message)
+            if improvise:
+                relay_line = "|w%s|n" % relay_line
+            from typeclasses.vehicles import relay_to_parked_vehicle_interiors
+            relay_to_parked_vehicle_interiors(location, relay_line)
+        except Exception:
+            pass

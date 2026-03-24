@@ -14,6 +14,13 @@ Key features:
 """
 
 import time
+from datetime import datetime
+
+try:
+    import arrow as _arrow
+    _ARROW_AVAILABLE = True
+except ImportError:
+    _ARROW_AVAILABLE = False
 
 from typeclasses.matrix.items import NetworkedItem
 from world.matrix_accounts import get_account, set_alias, get_alias, has_alias
@@ -69,6 +76,9 @@ class Handset(NetworkedItem):
         # Per-handset group chats (decentralized; keyed by group id).
         if not getattr(self.db, "group_chats", None):
             self.db.group_chats = {}
+        # Primary group for "hs group msg <text>" shortcut (no group name needed).
+        if not hasattr(self.db, "primary_group_id"):
+            self.db.primary_group_id = None
 
         # Per-handset photo album (list of dicts). Stored ONLY on this handset.
         if not getattr(self.db, "photos", None):
@@ -79,7 +89,7 @@ class Handset(NetworkedItem):
         # NOTE: Handset player command (`hs`) is now a global Character command
         # to avoid cmdset ambiguity when multiple handsets exist in scope.
 
-        # Register device commands (used by operate / device interface).
+        # Register device commands (used by use / operate / device interface).
         self._ensure_handset_device_commands()
 
     def at_cmdset_get(self, **kwargs):
@@ -169,16 +179,19 @@ class Handset(NetworkedItem):
         Get the character currently authenticated on this handset.
 
         For basic handsets, this is whoever is holding/wearing it.
+        Walks the container chain so a handset inside a bag still authenticates
+        the character who owns the bag.
         Future jailbroken devices may have separate authentication.
 
         Returns:
             Character or None: The authenticated user
         """
-        # For now, handset authenticates whoever is holding it
-        if hasattr(self, 'location'):
-            from typeclasses.characters import Character
-            if isinstance(self.location, Character):
-                return self.location
+        from typeclasses.characters import Character
+        loc = getattr(self, "location", None)
+        while loc is not None:
+            if isinstance(loc, Character):
+                return loc
+            loc = getattr(loc, "location", None)
         return None
 
     def handle_contacts(self, caller, *args):
@@ -691,7 +704,7 @@ class Handset(NetworkedItem):
         """Save a contact on this handset."""
         matrix_id = (matrix_id or "").strip()
         alias = (alias or "").strip()
-        if matrix_id is None or not str(matrix_id).strip():
+        if not matrix_id:
             return False, "|rInvalid Matrix ID.|n"
         if not alias:
             return False, "Usage: handset save <ID> as <alias>"
@@ -749,7 +762,7 @@ class Handset(NetworkedItem):
         self.db.call_log = log[-20:]
 
     def handle_call_history(self, caller, *args):
-        """Show recent call history (device menu / operate)."""
+        """Show recent call history (device menu / use)."""
         log = self.get_call_log()
         if not log:
             caller.msg("No recent calls logged on this handset.")
@@ -758,9 +771,10 @@ class Handset(NetworkedItem):
         for entry in log[-20:][::-1]:
             t = entry.get("t", 0)
             try:
-                from datetime import datetime
-
-                ts = datetime.fromtimestamp(float(t)).strftime("%b %d %H:%M")
+                if _ARROW_AVAILABLE:
+                    ts = _arrow.get(float(t)).format("MMM DD HH:mm")
+                else:
+                    ts = datetime.fromtimestamp(float(t)).strftime("%b %d %H:%M")
             except Exception:
                 ts = "?"
             peer_disp = self.display_alias_or_id(entry.get("peer", "") or "")
@@ -787,18 +801,13 @@ class Handset(NetworkedItem):
         return state
 
     def _set_call_state(self, state: str, peer_dbref: int | None = None):
+        # Always invalidate the cached peer object; get_call_peer re-resolves on demand.
+        # The old logic only cleared the cache when the peer changed, but missed the case
+        # where prev was None and a new peer was being set for the first time.
         try:
-            prev = getattr(self.ndb, "call_peer", None)
-            if peer_dbref is None:
-                self.ndb._call_peer_obj = None
-            elif prev is not None:
-                try:
-                    if int(prev) != int(peer_dbref):
-                        self.ndb._call_peer_obj = None
-                except Exception:
-                    self.ndb._call_peer_obj = None
+            self.ndb.call_state = state
+            self.ndb.call_peer = peer_dbref
+            self.ndb._call_peer_obj = None
         except Exception:
             pass
-        self.ndb.call_state = state
-        self.ndb.call_peer = peer_dbref
 

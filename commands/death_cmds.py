@@ -14,6 +14,8 @@ def _can_use_ooc_room(character):
         return False, "You can't do that right now."
     if getattr(character.db, "combat_target", None) is not None:
         return False, "You can't go OOC while in combat."
+    if getattr(character.db, "defib_in_progress", False):
+        return False, "You can't go OOC while using the defibrillator."
     try:
         from world.death import is_flatlined, is_permanently_dead
         if is_flatlined(character):
@@ -87,12 +89,14 @@ def _go_light_unpuppet_all(account):
 
 def _go_light_clear_death_attrs(account):
     """Remove corpse/spirit refs and spirit object from account. Logs and continues on exception."""
-    for key in ("dead_character_name", "dead_character_corpse"):
-        if hasattr(account.db, key):
-            try:
-                del account.db[key]
-            except Exception as e:
-                logger.log_trace("death_cmds._go_light_clear_death_attrs %s: %s" % (key, e))
+    for key in ("dead_character_name", "dead_character_corpse", "clone_snapshot_backup"):
+        try:
+            if hasattr(account.db, key):
+                account.attributes.remove(key)
+        except KeyError:
+            pass
+        except Exception as e:
+            logger.log_trace("death_cmds._go_light_clear_death_attrs %s: %s" % (key, e))
     spirit = getattr(account.db, "death_spirit", None)
     if spirit and hasattr(spirit, "id"):
         if hasattr(account, "characters") and hasattr(account.characters, "remove"):
@@ -102,18 +106,27 @@ def _go_light_clear_death_attrs(account):
                 logger.log_trace("death_cmds._go_light_clear_death_attrs remove spirit: %s" % e)
         try:
             spirit.delete()
+            # Only clear the reference after a successful delete; if delete() raises,
+            # the attr stays so the next death reuses the existing Spirit rather than
+            # creating a second orphaned one.
+            try:
+                if hasattr(account.db, "death_spirit"):
+                    account.attributes.remove("death_spirit")
+            except KeyError:
+                pass
+            except Exception as e:
+                logger.log_trace("death_cmds._go_light_clear_death_attrs remove death_spirit: %s" % e)
         except Exception as e:
             logger.log_trace("death_cmds._go_light_clear_death_attrs spirit.delete: %s" % e)
-    if hasattr(account.db, "death_spirit"):
+    # _last_puppet is cleared so a reconnect after go-light lands at account level (new char creation).
+    for key in ("_last_puppet",):
         try:
-            del account.db["death_spirit"]
+            if hasattr(account.db, key):
+                account.attributes.remove(key)
+        except KeyError:
+            pass
         except Exception as e:
-            logger.log_trace("death_cmds._go_light_clear_death_attrs del death_spirit: %s" % e)
-    if hasattr(account.db, "_last_puppet"):
-        try:
-            del account.db["_last_puppet"]
-        except Exception as e:
-            logger.log_trace("death_cmds._go_light_clear_death_attrs del _last_puppet: %s" % e)
+            logger.log_trace("death_cmds._go_light_clear_death_attrs %s: %s" % (key, e))
 
 
 def _go_light_disconnect_sessions(account, reason):
@@ -130,9 +143,32 @@ def _go_light_disconnect_sessions(account, reason):
             logger.log_trace("death_cmds._go_light_disconnect_sessions: %s" % e)
 
 
+def _find_ooc_room():
+    """Return the configured OOC room object, or None."""
+    from django.conf import settings
+    from evennia.utils.search import search_object
+    ooc_id = getattr(settings, "OOC_ROOM_ID", None)
+    if ooc_id is not None:
+        try:
+            res = search_object("#%s" % int(ooc_id))
+            if res:
+                return res[0]
+        except (TypeError, ValueError):
+            pass
+    try:
+        from evennia.utils.search import search_tag
+        res = search_tag("ooc_room", category="room")
+        if res:
+            return res[0] if hasattr(res[0], "move_to") else None
+    except Exception as e:
+        logger.log_trace("death_cmds._find_ooc_room: %s" % e)
+    return None
+
+
 class CmdGoOOC(Command):
     """
-    Temporarily move to the OOC room. You remain puppeted; use @ic to return.
+    Step out of the game world into the OOC lobby. Your character disappears
+    from the world until you return with @ic.
     Blocked while in combat, dead, grappled, unconscious, or voided.
     Usage: @ooc
     """
@@ -150,45 +186,62 @@ class CmdGoOOC(Command):
         if not ok:
             self.caller.msg("|r%s|n" % reason)
             return
-        from django.conf import settings
-        from evennia.utils.search import search_object
-        ooc_id = getattr(settings, "OOC_ROOM_ID", None)
-        ooc_room = None
-        if ooc_id is not None:
-            try:
-                res = search_object("#%s" % int(ooc_id))
-                if res:
-                    ooc_room = res[0]
-            except (TypeError, ValueError):
-                pass
-        if not ooc_room:
-            try:
-                from evennia.utils.search import search_tag
-                res = search_tag("ooc_room", category="room")
-                if res:
-                    ooc_room = res[0] if hasattr(res[0], "move_to") else res
-            except Exception as e:
-                logger.log_trace("death_cmds.CmdOOC search ooc_room: %s" % e)
-        if not ooc_room or not hasattr(ooc_room, "move_to"):
-            self.caller.msg("|rNo OOC room is configured. Ask staff to set OOC_ROOM_ID or tag a room 'ooc_room'.|n")
+
+        # Resolve the account and session.
+        account = getattr(caller, "account", None)
+        if not account:
+            self.caller.msg("|rCould not find your account.|n")
             return
+        session = getattr(self, "session", None)
+        if not session:
+            sess_list = account.sessions.get() if hasattr(account, "sessions") else []
+            session = sess_list[0] if sess_list else None
+        if not session:
+            self.caller.msg("|rNo active session found.|n")
+            return
+
         here = caller.location
         if not here:
             self.caller.msg("|rYou have no location to leave from.|n")
             return
+
+        # Save where the character was so @ic can restore them.
         caller.db.ooc_previous_location_id = here.id
-        caller.move_to(ooc_room)
-        self.caller.msg("|gYou step OOC. Use |w@ic|n to return.|n")
+
+        # Notify the room before the character vanishes.
         if here and hasattr(here, "contents_get"):
             for v in here.contents_get(content_type="character"):
                 if v == caller:
                     continue
-                v.msg("%s steps out of the world for a moment." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))
+                v.msg("%s goes OOC." % (
+                    caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name
+                ))
+
+        # Flag: suppress the normal fall-asleep broadcast in at_post_unpuppet.
+        caller.db._ooc_going_ooc = True
+
+        # Remove the character from the world (no location = invisible/gone).
+        caller.location = None
+
+        # Unpuppet — account is now at account level (OOC).
+        try:
+            account.unpuppet_object(session)
+        except Exception as e:
+            logger.log_trace("death_cmds.CmdGoOOC unpuppet_object: %s" % e)
+            # Clean up flag on failure.
+            try:
+                caller.attributes.remove("_ooc_going_ooc")
+            except Exception:
+                pass
+            return
+
+        account.msg("|gYou step out of the world. Use |w@ic|n to return.|n")
 
 
 class CmdReturnIC(Command):
     """
-    Return from the OOC room to where you were. Only works if you used @ooc.
+    Return to the game world from the OOC lobby. Repuppets your character
+    and restores them to where they were when they left.
     Usage: @ic
     """
     key = "@ic"
@@ -197,36 +250,115 @@ class CmdReturnIC(Command):
     help_category = "General"
 
     def func(self):
-        caller = _combat_caller(self)
-        if not getattr(caller, "db", None) or not hasattr(caller.db, "stats"):
-            self.caller.msg("You must be in character to use that.")
-            return
-        prev_id = getattr(caller.db, "ooc_previous_location_id", None)
-        if prev_id is None:
-            self.caller.msg("|rYou're already in the world. Use |w@ooc|n to step out first.|n")
-            return
-        from evennia.utils.search import search_object
-        try:
-            res = search_object("#%s" % int(prev_id))
-            if not res:
-                self.caller.msg("|rThat place is gone. You remain here.|n")
-                try:
-                    caller.attributes.remove("ooc_previous_location_id")
-                except Exception as e:
-                    logger.log_trace("death_cmds.CmdReturnIC remove ooc_previous_location_id: %s" % e)
+        # This command works both when puppeted (character-level) and when OOC (account-level).
+        account = None
+        char = None
+
+        # Determine if we're at account level (OOC) or character level.
+        from evennia.accounts.accounts import DefaultAccount
+        if isinstance(self.caller, DefaultAccount) or (
+            hasattr(self.caller, "characters") and not hasattr(self.caller.db, "stats")
+        ):
+            # Called at account level — find the character to re-puppet.
+            account = self.caller
+            chars = list(account.characters.all()) if hasattr(account, "characters") else []
+            if not chars:
+                self.caller.msg("|rNo character found to return to.|n")
                 return
-            dest = res[0]
-        except (TypeError, ValueError):
-            self.caller.msg("|rSomething went wrong.|n")
+            char = chars[0]
+        else:
+            # Called at character level — already IC, nothing to do.
+            caller = _combat_caller(self)
+            prev_id = getattr(caller.db, "ooc_previous_location_id", None)
+            if prev_id is None:
+                self.caller.msg("|rYou're already in the world. Use |w@ooc|n to step out first.|n")
+                return
+            try:
+                from world.death import character_can_act
+                can_act, block_msg = character_can_act(caller)
+                if not can_act:
+                    self.caller.msg(block_msg or "|rYou cannot return to the world in your current state.|n")
+                    return
+            except Exception:
+                pass
+            # Restore location and return early (character is still puppeted, just in OOC room).
+            from evennia.utils.search import search_object
+            try:
+                res = search_object("#%s" % int(prev_id))
+                dest = res[0] if res else None
+            except (TypeError, ValueError):
+                dest = None
+            try:
+                caller.attributes.remove("ooc_previous_location_id")
+            except Exception:
+                pass
+            if dest:
+                caller.move_to(dest)
+                self.caller.msg("|gYou step back into the world.|n")
+                if dest and hasattr(dest, "contents_get"):
+                    for v in dest.contents_get(content_type="character"):
+                        if v == caller:
+                            continue
+                        v.msg("%s returns IC." % (
+                            caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name
+                        ))
+            else:
+                self.caller.msg("|rYour previous location is gone. You remain here.|n")
             return
-        del caller.db.ooc_previous_location_id
-        caller.move_to(dest)
-        self.caller.msg("|gYou step back into the world.|n")
+
+        # Account-level path: re-puppet the character and restore their location.
+        session = getattr(self, "session", None)
+        if not session:
+            sess_list = account.sessions.get() if hasattr(account, "sessions") else []
+            session = sess_list[0] if sess_list else None
+        if not session:
+            self.caller.msg("|rNo active session found.|n")
+            return
+
+        prev_id = getattr(char.db, "ooc_previous_location_id", None)
+
+        # Find the destination before puppeting.
+        dest = None
+        if prev_id is not None:
+            from evennia.utils.search import search_object
+            try:
+                res = search_object("#%s" % int(prev_id))
+                dest = res[0] if res else None
+            except (TypeError, ValueError):
+                pass
+            try:
+                char.attributes.remove("ooc_previous_location_id")
+            except Exception:
+                pass
+
+        if dest is None:
+            # Fall back to the character's pre-logout location.
+            dest = getattr(char.db, "prelogout_location", None)
+
+        if dest is None:
+            self.caller.msg("|rCould not find a location to return to. Ask staff for help.|n")
+            return
+
+        # Restore the character into the world at their saved location.
+        char.location = dest
+
+        # Re-puppet.
+        try:
+            account.puppet_object(session, char)
+        except Exception as e:
+            logger.log_trace("death_cmds.CmdReturnIC puppet_object: %s" % e)
+            char.location = None  # roll back if puppet failed
+            self.caller.msg("|rFailed to return to character. Try again or contact staff.|n")
+            return
+
+        char.msg("|gYou step back into the world.|n")
         if dest and hasattr(dest, "contents_get"):
             for v in dest.contents_get(content_type="character"):
-                if v == caller:
+                if v == char:
                     continue
-                v.msg("%s steps back into the world." % (caller.get_display_name(v) if hasattr(caller, "get_display_name") else caller.name))
+                v.msg("%s returns IC." % (
+                    char.get_display_name(v) if hasattr(char, "get_display_name") else char.name
+                ))
 
 
 class CmdEnterPod(Command):
@@ -352,7 +484,11 @@ class CmdGoShard(Command):
             caller.msg("You are not in a state to do that.")
             return
         corpse = getattr(account.db, "dead_character_corpse", None)
-        snapshot = getattr(corpse, "db", None) and getattr(corpse.db, "clone_snapshot", None) if corpse else None
+        snapshot = None
+        if corpse and getattr(corpse, "db", None):
+            snapshot = getattr(corpse.db, "clone_snapshot", None)
+        if not snapshot:
+            snapshot = getattr(account.db, "clone_snapshot_backup", None)
         if not snapshot:
             caller.msg("|yYou have no stored shard. Only |wgo light|n is left.|n")
             return
@@ -377,7 +513,17 @@ class CmdGoShard(Command):
             if not new_char:
                 caller.msg("|rThe clone could not be created.|n")
                 return
-            apply_clone_snapshot(new_char, snapshot)
+            # Apply snapshot before linking to account; delete the orphan if it fails.
+            try:
+                apply_clone_snapshot(new_char, snapshot)
+            except Exception as e:
+                logger.log_err("death_cmds.CmdGoShard apply_clone_snapshot: %s" % e)
+                try:
+                    new_char.delete()
+                except Exception:
+                    pass
+                caller.msg("|rSomething went wrong restoring your shard. Contact staff.|n")
+                return
             account.characters.add(new_char)
             # Unlink corpse from account only; corpse stays persistent in the game world (do not delete)
             if corpse and hasattr(account, "characters"):
@@ -387,13 +533,27 @@ class CmdGoShard(Command):
                     logger.log_trace("death_cmds.CmdGoShard remove corpse: %s" % e)
             if corpse and getattr(corpse, "db", None) and hasattr(corpse.db, "clone_snapshot"):
                 try:
-                    del corpse.db["clone_snapshot"]
+                    corpse.attributes.remove("clone_snapshot")
+                except KeyError:
+                    pass
                 except Exception as e:
-                    logger.log_trace("death_cmds.CmdGoShard del clone_snapshot: %s" % e)
+                    logger.log_trace("death_cmds.CmdGoShard remove clone_snapshot: %s" % e)
+            try:
+                if hasattr(account.db, "clone_snapshot_backup"):
+                    account.attributes.remove("clone_snapshot_backup")
+            except KeyError:
+                pass
+            except Exception as e:
+                logger.log_trace("death_cmds.CmdGoShard remove clone_snapshot_backup: %s" % e)
             caller.msg("|xThe shard stirs. You are pulled away from the lobby.|n")
+            # Unpuppet the Spirit now so the account is at account-level during the narrative.
+            # This prevents a mid-narrative reconnect from re-puppeting the Spirit instead of
+            # landing on the clone at the end of the awakening sequence.
+            _go_light_unpuppet_all(account)
             run_awakening_sequence(account, new_char, spawn_room)
         except Exception as e:
-            caller.msg("|rSomething went wrong: %s|n" % e)
+            logger.log_err("death_cmds.CmdGoShard: %s" % e)
+            caller.msg("|rSomething went wrong. Contact staff.|n")
 
 
 class CmdGoLight(Command):
@@ -402,7 +562,9 @@ class CmdGoLight(Command):
     Usage: go light
     """
     key = "go light"
-    aliases = ["go light", "light"]
+    # No bare "light" alias: it steals the first token of phrases like "light tan" (chargen skin tone)
+    # and other IC text while Account + puppet cmdsets are merged with EvMenu.
+    aliases = []
     locks = "cmd:attr(has_spirit_puppet)"
     help_category = "Death"
 
@@ -470,3 +632,15 @@ class CmdNoMatchGrappled(Command):
 
     def func(self):
         self.caller.msg("You're locked in someone's grasp. You can only |wlook|n and |wresist|n.")
+
+
+class CmdNoMatchGrappling(Command):
+    """When holding someone in a grapple, any other command shows this."""
+    key = CMD_NOMATCH
+    locks = "cmd:all()"
+
+    def func(self):
+        self.caller.msg(
+            "Your hands are full holding them. You can only |wlook|n, |wattack|n them, |wgrapple|n, "
+            "|wletgo|n, |wstop walking|n, or use an exit to move."
+        )

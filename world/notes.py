@@ -11,6 +11,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+try:
+    import arrow as _arrow
+    _ARROW_AVAILABLE = True
+except ImportError:
+    _ARROW_AVAILABLE = False
+
 # REMOVED ServerConfig. Added search_script and create_script
 from evennia import search_script, create_script
 
@@ -19,6 +25,8 @@ DEFAULT_CATEGORIES = ("IC", "OOC", "JOB", "PLOT", "PVP")
 
 
 def _utc_now_iso() -> str:
+    if _ARROW_AVAILABLE:
+        return _arrow.utcnow().replace(microsecond=0).isoformat()
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 

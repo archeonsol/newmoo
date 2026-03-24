@@ -10,15 +10,9 @@ from evennia import TICKER_HANDLER as ticker
 
 from world.combat.utils import combat_display_name as _combat_display_name
 from world.combat.engine import _body_part_and_multiplier
-from world.combat.range_system import (
-    get_combat_range,
-    is_weapon_optimal,
-    get_weapon_optimal_ranges,
-    attempt_advance,
-    attempt_retreat,
-)
 from world.combat.cover import try_take_cover, clear_cover_state, set_suppressed
 from world.ammo import is_ranged_weapon
+from world.theme_colors import COMBAT_COLORS as CC
 
 # Seconds per "tick" for creature telegraphs (wind-up then execute).
 CREATURE_TICK_INTERVAL = 3.0
@@ -29,17 +23,7 @@ CREATURE_AI_COOLDOWN = 4.0
 
 
 def creature_range_decision(creature, target, weapon_key):
-    current = get_combat_range(creature, target)
-    if is_weapon_optimal(weapon_key, current):
-        return "attack"
-    optimal = get_weapon_optimal_ranges(weapon_key)
-    if not optimal:
-        return "attack"
-    nearest_optimal = min(optimal, key=lambda r: abs(r - current))
-    if nearest_optimal < current:
-        return "advance"
-    if nearest_optimal > current:
-        return "retreat"
+    # Positional advance/retreat removed; room size handles spacing.
     return "attack"
 
 
@@ -225,7 +209,6 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
 
     # Use both so telegraph execution still has a room if creature/target moved
     loc = getattr(creature, "location", None) or getattr(target, "location", None)
-    damage = int(spec.get("damage", 0))
     stamina_drain = int(spec.get("stamina_drain", 0))
 
     # Attack announcement: prefer the move's flavor (msg/execute_msg/msg_hit) so we never show generic when the move has flavor
@@ -296,11 +279,11 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
                     continue
                 tname = _combat_display_name(target, v)
                 cname = _combat_display_name(creature, v)
-                v.msg("|cThe blow lands on %s's %s but their armor absorbs it.|n" % (tname, body_part))
+                v.msg(CC["soak"] + "The blow lands on %s's %s but their armor absorbs it.|n" % (tname, body_part))
         if hasattr(creature, "msg"):
-            creature.msg("|cYour strike hits %s's %s — their armor takes it.|n" % (_combat_display_name(target, creature), body_part))
+            creature.msg(CC["soak"] + "Your strike hits %s's %s — their armor takes it.|n" % (_combat_display_name(target, creature), body_part))
         if hasattr(target, "msg"):
-            target.msg("|c%s's strike hits your %s; your armor takes it.|n" % (_combat_display_name(creature, target), body_part))
+            target.msg(CC["soak"] + "%s's strike hits your %s; your armor takes it.|n" % (_combat_display_name(creature, target), body_part))
         return True
 
     # Main hit message (creature move flavor). Skip room if we already used this line as the attack announcement.
@@ -336,7 +319,7 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
                     for v in loc.contents_get(content_type="character"):
                         if v == creature:
                             continue
-                        v.msg("|rThe blow tears into %s's %s — blood splashes everywhere like a waterfall|n" % (_combat_display_name(target, v), body_part))
+                        v.msg(CC["trauma_bleed"] + "The blow tears into %s's %s — blood splashes everywhere like a waterfall|n" % (_combat_display_name(target, v), body_part))
                 trauma_room_sent = True
         except Exception:
             pass
@@ -344,7 +327,7 @@ def execute_creature_move(creature, target, move_key, move_spec=None):
             for v in loc.contents_get(content_type="character"):
                 if v == creature:
                     continue
-                v.msg("|yThe blow lands on %s's %s.|n" % (_combat_display_name(target, v), body_part))
+                v.msg(CC["trauma_bone"] + "The blow lands on %s's %s.|n" % (_combat_display_name(target, v), body_part))
         target.at_damage(creature, damage, body_part=body_part, weapon_key=weapon_key, weapon_obj=None)
 
     return True
@@ -446,13 +429,7 @@ def creature_ai_tick(creature):
         return
     if cover_action == "leave_cover":
         clear_cover_state(creature, reset_pose=True)
-    range_action = creature_range_decision(creature, target, weapon_key)
-    if range_action == "advance":
-        attempt_advance(creature, target)
-        return
-    if range_action == "retreat":
-        attempt_retreat(creature, target)
-        return
+    creature_range_decision(creature, target, weapon_key)
     if weapon_key == "automatic" and int(getattr(target.db, "cover_quality", 0) or 0) >= 2:
         set_suppressed(target)
         loc = getattr(creature, "location", None)

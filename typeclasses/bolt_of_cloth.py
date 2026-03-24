@@ -20,6 +20,9 @@ class BoltOfCloth(Item):
         self.db.draft_worn_desc = ""
         self.db.draft_tease = ""
         self.db.draft_covered_parts = []
+        self.db.draft_see_thru = False
+        self.db.draft_state_a = None
+        self.db.draft_state_b = None
 
     def is_draft(self):
         return True

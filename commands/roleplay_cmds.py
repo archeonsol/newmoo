@@ -8,17 +8,24 @@ from evennia.commands.cmdhandler import CMD_NOMATCH
 from evennia.utils import logger
 
 
-def _resolve_body_part(name):
+def _resolve_body_part(name, caller=None):
     """Resolve short alias or full name to canonical body part key, or None."""
+    from world.body import get_character_body_parts
     from world.medical import BODY_PARTS, BODY_PART_ALIASES
     raw = name.strip().lower()
     if raw in BODY_PARTS:
         return raw
-    return BODY_PART_ALIASES.get(raw)
+    resolved = BODY_PART_ALIASES.get(raw)
+    if resolved:
+        return resolved
+    if raw == "tail" and caller is not None and "tail" in get_character_body_parts(caller):
+        return "tail"
+    return None
 
 
-def _body_parts_usage_list():
+def _body_parts_usage_list(caller=None):
     """Head-to-feet list with short names where available (for usage line)."""
+    from world.body import get_character_body_parts
     from world.medical import BODY_PARTS_HEAD_TO_FEET, BODY_PART_ALIASES
     rev = {}
     for alias, full in BODY_PART_ALIASES.items():
@@ -31,7 +38,55 @@ def _body_parts_usage_list():
         new_score = (len(alias), 1 if " " in alias else 0)
         if new_score < current_score:
             rev[full] = alias
-    return [rev.get(p, p) for p in BODY_PARTS_HEAD_TO_FEET]
+    out = [rev.get(p, p) for p in BODY_PARTS_HEAD_TO_FEET]
+    if caller is not None and "tail" in get_character_body_parts(caller):
+        out.append("tail")
+    return out
+
+
+def _set_body_part_description(caller, args):
+    """Set one body-part line from args like '<part> = <text>'. Returns True if handled (set or error msg)."""
+    if not hasattr(caller, "get_body_descriptions"):
+        caller.msg("You cannot set body descriptions.")
+        return True
+    if not args or "=" not in args:
+        caller.msg("Usage: @body <body part> = <text>")
+        caller.msg("Body parts: " + ", ".join(_body_parts_usage_list(caller)))
+        return True
+    raw, _, rest = args.partition("=")
+    rest = rest.strip()
+    if not rest:
+        caller.msg("Provide a description after the =.")
+        return True
+    from world.body import get_character_body_parts
+
+    part = _resolve_body_part(raw, caller=caller)
+    if not part:
+        caller.msg("Unknown body part. Use: " + ", ".join(_body_parts_usage_list(caller)))
+        return True
+    if part not in get_character_body_parts(caller):
+        caller.msg("You don't have that body part.")
+        return True
+    locked = getattr(caller.db, "locked_descriptions", None) or {}
+    if part in locked:
+        caller.msg(f"|r{part.title()} is locked by installed cyberware and cannot be edited.|n")
+        return True
+    if not caller.check_permstring("Builder"):
+        from world.skin_tones import strip_color_codes
+
+        race = (getattr(caller.db, "race", None) or "human").lower()
+        allow_markup = race == "splicer" and part in ("tail", "left ear", "right ear")
+        if not allow_markup:
+            stripped = strip_color_codes(rest)
+            if stripped != rest:
+                caller.msg(
+                    "Color codes are not allowed in body descriptions. Your skin tone provides the coloring."
+                )
+            rest = stripped
+    caller.get_body_descriptions()
+    caller.db.body_descriptions[part] = rest
+    caller.msg(f"Set your |w{part}|n description: {rest}")
+    return True
 
 
 def _run_emote(caller, text, improvise=False):
@@ -59,9 +114,8 @@ def _run_emote(caller, text, improvise=False):
     segments = split_emote_segments(text)
     # Comma-start = no "You " prefix in echo (scene-setting style)
     starts_with_comma = bool(segments and segments[0].strip().startswith(","))
-    emitter_name = caller.get_display_name(caller)
     chars_here = location.filter_visible(location.contents_get(content_type="character"), caller)
-    viewers = list(chars_here) + [caller]
+    viewers = [c for c in chars_here if c != caller] + [caller]
     debug_on = getattr(caller.db, "emote_debug", False) and caller.account
     if debug_on:
         debug_on = caller.account.permissions.check("Builder") or caller.account.permissions.check("Admin")
@@ -114,16 +168,21 @@ def _run_emote(caller, text, improvise=False):
             # Replace target refs in caller's echo (sdesc/recog from emitter's perspective)
             try:
                 from world.rp_features import get_display_name_for_viewer
+                from world.skin_tones import format_ic_character_name, format_ic_character_name_possessive
             except ImportError:
                 get_display_name_for_viewer = lambda c, v: getattr(c, "key", str(c))
+                format_ic_character_name = lambda c, v, p: p
+                format_ic_character_name_possessive = lambda c, v, p: (p or "") + "'s"
             for matched_name, char in sorted(caller_targets, key=lambda x: -len(x[0])):
                 if char == caller:
                     replacement = "you"
                     full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", "your", full_echo, flags=re.IGNORECASE)
                     full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, full_echo, flags=re.IGNORECASE)
                 else:
-                    replacement = get_display_name_for_viewer(char, caller)
-                    full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", replacement + "'s", full_echo, flags=re.IGNORECASE)
+                    pln = get_display_name_for_viewer(char, caller)
+                    replacement = format_ic_character_name(char, caller, pln)
+                    repl_poss = format_ic_character_name_possessive(char, caller, pln)
+                    full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"'s(?!\w)", repl_poss, full_echo, flags=re.IGNORECASE)
                     full_echo = re.sub(r"(?<!\w)" + re.escape(matched_name) + r"(?!\w)", replacement, full_echo, flags=re.IGNORECASE)
             # Comma-start: no "You " prefix; else template adds "You " and we avoid double capital
             if starts_with_comma:
@@ -158,7 +217,7 @@ def _run_emote(caller, text, improvise=False):
                 except Exception:
                     lang_bits = []
                 targets = find_targets_in_text(third, location.contents_get(content_type="character"), caller)
-                body_part = build_emote_for_viewer(third, viewer, targets, emitter_name)
+                body_part = build_emote_for_viewer(third, viewer, targets)
                 lang_key = get_speaker_language(caller)
                 for ph, quote_text in lang_bits:
                     try:
@@ -181,10 +240,10 @@ def _run_emote(caller, text, improvise=False):
                 logger.log_trace("roleplay_cmds._run_emote voice tag: %s" % e)
             if starts_with_comma:
                 pronoun_key = getattr(caller.db, "pronoun", "neutral")
-                full_body = replace_first_pronoun_with_name(full_body, pronoun_key, emitter_name)
+                full_body = replace_first_pronoun_with_name(full_body, pronoun_key, caller, viewer)
                 msg = full_body
             else:
-                msg = format_emote_message(emitter_name, full_body)
+                msg = format_emote_message(caller, viewer, full_body)
             # Slur emote output for drunk callers (level 2+) for other viewers as well.
             try:
                 from world.rpg.survival import slur_text_if_drunk
@@ -208,7 +267,7 @@ def _run_emote(caller, text, improvise=False):
             except Exception:
                 lang_bits = []
             targets = find_targets_in_text(third, location.contents_get(content_type="character"), caller)
-            body_part = build_emote_for_viewer(third, None, targets, emitter_name)
+            body_part = build_emote_for_viewer(third, None, targets)
             lang_key = get_speaker_language(caller)
             for ph, quote_text in lang_bits:
                 try:
@@ -222,10 +281,10 @@ def _run_emote(caller, text, improvise=False):
         full_body = re.sub(r"\.\s+(\w)", lambda m: ". " + m.group(1).upper(), full_body)
         if starts_with_comma:
             pronoun_key = getattr(caller.db, "pronoun", "neutral")
-            full_body = replace_first_pronoun_with_name(full_body, pronoun_key, emitter_name)
+            full_body = replace_first_pronoun_with_name(full_body, pronoun_key, caller, None)
             room_line = (full_body[0].upper() + full_body[1:]) if full_body and full_body[0].islower() else (full_body or "")
         else:
-            room_line = format_emote_message(emitter_name, full_body)
+            room_line = format_emote_message(caller, None, full_body)
     else:
         room_line = None
     if room_line:
@@ -234,6 +293,11 @@ def _run_emote(caller, text, improvise=False):
             feed_cameras_in_location(location, room_line)
         except Exception as e:
             logger.log_trace("roleplay_cmds._run_emote feed_cameras: %s" % e)
+        try:
+            from typeclasses.vehicles import relay_to_parked_vehicle_interiors
+            relay_to_parked_vehicle_interiors(location, room_line)
+        except Exception as e:
+            logger.log_trace("roleplay_cmds._run_emote relay_vehicle: %s" % e)
 
     if improvise and location:
         try:
@@ -250,52 +314,6 @@ def _run_emote(caller, text, improvise=False):
             else:
                 caller.msg(f"|yTo {who}:|n {line}")
         caller.msg("|w---|n")
-
-
-class CmdDescribeBodypart(Command):
-    """
-    Set a body-part description for your character (shown when someone looks at you).
-    You can use tokens $N (your name), $P/$p (possessive), $S/$s (subject). See help tokens.
-
-    Usage:
-      @describe_bodypart <body part> = <text>
-      @describe_bodypart head = scarred and crooked
-      @descpart lshoulder = $S has an old burn mark on $p shoulder
-
-    Body parts (head to feet): head, face, leye, reye, lear, rear, neck, lshoulder,
-    rshoulder, torso, back, abdomen, larm, rarm, lhand, rhand, groin, lthigh,
-    rthigh, lfoot, rfoot
-    """
-    key = "@describe_bodypart"
-    aliases = ["@descpart"]
-    locks = "cmd:all()"
-    help_category = "General"
-
-    def func(self):
-        caller = self.caller
-        if not hasattr(caller, "get_body_descriptions"):
-            caller.msg("You cannot set body descriptions.")
-            return
-        if not self.args or "=" not in self.args:
-            caller.msg("Usage: @describe_bodypart <body part> = <text>")
-            caller.msg("Body parts: " + ", ".join(_body_parts_usage_list()))
-            return
-        raw, _, rest = self.args.partition("=")
-        rest = rest.strip()
-        if not rest:
-            caller.msg("Provide a description after the =.")
-            return
-        part = _resolve_body_part(raw)
-        if not part:
-            caller.msg("Unknown body part. Use: " + ", ".join(_body_parts_usage_list()))
-            return
-        locked = getattr(caller.db, "locked_descriptions", None) or {}
-        if part in locked:
-            caller.msg(f"|r{part.title()} is locked by installed cyberware and cannot be edited.|n")
-            return
-        caller.get_body_descriptions()
-        caller.db.body_descriptions[part] = rest
-        caller.msg(f"Set your |w{part}|n description: {rest}")
 
 
 class CmdDescribeMeAs(Command):
@@ -319,6 +337,15 @@ class CmdDescribeMeAs(Command):
         if "=" in args:
             _, _, rest = args.partition("=")
             rest = rest.strip()
+            if not caller.check_permstring("Builder"):
+                from world.skin_tones import strip_color_codes
+
+                stripped = strip_color_codes(rest)
+                if stripped != rest:
+                    caller.msg(
+                        "Color codes are not allowed in your general description. Your skin tone provides the coloring."
+                    )
+                rest = stripped
             caller.db.general_desc = rest if rest else "This is a character."
             if rest:
                 caller.msg("When someone looks at you, they will see: |w%s|n" % rest)
@@ -622,12 +649,16 @@ class CmdMemory(Command):
 
 class CmdCount(Command):
     """
-    Count how many things or people matching a name are in the room. Use this to
-    see how many pods, chairs, or characters matching 'tall man' are here. When
+    Count how many things or people matching a name are in the room. When
     there are multiples, shows 1st, 2nd so you can target them in poses.
 
+    Also used to check how much cash you're carrying. Use with no arguments,
+    or with 'money' / 'cash', to count your on-hand funds.
+
     Usage:
-      count <name>
+      count              -- show your on-hand cash
+      count money        -- show your on-hand cash
+      count <name>       -- count matching objects/people in the room
     """
     key = "count"
     locks = "cmd:all()"
@@ -641,8 +672,18 @@ class CmdCount(Command):
             caller.msg("You are not in a location.")
             return
         name_arg = (self.args or "").strip()
-        if not name_arg:
-            caller.msg("Usage: count <name> — Count how many things or people matching that name are here (e.g. |wcount pod|n, |wcount tall man|n).")
+
+        # No args or money/cash keywords → show on-hand cash
+        if not name_arg or name_arg.lower() in ("money", "cash", "funds", "credits"):
+            from world.rpg.economy import get_balance, format_currency, CURRENCY_NAME
+            amount = get_balance(caller)
+            if amount == 0:
+                caller.msg(f"You count your {CURRENCY_NAME}. You have nothing on hand.")
+            else:
+                caller.msg(
+                    f"You count your {CURRENCY_NAME}. "
+                    f"You have {format_currency(amount)} on hand."
+                )
             return
         search = name_arg.lower()
         ordinals = ("1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th")
@@ -767,10 +808,20 @@ class CmdRecog(Command):
                 caller.msg("You don't recognize anyone by that name.")
                 return
             target, perm_match, temp_match = found
+            perm = caller.recog.get(target) if hasattr(caller, "recog") else None
+            temp = get_helmet_recog_for_viewer(caller, target)
             if perm_match:
+                from world.rpg.trust import forget_trust_for_name
+
                 caller.recog.remove(target)
+                if perm:
+                    forget_trust_for_name(caller, perm)
             if temp_match:
+                from world.rpg.trust import forget_trust_for_name
+
                 clear_helmet_recog_for_viewer(caller, target)
+                if temp:
+                    forget_trust_for_name(caller, temp)
             sdesc = get_display_name_for_viewer(target, caller)
             caller.msg("You no longer recognize them. You'll see them as: |w%s|n" % sdesc)
             return
@@ -824,31 +875,53 @@ class CmdRecog(Command):
             # Normal recog: permanent name tied to their uncovered face; message should use the
             # *current* visible description (sdesc) before recog is applied.
             before = get_character_sdesc_for_viewer(target, caller)
+            old_perm = caller.recog.get(target) if hasattr(caller, "recog") else None
             caller.recog.add(target, name_part)
+            if old_perm and old_perm.strip().lower() != name_part.strip().lower():
+                from world.rpg.trust import migrate_trust_rename
+
+                migrate_trust_rename(caller, old_perm, name_part)
         caller.msg("You'll now see |w%s|n as |w%s|n." % (before, name_part))
 
 
 class CmdBody(Command):
     """
-    List all body parts and their current descriptions (head to feet).
+    List or set body-part descriptions (shown when someone looks at you).
+    You can use tokens $N (your name), $P/$p (possessive), $S/$s (subject). See help tokens.
 
     Usage:
       @body
+      @body <body part> = <text>
+      @body head = scarred and crooked
+      @body lshoulder = $S has an old burn mark on $p shoulder
+
+    Body parts (head to feet): head, face, leye, reye, lear, rear, neck, lshoulder,
+    rshoulder, torso, back, abdomen, larm, rarm, lhand, rhand, groin, lthigh,
+    rthigh, lfoot, rfoot
     """
     key = "@body"
+    aliases = ["@describe_bodypart", "@descpart"]
+    locks = "cmd:all()"
     help_category = "General"
 
     def func(self):
-        from world.medical import BODY_PARTS_HEAD_TO_FEET
+        from world.body import body_part_groups_for_character
         caller = self.caller
+        args = (self.args or "").strip()
+        if "=" in args:
+            _set_body_part_description(caller, args)
+            return
         if not hasattr(caller, "db") or not hasattr(caller.db, "body_descriptions"):
             caller.msg("You cannot view body descriptions.")
             return
         # Show raw descriptions you set, not clothing-overridden (look uses effective desc)
         parts = caller.db.body_descriptions or {}
-        caller.msg("|wYour body part descriptions|n (use |w@describe_bodypart <part> = <text>|n to set)")
+        caller.msg("|wYour body part descriptions|n (use |w@body <part> = <text>|n to set)")
         caller.msg("")
-        for part in BODY_PARTS_HEAD_TO_FEET:
+        order = []
+        for group in body_part_groups_for_character(caller):
+            order.extend(group)
+        for part in order:
             text = (parts.get(part) or "").strip()
             if text:
                 caller.msg(f"  |w{part}|n: {text}")
@@ -1260,6 +1333,15 @@ class CmdNoMatch(Command):
 
     def func(self):
         raw = (self.args or "").strip()
+
+        # Check for pending rentable-door input (rent code, doorcode menu, open code)
+        try:
+            from commands.rentable_door_cmds import handle_pending_input
+            if handle_pending_input(self.caller, raw):
+                return
+        except Exception:
+            pass
+
         if raw.startswith("."):
             emote_text = raw[1:].strip()
             if emote_text:
@@ -1371,7 +1453,7 @@ class CmdTease(Command):
              Bob sees:  'He lifts his shirt and shows his chest to you.'
              Others:    'He lifts his shirt and shows his chest to Bob.'
 
-    Same tokens work in describe_bodypart, lp/pose, and worndesc. See |whelp tokens|n.
+    Same tokens work in |w@body|n part lines, lp/pose, and worndesc. See |whelp tokens|n.
 
     Usage:
       tease <clothing> [at <target>]
@@ -1428,7 +1510,6 @@ class CmdTease(Command):
         room = caller.location
         if not room:
             return
-        doer_name = caller.get_display_name(caller)
         for viewer in room.contents:
             if not hasattr(viewer, "msg"):
                 continue
@@ -1437,7 +1518,9 @@ class CmdTease(Command):
                 if viewer == caller:
                     viewer.msg(body)
                 else:
-                    viewer.msg(format_emote_message(doer_name, body))
+                    from world.rpg.emote import format_emote_message
+
+                    viewer.msg(format_emote_message(caller, viewer, body))
         return
 
 
@@ -1527,7 +1610,7 @@ class CmdSmell(Command):
         target = None
         if matches:
             if len(matches) > 1:
-                caller.msg("Multiple people match that. Be more specific (use 1-<sdesc>, 2-<sdesc>, etc).")
+                caller.msg("Multiple people match that. Be more specific (use 1-<sdesc> or <sdesc>-1, etc).")
                 return
             target = matches[0]
         else:

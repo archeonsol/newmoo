@@ -307,7 +307,7 @@ class CmdPhotoRecog(Command):
                 self.caller.msg(f"No one in the photo matches |w{sdesc_part}|n.")
                 return
             if len(matches) > 1:
-                self.caller.msg("Multiple people match that in the photo. Be more specific (use 1-<sdesc>, 2-<sdesc>, etc).")
+                self.caller.msg("Multiple people match that in the photo. Be more specific (use 1-<sdesc> or <sdesc>-1, etc).")
                 return
             target = matches[0]
         except Exception:

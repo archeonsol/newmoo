@@ -23,6 +23,7 @@ class Ammo(Object):
     Subclasses set ammo_type so builders can create "pistol rounds", "rifle rounds", etc.
     """
     def at_object_creation(self):
+        super().at_object_creation()
         self.db.ammo_type = AMMO_TYPE_SIDEARM
         self.db.quantity = 0
         self.db.max_stack = DEFAULT_MAX_STACK
@@ -40,7 +41,8 @@ class PistolAmmo(Ammo):
     def at_object_creation(self):
         super().at_object_creation()
         self.db.ammo_type = AMMO_TYPE_SIDEARM
-        self.db.quantity = self.db.quantity or 12
+        if not self.db.quantity:
+            self.db.quantity = 12
         if not self.db.desc:
             self.db.desc = "A stack of pistol rounds for sidearms."
 
@@ -50,7 +52,8 @@ class RifleAmmo(Ammo):
     def at_object_creation(self):
         super().at_object_creation()
         self.db.ammo_type = AMMO_TYPE_LONGARM
-        self.db.quantity = self.db.quantity or 5
+        if not self.db.quantity:
+            self.db.quantity = 5
         if not self.db.desc:
             self.db.desc = "A stack of rifle rounds for longarms."
 
@@ -60,6 +63,7 @@ class AutomaticAmmo(Ammo):
     def at_object_creation(self):
         super().at_object_creation()
         self.db.ammo_type = AMMO_TYPE_AUTOMATIC
-        self.db.quantity = self.db.quantity or 30
+        if not self.db.quantity:
+            self.db.quantity = 30
         if not self.db.desc:
             self.db.desc = "A stack of rounds for automatic weapons."

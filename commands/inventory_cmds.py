@@ -88,6 +88,19 @@ class CmdWield(Command):
                 caller.msg("Your deployed claws prevent you from holding items. Retract them first.")
                 return
 
+        try:
+            from world.medical.limb_trauma import is_hand_usable
+            use_left = is_hand_usable(caller, "left")
+            use_right = is_hand_usable(caller, "right")
+        except Exception:
+            use_left = use_right = True
+        if not use_left and not use_right:
+            caller.msg("Your arms are ruined. You can't hold anything until you get chrome.")
+            return
+        if getattr(caller.db, "grappling", None):
+            caller.msg("Your hands are full holding someone. Let go first.")
+            return
+
         target = caller.search(self.args.strip(), location=caller)
         if not target:
             return
@@ -106,6 +119,9 @@ class CmdWield(Command):
         left = getattr(caller.db, "left_hand_obj", None)
         right = getattr(caller.db, "right_hand_obj", None)
         if hands_needed == 2:
+            if not (use_left and use_right):
+                caller.msg("You need two working arms to wield that. Your limb won't cooperate.")
+                return
             if left or right:
                 caller.msg("You need both hands free to wield that. Unwield or drop what you're holding first.")
                 return
@@ -125,10 +141,13 @@ class CmdWield(Command):
             caller.db.left_hand_obj = target
             caller.db.right_hand_obj = target
         else:
-            if not right:
+            if not right and use_right:
                 caller.db.right_hand_obj = target
-            else:
+            elif not left and use_left:
                 caller.db.left_hand_obj = target
+            else:
+                caller.msg("You have no free usable hand.")
+                return
         _update_primary_wielded(caller)
         if getattr(caller.db, "combat_target", None) is not None:
             caller.db.combat_skip_next_turn = True
@@ -492,6 +511,14 @@ class CmdWear(Command):
         if not covered:
             caller.msg(f"{target.get_display_name(caller)} isn't something you can wear.")
             return
+        race_fit = getattr(target.db, "race_fit", None)
+        character_race = (getattr(caller.db, "race", None) or "human").lower()
+        if race_fit == "human_only" and character_race == "splicer":
+            caller.msg("This garment doesn't accommodate your tail.")
+            return
+        if race_fit == "splicer_only" and character_race != "splicer":
+            caller.msg("This garment is cut for a Splicer's frame.")
+            return
         worn = caller.db.worn or []
         if target in worn:
             caller.msg(f"You're already wearing {target.get_display_name(caller)}.")
@@ -682,10 +709,15 @@ class CmdToggleClothing(Command):
         cfg = target.get_state_config(old_key)
         you_emote = cfg.get("toggle_emote_you") if cfg else None
 
-        item_name_you = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
+        substitute_clothing_desc = None
         if you_emote:
-            from world.rpg.crafting import substitute_clothing_desc
+            try:
+                from world.rpg.crafting import substitute_clothing_desc
+            except ImportError:
+                substitute_clothing_desc = None
 
+        item_name_you = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.name
+        if you_emote and substitute_clothing_desc:
             caller.msg(substitute_clothing_desc(you_emote, caller, item=target))
         else:
             caller.msg(f"You adjust {item_name_you}.")
@@ -696,9 +728,7 @@ class CmdToggleClothing(Command):
                     continue
                 vcaller = caller.get_display_name(viewer) if hasattr(caller, "get_display_name") else caller.name
                 vitem = target.get_display_name(viewer) if hasattr(target, "get_display_name") else target.name
-                if you_emote:
-                    from world.rpg.crafting import substitute_clothing_desc
-
+                if you_emote and substitute_clothing_desc:
                     viewer.msg(substitute_clothing_desc(you_emote, caller, item=target))
                 else:
                     viewer.msg(f"{vcaller} adjusts {vitem}.")
@@ -733,18 +763,33 @@ class CmdStrip(Command):
             target = caller.search(target_spec, location=caller.location)
             if not target:
                 return
-            if target != caller:
+        else:
+            item_spec = args
+            target = caller
+
+        if target != caller:
+            try:
+                from typeclasses.corpse import Corpse
+            except ImportError:
+                Corpse = None
+            if Corpse and isinstance(target, Corpse):
+                pass
+            else:
                 try:
                     from world.death import is_character_logged_off, character_logged_off_long_enough
+                    from world.rpg.trust import check_trust_or_incapacitated
+
                     if is_character_logged_off(target):
                         if not character_logged_off_long_enough(target):
                             caller.msg("They haven't been asleep long enough.")
                             return
+                    else:
+                        ok, _r = check_trust_or_incapacitated(target, caller, "strip")
+                        if not ok:
+                            caller.msg("They don't trust you for that. They need to @trust you to strip.")
+                            return
                 except ImportError as e:
                     logger.log_trace("inventory_cmds.CmdStrip is_character_logged_off: %s" % e)
-        else:
-            item_spec = args
-            target = caller
         worn = list(target.db.worn or [])
         if not worn:
             if target is caller:
@@ -764,17 +809,19 @@ class CmdStrip(Command):
         iname = item.get_display_name(caller) if hasattr(item, "get_display_name") else item.name
         tname = target.get_display_name(caller) if hasattr(target, "get_display_name") else target.key
         if target is caller:
-            caller.msg(f"You strip {iname} and take it.")
-            caller.location.msg_contents(
-                f"{caller.get_display_name(caller)} strips {iname}.",
-                exclude=caller,
-            )
+            caller.msg(f"You strip off {iname} and take it.")
+            if caller.location:
+                caller.location.msg_contents(
+                    f"{caller.get_display_name(caller.location)} strips off {iname}.",
+                    exclude=caller,
+                )
         else:
             caller.msg(f"You strip {iname} from {tname} and take it.")
-            caller.location.msg_contents(
-                f"{caller.get_display_name(caller)} strips {iname} from {tname}.",
-                exclude=caller,
-            )
+            if caller.location:
+                caller.location.msg_contents(
+                    f"{caller.get_display_name(caller.location)} strips {iname} from {tname}.",
+                    exclude=caller,
+                )
 
 
 class CmdFrisk(Command):
@@ -809,6 +856,20 @@ class CmdFrisk(Command):
         if target == caller:
             caller.msg("You know what you're carrying.")
             return
+        # Flatlined characters (dying, 0 HP) can be frisked without consent — they are
+        # incapacitated and cannot object. Skip the trust check in that state.
+        flatlined = False
+        try:
+            from world.death import is_flatlined
+            flatlined = is_flatlined(target)
+        except ImportError:
+            pass
+        if not flatlined:
+            from world.rpg.trust import check_trust_or_incapacitated
+            ok, _r = check_trust_or_incapacitated(target, caller, "strip")
+            if not ok:
+                caller.msg("They don't trust you for that. They need to @trust you to strip.")
+                return
         tname = target.get_display_name(caller)
         caller.msg("You run your hands over %s's pockets and belongings." % tname)
         caller.location.msg_contents(

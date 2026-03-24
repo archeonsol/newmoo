@@ -3,6 +3,8 @@ Bleeding subsystem split from world.medical.__init__.
 """
 import random
 
+from world.theme_colors import MEDICAL_COLORS as MC
+
 BLEEDING_TICK_INTERVAL = 18
 BLEEDING_DRAIN_PER_TICK = (1, 2, 3, 5)
 HEMOSTATIC_REOPEN_CHANCE = 0.12
@@ -47,7 +49,7 @@ def apply_bleeding_tick(character):
                 wound["bleed_treated"] = False
                 wound["bleed_rate"] = max(0.8, float(wound.get("bleed_rate", 0.0) or 0.0) + 0.8)
                 if hasattr(character, "msg"):
-                    character.msg("|yExertion tears at a recent closure. A wound reopens.|n")
+                    character.msg(f"{MC['compensated']}Exertion tears at a recent closure. A wound reopens.|n")
                 break
     if tourniquet:
         if level > 0:
@@ -68,9 +70,9 @@ def apply_bleeding_tick(character):
                 character.db.tourniquet_ticks = 0
                 compute_effective_bleed_level(character)
                 if character.location:
-                    character.msg("|yThe tourniquet has been on too long. You loosen it; the wound reopens. Get proper closure soon.|n")
+                    character.msg(f"{MC['compensated']}The tourniquet has been on too long. You loosen it; the wound reopens. Get proper closure soon.|n")
                     character.location.msg_contents(
-                        "|y%s loosens the tourniquet; the wound reopens.|n" % character.get_display_name(character),
+                        f"{MC['compensated']}%s loosens the tourniquet; the wound reopens.|n" % character.get_display_name(character),
                         exclude=character,
                     )
             return False
@@ -95,9 +97,9 @@ def apply_bleeding_tick(character):
         character.db.bleeding_hemostatic_stabilized = False
         level, _ = compute_effective_bleed_level(character)
         if character.location:
-            character.msg("|yThe hemostatic seal gives. The wound is bleeding again.|n")
+            character.msg(f"{MC['compensated']}The hemostatic seal gives. The wound is bleeding again.|n")
             character.location.msg_contents(
-                "|y%s's wound reopens; the hemostatic seal did not hold.|n" % character.get_display_name(character),
+                f"{MC['compensated']}%s's wound reopens; the hemostatic seal did not hold.|n" % character.get_display_name(character),
                 exclude=character,
             )
 
@@ -114,12 +116,19 @@ def apply_bleeding_tick(character):
         return False
     character.db.current_hp = max(0, (current or 0) - drain)
     if character.location:
-        from typeclasses.cyberware_catalog import PainEditor
-        has_pain_editor = any(isinstance(cw, PainEditor) and not bool(getattr(cw.db, "malfunctioning", False)) for cw in (getattr(character.db, "cyberware", None) or []))
+        try:
+            from world.alchemy.effects import has_pain_suppression
+
+            has_pain_editor = has_pain_suppression(character)
+        except Exception:
+            has_pain_editor = any(
+                type(cw).__name__ == "PainEditor" and not bool(getattr(cw.db, "malfunctioning", False))
+                for cw in (getattr(character.db, "cyberware", None) or [])
+            )
         if not has_pain_editor:
-            character.msg("|rYou're bleeding.|n")
+            character.msg(f"{MC['critical']}You're bleeding.|n")
         character.location.msg_contents(
-            "|r%s is bleeding.|n" % character.get_display_name(character),
+            f"{MC['critical']}%s is bleeding.|n" % character.get_display_name(character),
             exclude=character,
         )
     return True

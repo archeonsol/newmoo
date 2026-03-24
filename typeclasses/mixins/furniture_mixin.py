@@ -21,6 +21,14 @@ class FurnitureMixin:
         """
         move_type = kwargs.get("move_type", "move")
 
+        if move_type in ("move", "traverse"):
+            try:
+                from world.vehicle_mounts import try_auto_dismount_for_move
+
+                try_auto_dismount_for_move(self)
+            except Exception:
+                pass
+
         # Check if sitting/lying
         is_seated = self.db.sitting_on is not None
         is_lying = self.db.lying_on is not None or self.db.lying_on_table is not None

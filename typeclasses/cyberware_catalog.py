@@ -2,6 +2,7 @@
 
 from typeclasses.cyberware import CyberwareBase
 from world.cyberware_buffs import *
+from world.skin_tones import strip_color_codes
 
 
 SKINWEAVE_DEFAULTS = {
@@ -22,6 +23,7 @@ SKINWEAVE_EXTENDED_COVERAGE = {
 
 class ChromeArmLeft(CyberwareBase):
     buff_class = ChromeArmLeftBuff
+    chrome_replacement_for = "left_arm"
     surgery_category = "limb"
     surgery_narrative_key = "chrome_arm"
     surgery_difficulty = 20
@@ -50,6 +52,7 @@ class ChromeArmRight(CyberwareBase):
 
 class ChromeLegLeft(CyberwareBase):
     buff_class = ChromeLegLeftBuff
+    chrome_replacement_for = "left_leg"
     surgery_category = "limb"
     surgery_narrative_key = "chrome_leg"
     surgery_difficulty = 22
@@ -64,6 +67,7 @@ class ChromeLegLeft(CyberwareBase):
 
 class ChromeLegRight(CyberwareBase):
     buff_class = ChromeLegRightBuff
+    chrome_replacement_for = "right_leg"
     surgery_category = "limb"
     surgery_narrative_key = "chrome_leg"
     surgery_difficulty = 22
@@ -96,6 +100,29 @@ class ChromeHandRight(CyberwareBase):
     chrome_max_hp = 60
     conflicts_with = ["ChromeArmRight"]
     body_mods = {"right hand": ("lock", "Five chrome fingers, each knuckle a visible pin joint. The grip plates are crosshatched for traction. When the hand closes, the servos hum at a pitch just below hearing. The fingertips are smooth, featureless: no prints, no whorls.")}
+
+
+class ChromeTail(CyberwareBase):
+    """
+    Adds the tail body part for races that lack it; locks/replaces for Splicers.
+    Future tail-slot cyberware should set conflicts_with to include ChromeTail (both ways).
+    """
+
+    buff_class = ChromeTailBuff
+    adds_body_parts = ["tail"]
+    surgery_category = "limb"
+    surgery_narrative_key = "chrome_tail"
+    surgery_difficulty = 16
+    surgery_blood_loss = "moderate"
+    chrome_max_hp = 80
+    armor_values = {"slashing": 3, "impact": 3}
+    damage_model = "none"
+    body_mods = {
+        "tail": (
+            "lock",
+            "A chrome tail extends from the base of the spine — segmented, articulated, each vertebral plate clicking softly as it moves.",
+        ),
+    }
 
 
 class ChromeEyes(CyberwareBase):
@@ -239,8 +266,9 @@ class SkinWeave(CyberwareBase):
         if body_part not in parts:
             return False, f"Your skin weave doesn't cover your {body_part}."
         new_desc = (new_desc or "").strip()
-        if len(new_desc) < 20:
-            return False, "Description too short (min 20 characters)."
+        visible = (strip_color_codes(new_desc) or "").strip()
+        if len(visible) < 20:
+            return False, "Description too short (min 20 characters of visible text, not counting color codes)."
         if len(new_desc) > 500:
             return False, "Description too long (max 500 characters)."
         descs = dict(self.db.weave_descriptions or {})
@@ -463,6 +491,34 @@ class RetractableClaws(CyberwareBase):
     chrome_max_hp = 40
     body_mods = {}
 
+    def reapply_buffs(self, character):
+        super().reapply_buffs(character)
+        if getattr(self.db, "malfunctioning", False):
+            return
+        if self.are_deployed():
+            from world.cyberware_buffs import RetractableClawsDeployedBuff
+
+            character.buffs.add(RetractableClawsDeployedBuff)
+
+    def set_malfunction(self, character, value=True):
+        super().set_malfunction(character, value)
+        if value:
+            try:
+                character.buffs.remove("retractable_claws_deployed")
+            except Exception:
+                pass
+        elif self.are_deployed():
+            from world.cyberware_buffs import RetractableClawsDeployedBuff
+
+            character.buffs.add(RetractableClawsDeployedBuff)
+
+    def on_uninstall(self, character):
+        try:
+            character.buffs.remove("retractable_claws_deployed")
+        except Exception:
+            pass
+        super().on_uninstall(character)
+
     def _claw_descs(self):
         return {
             "left hand": ("append", "Sharp, animalistic claws extend from the fingertips, made out of some bone and steel composite."),
@@ -491,6 +547,9 @@ class RetractableClaws(CyberwareBase):
         if left or right:
             return False, "Your hands must be empty before deploying claws."
         self.db.claws_deployed = True
+        from world.cyberware_buffs import RetractableClawsDeployedBuff
+
+        character.buffs.add(RetractableClawsDeployedBuff)
         self.body_mods = self._claw_descs()
         for part, (_mode, text) in self.body_mods.items():
             appended = dict(character.db.appended_descriptions or {})
@@ -505,6 +564,10 @@ class RetractableClaws(CyberwareBase):
         if not self.are_deployed():
             return False, "Your claws are already retracted."
         self.db.claws_deployed = False
+        try:
+            character.buffs.remove("retractable_claws_deployed")
+        except Exception:
+            pass
         for part in ("left hand", "right hand"):
             appended = dict(character.db.appended_descriptions or {})
             if part in appended:
