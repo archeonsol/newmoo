@@ -120,6 +120,9 @@ from commands.vehicle_cmds import (
 )
 from commands.tunnel_cmds import CmdAutopilot
 
+# diskette_cmds
+from commands.diskette_cmds import CmdEnterDisketteArena
+
 # roleplay_cmds
 from commands.roleplay_cmds import (
     _resolve_body_part,
@@ -325,6 +328,7 @@ __all__ = [
     "CmdRepairArmor",
     "CmdEat",
     "CmdDrink",
+    "CmdEnterDisketteArena",
     "CmdEnterVehicle",
     "CmdExitVehicle",
     "CmdMount",

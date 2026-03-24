@@ -185,6 +185,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         from commands.performance_cmds import CmdPerformance
         from commands.death_cmds import CmdGoOOC, CmdReturnIC, CmdEnterPod, CmdLeavePod, CmdSplinterMe
         from commands.lock_cmds import CmdLock, CmdUnlock
+        from commands.diskette_cmds import CmdEnterDisketteArena
         from commands.vehicle_cmds import (
             CmdEnterVehicle,
             CmdExitVehicle,
@@ -435,6 +436,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSplinterMe())
         self.add(SplinterPodCmdSet())  # CmdLeavePod here so it beats exits (priority 110)
         self.add(CombatGrappleCmdSet())  # grapple/letgo/resist above exits (priority 120)
+        self.add(CmdEnterDisketteArena())
         self.add(CmdEnterVehicle())
         self.add(CmdExitVehicle())
         self.add(CmdMount())
