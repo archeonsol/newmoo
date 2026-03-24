@@ -306,6 +306,28 @@ class CmdLook(DefaultCmdLook):
                         target_exit = ex
                         break
                 if target_exit and target_exit.destination:
+                    # Door check: if the exit has a door, handle closed/open messaging.
+                    if getattr(target_exit.db, "door", None):
+                        if not getattr(target_exit.db, "door_open", None):
+                            # Determine what kind of door it is for the hint suffix.
+                            try:
+                                from world.rpg.rentable_doors import is_rentable, is_paired_with_rentable
+                                _is_keypad = is_rentable(target_exit) or is_paired_with_rentable(target_exit)
+                            except Exception:
+                                _is_keypad = False
+                            _is_bioscan = bool(getattr(target_exit.db, "bioscan", None))
+
+                            if _is_bioscan:
+                                suffix = " It requires a biometric scan to open."
+                            elif _is_keypad:
+                                suffix = " It requires a code to open."
+                            else:
+                                suffix = ""
+
+                            caller.msg(f"The door to the {direction} is |wclosed|n.{suffix}")
+                            return
+                        # Door is open — fall through to peek-through logic below.
+
                     dest = target_exit.destination
                     # Collect visible characters in the destination room (players and NPCs, but not corpses).
                     contents = getattr(dest, "contents", [])
@@ -385,6 +407,140 @@ class CmdStopWalking(Command):
             self.caller.msg("You steady yourself, keeping from walking off anywhere.")
         else:
             self.caller.msg("You stop walking.")
+
+
+class CmdStop(Command):
+    """
+    Stop one specific thing you are doing. Bare |wstop|n does nothing.
+
+    Usage:
+      stop following   — end follow/shadow
+      stop escorting   — end escort (leading or being led)
+      stop hiding      — cancel trying to hide, or step out if hidden
+      stop sneaking    — abort a pending sneak move
+      stop attacking   — stop combat swings (|wstop attacking <name>|n optional)
+      cease            — same as |wstop attacking|n with your current target
+    """
+
+    key = "stop"
+    aliases = ["cease"]
+    locks = "cmd:all()"
+    help_category = "General"
+
+    def at_pre_cmd(self):
+        """Let |wstop hiding|n reach func without hide-pending cancel (that would abort the command)."""
+        raw_l = (self.raw_string or "").strip().lower()
+        if raw_l.startswith("stop hiding") or raw_l.startswith("stop hide"):
+            from world.profiling import record_command_start
+
+            record_command_start(self)
+            caller = self.caller
+            if not caller:
+                return super().at_pre_cmd()
+            char = _command_character(self)
+            from world.death import character_can_act
+
+            can_act, msg = character_can_act(char, allow_builders=True)
+            if not can_act and msg:
+                caller.msg(msg)
+                return True
+            return False
+        return super().at_pre_cmd()
+
+    def func(self):
+        caller = _command_character(self)
+        if not getattr(caller, "db", None):
+            self.caller.msg("You must be in character to do that.")
+            return
+
+        raw = (self.raw_string or "").strip()
+        parts = raw.split(None, 1)
+        verb = (parts[0] or "").lower() if parts else ""
+        tail = parts[1].strip() if len(parts) > 1 else ""
+
+        usage = (
+            "Stop what? Specify: |wstop following|n, |wstop escorting|n, |wstop hiding|n, "
+            "|wstop sneaking|n, or |wstop attacking|n (|wcease|n = stop attacking)."
+        )
+
+        if verb == "cease":
+            self._stop_attacking(caller, tail)
+            return
+
+        if verb != "stop":
+            return
+
+        if not tail:
+            caller.msg(usage)
+            return
+
+        mode = tail.split(None, 1)[0].lower()
+        rest = ""
+        tsplit = tail.split(None, 1)
+        if len(tsplit) > 1:
+            rest = tsplit[1].strip()
+
+        if mode in ("following", "follow"):
+            from commands.follow_cmds import stop_following_activity
+
+            stop_following_activity(caller)
+        elif mode in ("escorting", "escort"):
+            from commands.follow_cmds import stop_escorting_activity
+
+            stop_escorting_activity(caller)
+        elif mode in ("hiding", "hide"):
+            self._stop_hiding(caller)
+        elif mode in ("sneaking", "sneak"):
+            self._stop_sneaking(caller)
+        elif mode == "attacking":
+            self._stop_attacking(caller, rest)
+        else:
+            caller.msg(usage)
+
+    def _stop_hiding(self, caller):
+        from world.rpg import stealth
+
+        if getattr(caller.ndb, "hide_pending", False):
+            stealth.cancel_hide_pending(caller, "|xYou stop trying to hide.|n")
+            return
+        if stealth.is_hidden(caller):
+            stealth.reveal(caller, reason="action")
+            return
+        caller.msg("|xYou are not hiding.|n")
+
+    def _stop_sneaking(self, caller):
+        if not getattr(caller.ndb, "_stealth_move_sneak", False):
+            caller.msg("|xYou are not sneaking anywhere.|n")
+            return
+        try:
+            from world.rpg.staggered_movement import interrupt_staggered_walk
+
+            was = interrupt_staggered_walk(caller, notify_msg="|xYou abort your sneaking move.|n")
+        except ImportError:
+            was = False
+        try:
+            if hasattr(caller.ndb, "_stealth_move_sneak"):
+                del caller.ndb._stealth_move_sneak
+        except Exception:
+            pass
+        if not was:
+            caller.msg("|xYou are not sneaking anywhere.|n")
+
+    def _stop_attacking(self, caller, target_name: str):
+        from world.combat import stop_combat_ticker, _get_combat_target
+
+        tn = (target_name or "").strip()
+        if not tn:
+            current = _get_combat_target(caller)
+            if not current:
+                caller.msg("You're not in combat.")
+                return
+            stop_combat_ticker(caller, current)
+            return
+        target = caller.search(tn)
+        if not target:
+            return
+        stop_combat_ticker(caller, target)
 
 
 class CmdGo(Command):

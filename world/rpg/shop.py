@@ -35,7 +35,6 @@ from world.rpg.economy import (
     format_currency,
     get_balance,
     deduct_funds,
-    _log_transaction,
 )
 
 # ---------------------------------------------------------------------------

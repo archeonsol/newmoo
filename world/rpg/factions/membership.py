@@ -5,7 +5,7 @@ All functions operate on Evennia tags and db attributes.
 Membership data stored on character:
     tags: faction_imp (category="faction")     — one tag per faction
     db.faction_ranks: {"IMP": 3, "MYTHOS": 1}  — rank number per faction
-    db.faction_joined: {"IMP": timestamp, ...}  — when they joined
+    db.faction_joined: {"IMP": timestamp, ...}  — when they joined (see ensure_faction_join_timestamp)
     db.faction_pay_collected: {"IMP": timestamp} — last pay collection time
     db.faction_notes: {"IMP": "Transferred from..."}  — admin notes per faction
 
@@ -24,6 +24,86 @@ try:
     _log = _get_gamelog(__name__)
 except Exception:
     _log = logging.getLogger("evennia")
+
+# Wall-clock enlist uses time.time(). Below this, values are almost always epoch bugs or bad imports.
+FACTION_JOIN_MIN_PLAUSIBLE_TS = 946684800  # 2000-01-01 UTC
+
+
+def _is_plausible_faction_join_ts(ts):
+    if ts is None or ts == "":
+        return False
+    if not isinstance(ts, (int, float)):
+        return False
+    if isinstance(ts, bool):
+        return False
+    now = time.time()
+    if ts <= 0 or ts < FACTION_JOIN_MIN_PLAUSIBLE_TS or ts > now + 86400:
+        return False
+    return True
+
+
+def _faction_enlist_time_from_log(character, faction_key):
+    """Most recent 'enlisted' log entry for this faction, or None."""
+    log = character.db.faction_log or []
+    for entry in reversed(log):
+        if entry.get("faction") != faction_key or entry.get("event") != "enlisted":
+            continue
+        raw = entry.get("time")
+        if raw is None:
+            raw = entry.get("timestamp")
+        if raw is not None and _is_plausible_faction_join_ts(raw):
+            return float(raw)
+    return None
+
+
+def _faction_join_time_from_first_pay_cooldown(character, faction_key):
+    """
+    While the first-pay delay cooldown is active, its expiry minus the standard
+    delay recovers the enlist wall-clock time.
+    """
+    from world.rpg.factions.pay import FIRST_PAY_DELAY_SECONDS
+
+    try:
+        raw_cd = getattr(character.db, "cooldowns", None) or {}
+        exp = raw_cd.get(f"pay_first_{faction_key}")
+    except Exception:
+        return None
+    if exp is None:
+        return None
+    now = time.time()
+    inferred = float(exp) - float(FIRST_PAY_DELAY_SECONDS)
+    if inferred > now + 60:
+        return None
+    if not _is_plausible_faction_join_ts(inferred):
+        return None
+    return inferred
+
+
+def ensure_faction_join_timestamp(character, faction_key):
+    """
+    Return db.faction_joined[faction_key] if valid; otherwise infer from faction_log
+    or the active first-pay cooldown, persist it, and return it. Returns None if unknown.
+    """
+    fdata = get_faction(faction_key)
+    if not fdata or not hasattr(character, "db"):
+        return None
+    if not character.tags.has(fdata["tag"], category=fdata["tag_category"]):
+        return None
+
+    joined_map = dict(character.db.faction_joined or {})
+    current = joined_map.get(faction_key)
+    if _is_plausible_faction_join_ts(current):
+        return float(current)
+
+    inferred = _faction_enlist_time_from_log(character, faction_key)
+    if inferred is None:
+        inferred = _faction_join_time_from_first_pay_cooldown(character, faction_key)
+
+    if inferred is not None:
+        joined_map[faction_key] = inferred
+        character.db.faction_joined = joined_map
+        return inferred
+    return None
 
 
 def _is_roster_eligible(obj):
@@ -259,17 +339,21 @@ def get_member_rank(character, faction_key):
     return ranks.get(fdata["key"], 0)
 
 
-def get_member_permission(character, faction_key):
+def get_member_permission(character, faction_key, *, elevate_staff=True):
     """
     Return the character's permission level in a faction. Returns -1 if not a member.
-    Staff always return 99.
+
+    When elevate_staff is True (default), Builder/Admin accounts return 99 (OOC bypass for
+    code paths that should treat staff as fully authorized). When False, only rank-derived
+    permission is used (e.g. registry terminals that should stay IC).
     """
-    try:
-        if getattr(character, "account", None):
-            if character.account.permissions.check("Builder") or character.account.permissions.check("Admin"):
-                return 99
-    except Exception:
-        pass
+    if elevate_staff:
+        try:
+            if getattr(character, "account", None):
+                if character.account.permissions.check("Builder") or character.account.permissions.check("Admin"):
+                    return 99
+        except Exception:
+            pass
 
     fdata = get_faction(faction_key)
     if not fdata:

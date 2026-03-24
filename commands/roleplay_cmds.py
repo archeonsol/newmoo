@@ -1333,6 +1333,15 @@ class CmdNoMatch(Command):
 
     def func(self):
         raw = (self.args or "").strip()
+
+        # Check for pending rentable-door input (rent code, doorcode menu, open code)
+        try:
+            from commands.rentable_door_cmds import handle_pending_input
+            if handle_pending_input(self.caller, raw):
+                return
+        except Exception:
+            pass
+
         if raw.startswith("."):
             emote_text = raw[1:].strip()
             if emote_text:

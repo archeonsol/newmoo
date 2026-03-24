@@ -16,13 +16,13 @@ from commands.base_cmds import (
     CmdExamine,
     CmdGet,
     CmdPut,
+    CmdStop,
 )
 
 # combat_cmds
 from commands.combat_cmds import (
     _combat_caller,
     CmdAttack,
-    CmdStop,
     CmdFlee,
     CmdStance,
     CmdGrapple,

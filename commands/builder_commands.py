@@ -3,6 +3,7 @@ Builder QoL commands: butag, buhere, budig, budesc, etc.
 Prefixed with 'bu' to leave short names free. Locked to Builder only.
 """
 from evennia import Command
+from evennia.commands.default import building as evennia_building
 from evennia.utils.create import create_object
 from typeclasses.matrix.rooms import MatrixNode
 from typeclasses.matrix.exits import MatrixExit
@@ -612,6 +613,28 @@ class CmdOpen(Command):
             caller.msg("Error: %s" % e)
 
 
+class CmdAtOpen(evennia_building.CmdOpen):
+    """
+    Evennia's full |w@open|n exit builder. Plain |wopen|n is reserved for IC doors.
+
+    Stock |wbuilding.CmdOpen|n registers a no-|w@|n match so |wopen|n would
+    collide with |wcommands.door_cmds.CmdOpenDoor|n. This subclass only matches
+    when the prefixed form is used (parser's |winclude_prefixes=True|n pass).
+
+    Usage:
+        @open <new exit> ... = <destination>
+
+    Same as Evennia; you can also use |wbuopen|n.
+    """
+
+    key = "@open"
+
+    def match(self, cmdname, include_prefixes=True):
+        if not include_prefixes:
+            return None, None
+        return super().match(cmdname, include_prefixes=include_prefixes)
+
+
 class CmdDestroy(Command):
     """
     Permanently delete an object. Asks for confirmation unless /force.
@@ -742,9 +765,10 @@ class CmdMatrixLink(Command):
             caller.msg(f"Access Point ID assigned: |m{matrix_id}|n")
 
 
-def _resolve_exit_for_builder(caller, spec):
+def _resolve_exit_for_builder(caller, spec, room=None):
     """
-    Resolve an exit from a direction keyword/alias in the caller's room, or #dbref anywhere.
+    Resolve an exit from a direction keyword/alias in *room* (default: caller's location),
+    or #dbref anywhere.
     """
     spec = (spec or "").strip()
     if not spec:
@@ -754,9 +778,10 @@ def _resolve_exit_for_builder(caller, spec):
 
         res = search_object(spec)
         return res[0] if res else None
-    from commands.door_cmds import find_exit_by_direction
+    from commands.door_cmds import find_exit_by_direction_in_room
 
-    return find_exit_by_direction(caller, spec)
+    loc = room if room is not None else caller.location
+    return find_exit_by_direction_in_room(loc, spec)
 
 
 class CmdDoor(Command):
@@ -769,12 +794,18 @@ class CmdDoor(Command):
         @door <direction|#dbref> = bioscan faction <FACTION_KEY>
         @door <direction|#dbref> = bioscan rank <FACTION_KEY> <rank#>
         @door <direction|#dbref> = bioscan whitelist
+        @door <direction|#dbref> = rentable [cost]
 
     Examples:
         @door east = basic
         @door east = locked key_medbay
         @door east = bioscan faction IMP
         @door east = bioscan rank IMP 3
+        @door east = rentable 500
+
+    For rentable doors, only mark the *outside* exit as rentable. Set the
+    inside exit as a basic door and pair both with @doorpair. Closing from
+    either side will auto-lock; opening from inside requires the code too.
     """
 
     key = "@door"
@@ -889,7 +920,35 @@ class CmdDoor(Command):
             caller.msg("Unknown bioscan mode. Use |wfaction|n, |wrank|n, or |wwhitelist|n.")
             return
 
-        caller.msg("Unknown type. Use |wbasic|n, |wlocked|n, or |wbioscan|n.")
+        if mode == "rentable":
+            cost = 0
+            if len(tokens) >= 2:
+                try:
+                    cost = int(tokens[1].replace(",", ""))
+                except ValueError:
+                    caller.msg("Optional cost must be a number. e.g. |w@door east = rentable 500|n")
+                    return
+            ex.db.door = True
+            ex.db.door_open = False
+            ex.db.door_locked = True
+            ex.db.door_name = getattr(ex.db, "door_name", None) or "apartment door"
+            ex.db.door_key_tag = None
+            ex.db.door_auto_close = 0
+            ex.db.bioscan = False
+            ex.db.bioscan_type = "faction"
+            ex.db.bioscan_faction = ""
+            ex.db.rentable = True
+            ex.db.rent_cost = cost
+            ex.db.rent_tenant_id = None
+            ex.db.rent_tenant_name = None
+            ex.db.rent_expires = None
+            ex.db.rent_master_code = None
+            ex.db.rent_secondary_codes = []
+            cost_str = f" ({cost:,} script/week)" if cost else " (no cost set — use @rentset to set cost)"
+            caller.msg(f"Set |w{ex.key}|n as a rentable apartment door{cost_str}.")
+            return
+
+        caller.msg("Unknown type. Use |wbasic|n, |wlocked|n, |wbioscan|n, or |wrentable|n.")
 
 
 class CmdDoorPair(Command):
@@ -900,6 +959,9 @@ class CmdDoorPair(Command):
         @doorpair <exit1> = <exit2>
 
     Each side can be a direction (from your current room) or #dbref of an exit.
+    If one side is only in the *other* room (typical apartment), stand in either
+    room and use both directions — e.g. |w@doorpair south = north|n from outside
+    resolves |wsouth|n here and |wnorth|n in the room across |wsouth|n.
     """
 
     key = "@doorpair"
@@ -914,10 +976,20 @@ class CmdDoorPair(Command):
             caller.msg("Usage: |w@doorpair <direction|#dbref> = <direction|#dbref>|n")
             return
         left, right = args.split("=", 1)
-        ex1 = _resolve_exit_for_builder(caller, left.strip())
-        ex2 = _resolve_exit_for_builder(caller, right.strip())
+        left_spec, right_spec = left.strip(), right.strip()
+        ex1 = _resolve_exit_for_builder(caller, left_spec)
+        ex2 = _resolve_exit_for_builder(caller, right_spec)
+        # Other side of a doorway is usually a different room — resolve missing exit there.
+        if ex1 and not ex2 and getattr(ex1, "destination", None):
+            ex2 = _resolve_exit_for_builder(caller, right_spec, room=ex1.destination)
+        if ex2 and not ex1 and getattr(ex2, "destination", None):
+            ex1 = _resolve_exit_for_builder(caller, left_spec, room=ex2.destination)
         if not ex1 or not ex2:
-            caller.msg("Could not resolve one or both exits.")
+            caller.msg(
+                "Could not resolve one or both exits. "
+                "Use directions from your room, or |w#dbref|n for the far exit, "
+                "or |w@doorpair south = north|n from outside (north = return exit inside)."
+            )
             return
         if not hasattr(ex1, "destination") or not hasattr(ex2, "destination"):
             caller.msg("Both sides must be exits.")
@@ -928,7 +1000,13 @@ class CmdDoorPair(Command):
 
         ex1.db.door_pair = ex2.id
         ex2.db.door_pair = ex1.id
+        for ex in (ex1, ex2):
+            try:
+                del ex.ndb._door_pair_obj
+            except Exception:
+                pass
         caller.msg(
-            f"Door pair: |w{ex1.key}|n (#{ex1.id}) <-> |w{ex2.key}|n (#{ex2.id}). "
+            f"Door pair: |w{ex1.key}|n (#{ex1.id}) in {ex1.location.key if ex1.location else '?'} "
+            f"<-> |w{ex2.key}|n (#{ex2.id}) in {ex2.location.key if ex2.location else '?'}. "
             "Open/close/verify syncs both sides."
         )

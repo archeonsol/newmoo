@@ -7,7 +7,10 @@ every display string updates automatically. Code always uses 'money' /
 
 Wallet storage:
   character.db.currency       -- int, on-hand cash
-  character.db.transaction_log -- list of dicts (rolling, max TRANSACTION_LOG_SIZE)
+  character.db.transaction_log -- bank / wire history only (rolling, max TRANSACTION_LOG_SIZE)
+
+On-hand cash changes (pay, dropm, vendors, rent, etc.) do NOT write to this log.
+Bank code in world.rpg.bank logs deposits, withdrawals, and wires via _log_transaction.
 
 Transaction log entry shape:
   {
@@ -126,7 +129,6 @@ def add_funds(character, amount, party="", reason=""):
         return get_balance(character)
     current = get_balance(character)
     character.db.currency = current + amount
-    _log_transaction(character, "credit", amount, party=party, reason=reason)
     return current + amount
 
 
@@ -144,7 +146,6 @@ def deduct_funds(character, amount, party="", reason=""):
     if current < amount:
         return False
     character.db.currency = current - amount
-    _log_transaction(character, "debit", amount, party=party, reason=reason)
     return True
 
 
@@ -165,13 +166,11 @@ def transfer_funds(sender, recipient, amount, reason=""):
     sender_name = getattr(sender, "key", str(sender))
     recipient_name = getattr(recipient, "key", str(recipient))
 
-    # Atomic: deduct first, then credit.
+    # Atomic: deduct first, then credit. (No transaction_log — cash pay is not logged.)
     sender.db.currency = current - amount
-    _log_transaction(sender, "transfer_out", amount, party=recipient_name, reason=reason)
 
     rec_current = get_balance(recipient)
     recipient.db.currency = rec_current + amount
-    _log_transaction(recipient, "transfer_in", amount, party=sender_name, reason=reason)
 
     return True, f"Transferred {format_currency(amount)} to {recipient_name}."
 
@@ -207,19 +206,20 @@ def _box_row(text, pad_char=" "):
 
 def format_transaction_log(character, limit=TRANSACTION_LOG_SIZE):
     """
-    Return a formatted string of the character's recent transactions.
+    Return a formatted string of bank deposits, withdrawals, and wires
+    (entries written by world.rpg.bank — not on-hand cash like pay/dropm).
     """
     log = list(character.db.transaction_log or [])
     if not log:
         return (
             f"\n{_box_line()}\n"
-            f"{_box_row('|xNo transactions recorded.|n')}\n"
+            f"{_box_row('|xNo bank activity recorded.|n')}\n"
             f"{_box_line()}\n"
         )
 
     lines = [
         f"\n{_box_line()}",
-        _box_row(f"|wRECENT TRANSACTIONS|n"),
+        _box_row(f"|wBANK & WIRE HISTORY|n"),
         _box_line("─"),
     ]
     for entry in reversed(log[-limit:]):

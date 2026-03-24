@@ -3,7 +3,7 @@ Staff commands: givexp, charsheet, setstat, setskill, create, typeclasses,
 spawn (item/armor/vehicle/medical/or/seat/bed/pod/camera/tv/creature),
 creatureset, despawn, npc, makenpc, npcset, @goto, @gotoroom, @summon,
 @setvoid, @void, release (@release), boot, @find, announce, restore,
-debugkill, emotedebug, damagevehicle, @climate. CmdPending imported from roleplay_cmds.
+debugkill, emotedebug, damagevehicle, @climate, @grantscript. CmdPending imported from roleplay_cmds.
 """
 
 from datetime import datetime
@@ -2698,6 +2698,51 @@ class CmdClimate(Command):
             "@climate time <phase> | @climate time auto|utc | @climate time manual | "
             "@climate override <district> <weather> <time> = <text> | "
             "@climate clearoverride <district> <weather> <time>"
+        )
+
+
+class CmdGrantScript(Command):
+    """
+    Grant on-hand currency to yourself (staff / testing).
+
+    Usage:
+      @grantscript <amount>
+
+    Adds to your wallet as a normal credit (logged in your transaction history).
+    Builder or Admin only.
+
+    Example:
+      @grantscript 5000
+    """
+
+    key = "@grantscript"
+    aliases = ["grantscript"]
+    locks = ADMIN_LOCK
+    help_category = "Staff"
+
+    def func(self):
+        from world.rpg.economy import add_funds, format_currency, get_balance
+
+        caller = self.caller
+        raw = (self.args or "").strip()
+        if not raw:
+            caller.msg("Usage: |w@grantscript <amount>|n")
+            return
+        try:
+            amount = int(raw.replace(",", ""))
+        except ValueError:
+            caller.msg("Amount must be a whole number.")
+            return
+        if amount <= 0:
+            caller.msg("Amount must be positive.")
+            return
+        if not getattr(caller, "db", None) or not hasattr(caller.db, "currency"):
+            caller.msg("You must be puppeting a character with a wallet.")
+            return
+
+        add_funds(caller, amount, party="staff", reason="staff self-grant")
+        caller.msg(
+            f"Granted {format_currency(amount)}. On hand: {format_currency(get_balance(caller))}."
         )
 
 

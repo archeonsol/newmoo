@@ -132,7 +132,9 @@ def _weekly_faction_economy_log_flush():
                 log = getattr(char.db, "faction_log", None)
                 if not log:
                     continue
-                trimmed = [e for e in log if e.get("timestamp", 0) >= cutoff]
+                trimmed = [
+                    e for e in log if (e.get("time", e.get("timestamp", 0)) or 0) >= cutoff
+                ]
                 if len(trimmed) != len(log):
                     char.db.faction_log = trimmed
             except Exception:

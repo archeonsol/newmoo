@@ -37,6 +37,8 @@ def get_drive_delay(vehicle) -> float:
 # Pending staggered walk (set in Exit / sneak until move completes or is cancelled).
 NDB_STAGGER_WALK_NORM = "_stagger_walk_direction_norm"
 NDB_STAGGER_WALK_DISPLAY = "_stagger_walk_direction_display"
+# Database id of the Exit used for this step — needed to re-run precheck when the delayed move fires.
+NDB_STAGGER_WALK_EXIT_ID = "_stagger_walk_exit_id"
 NDB_WALK_QUEUE = "_walk_queue"
 
 KNOWN_COMPASS_DIRECTIONS = frozenset(
@@ -156,7 +158,7 @@ def clear_stagger_walk_pending(character):
     ndb = getattr(character, "ndb", None)
     if ndb is None:
         return
-    for name in (NDB_STAGGER_WALK_NORM, NDB_STAGGER_WALK_DISPLAY):
+    for name in (NDB_STAGGER_WALK_NORM, NDB_STAGGER_WALK_DISPLAY, NDB_STAGGER_WALK_EXIT_ID):
         try:
             if hasattr(ndb, name):
                 delattr(ndb, name)
@@ -220,6 +222,46 @@ def find_exit_in_room(room, direction_norm):
             except Exception:
                 pass
     return None, None
+
+
+def _recheck_staggered_exit_traversal(character, planned_dest):
+    """
+    Re-run exit precheck when a delayed walk completes. Doors can close (or state can
+    change) after the step was queued. Returns (ok, destination_to_use, err_or_none).
+    """
+    from typeclasses.exit_traversal import precheck_exit_traversal
+
+    ndb = getattr(character, "ndb", None)
+    loc = getattr(character, "location", None)
+    if not loc or not planned_dest:
+        return False, planned_dest, "You have nowhere to go."
+
+    exit_obj = None
+    exit_id = getattr(ndb, NDB_STAGGER_WALK_EXIT_ID, None) if ndb else None
+    if exit_id:
+        ex_res = search_object("#%s" % exit_id)
+        if ex_res:
+            exit_obj = ex_res[0]
+    if exit_obj and getattr(exit_obj, "destination", None):
+        if getattr(exit_obj, "location", None) != loc:
+            return (
+                False,
+                planned_dest,
+                "You pause — the way you were heading is no longer clear.",
+            )
+        ok, dest2, err, _ = precheck_exit_traversal(exit_obj, character, exit_obj.destination)
+        return ok, dest2 if dest2 is not None else planned_dest, err
+
+    norm = getattr(ndb, NDB_STAGGER_WALK_NORM, None) if ndb else None
+    if norm:
+        exit_obj, resolved_dest = find_exit_in_room(loc, norm)
+        if exit_obj and resolved_dest and getattr(resolved_dest, "id", None) == getattr(
+            planned_dest, "id", None
+        ):
+            ok, dest2, err, _ = precheck_exit_traversal(exit_obj, character, resolved_dest)
+            return ok, dest2 if dest2 is not None else resolved_dest, err
+
+    return False, planned_dest, "You can't complete that move."
 
 
 def seed_walk_queue_and_start_first(character, directions_norm_list):
@@ -359,6 +401,15 @@ def begin_staggered_walk_segment(traversing_object, destination, direction, new_
                     viewer.msg(f"{display} begins walking {direction}.")
 
     set_stagger_walk_pending(traversing_object, new_norm, direction)
+    ndb = getattr(traversing_object, "ndb", None)
+    if ndb is not None:
+        if exit_obj is not None and getattr(exit_obj, "id", None):
+            setattr(ndb, NDB_STAGGER_WALK_EXIT_ID, exit_obj.id)
+        elif hasattr(ndb, NDB_STAGGER_WALK_EXIT_ID):
+            try:
+                delattr(ndb, NDB_STAGGER_WALK_EXIT_ID)
+            except Exception:
+                pass
     cb = _staggered_walk_callback
     if cb:
         delay(delay_secs, cb, traversing_object.id, destination.id)
@@ -381,6 +432,20 @@ def begin_staggered_walk_segment(traversing_object, destination, direction, new_
                     except Exception:
                         pass
                     return
+                ok_move, d_use, pre_err = _recheck_staggered_exit_traversal(o, d)
+                if not ok_move:
+                    if pre_err:
+                        o.msg(pre_err)
+                    else:
+                        o.msg("You can't go that way.")
+                    try:
+                        if hasattr(o.ndb, "_stealth_move_sneak"):
+                            del o.ndb._stealth_move_sneak
+                    except Exception:
+                        pass
+                    clear_walk_queue(o)
+                    return
+                d = d_use
                 sneak = bool(getattr(o.ndb, "_stealth_move_sneak", False))
                 o.move_to(d, quiet=sneak)
                 victim = getattr(getattr(o, "db", None), "grappling", None)
@@ -453,6 +518,20 @@ def _staggered_walk_callback(obj_id, dest_id):
                     pass
                 clear_walk_queue(obj)
                 return
+            ok_move, dest_use, pre_err = _recheck_staggered_exit_traversal(obj, dest)
+            if not ok_move:
+                if pre_err:
+                    obj.msg(pre_err)
+                else:
+                    obj.msg("You can't go that way.")
+                try:
+                    if hasattr(obj.ndb, "_stealth_move_sneak"):
+                        del obj.ndb._stealth_move_sneak
+                except Exception:
+                    pass
+                clear_walk_queue(obj)
+                return
+            dest = dest_use
             sneak = bool(getattr(obj.ndb, "_stealth_move_sneak", False))
             obj.move_to(dest, quiet=sneak)
             # If grappler: bring grappled victim along
@@ -467,6 +546,20 @@ def _staggered_walk_callback(obj_id, dest_id):
                         vname = victim.get_display_name(v) if hasattr(victim, "get_display_name") else victim.name
                         oname = obj.get_display_name(v) if hasattr(obj, "get_display_name") else obj.name
                         v.msg("%s is dragged in by %s." % (vname, oname))
+            # Notify follow/escort system after the move completes
+            direction_used = getattr(getattr(obj, "ndb", None), NDB_STAGGER_WALK_NORM, None)
+            try:
+                from world.rpg.follow import notify_departure
+
+                notify_departure(obj, dest, direction_used or "")
+            except Exception:
+                pass
+            try:
+                from world.rpg.follow import after_escort_departure
+
+                after_escort_departure(obj, dest, direction_used or "")
+            except Exception:
+                pass
         finally:
             clear_stagger_walk_pending(obj)
             _try_schedule_next_walk_from_queue(obj)

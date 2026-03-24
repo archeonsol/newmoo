@@ -17,6 +17,7 @@ try:
         WALK_DELAY,
         CRAWL_DELAY_EXHAUSTED,
         CRAWL_DELAY_LEG_TRAUMA,
+        NDB_STAGGER_WALK_EXIT_ID,
         _staggered_walk_callback,
         normalize_move_direction,
         set_stagger_walk_pending,
@@ -28,6 +29,7 @@ except ImportError:
     WALK_DELAY = 3.5
     CRAWL_DELAY_EXHAUSTED = 8.5
     CRAWL_DELAY_LEG_TRAUMA = 16.0
+    NDB_STAGGER_WALK_EXIT_ID = "_stagger_walk_exit_id"
     _staggered_walk_callback = None
     normalize_move_direction = None
     set_stagger_walk_pending = None
@@ -318,6 +320,7 @@ class CmdSneak(Command):
 
         if set_stagger_walk_pending:
             set_stagger_walk_pending(caller, new_norm, direction)
+        setattr(caller.ndb, NDB_STAGGER_WALK_EXIT_ID, target_exit.id)
         cb = _staggered_walk_callback
         if cb:
             delay(delay_secs, cb, caller.id, destination.id)

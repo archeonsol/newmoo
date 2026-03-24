@@ -145,12 +145,12 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         from evennia.contrib.grid.extended_room.extended_room import ExtendedRoomCmdSet
         self.add(ExtendedRoomCmdSet)
 
-        from commands.base_cmds import CmdLook, CmdExamine, CmdGet, CmdPut, CmdStopWalking
+        from commands.base_cmds import CmdLook, CmdExamine, CmdGet, CmdPut, CmdStopWalking, CmdStop
         from commands.stealth_cmds import CmdHide, CmdSneak, CmdSearch, CmdUnhide
+        from commands.follow_cmds import CmdFollow, CmdShadow, CmdEscort
         from commands.matrix_cmds import CmdMacl
         from commands.combat_cmds import (
             CmdAttack,
-            CmdStop,
             CmdFlee,
             CmdStance,
             CmdExecute,
@@ -238,7 +238,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdGoto, CmdGotoRoom, CmdSummon, CmdSetVoid, CmdVoid, CmdRelease, CmdBoot, CmdFind, CmdAnnounce, CmdRestore, CmdDebugKill,
             CmdSpawnSeat, CmdSpawnBed, CmdSpawnPod, CmdSpawnDiveRig, CmdSpawnCamera, CmdSpawnTelevision,
             CmdEmoteDebug, CmdDamageVehicle, CmdMusic, CmdProfiling, CmdBuffDebug, CmdClimate,
-            CmdMigrateTraits,
+            CmdMigrateTraits, CmdGrantScript,
         )
         from commands.staff_vehicle_cmds import (
             CmdVmod,
@@ -253,12 +253,13 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
             CmdPay, CmdDropMoney, CmdShopList, CmdBuy, CmdWire, CmdWireConfirm,
             CmdBankMenu, CmdShopSet, CmdShopItem, CmdSpawnBank, CmdTagBank,
         )
+        from commands.rentable_door_cmds import CmdRent, CmdPayRent, CmdPush, CmdDoorCode as CmdProgramDoor, CmdRentSet, CmdCheckDoor
         from commands.sheet_cmds import CmdStats
         from commands.player_cmds import CmdXp
         from commands.notes_cmds import CmdAddNote, CmdNotes, CmdNoteSearch
         from commands.builder_commands import (
             CmdTag, CmdHere, CmdListCmds, CmdCloneSpawn, CmdDig, CmdMatrixDig, CmdDesc,
-            CmdSetAttr, CmdName, CmdOpen, CmdDestroy, CmdMatrixLink, CmdDoor, CmdDoorPair,
+            CmdSetAttr, CmdName, CmdOpen, CmdAtOpen, CmdDestroy, CmdMatrixLink, CmdDoor, CmdDoorPair,
         )
         from commands.city_grid_cmds import (
             CmdAirRoom,
@@ -279,6 +280,18 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
 
         # Use our custom CmdLook instead of Evennia's default
         self.remove(default_general.CmdLook)
+        # Evennia's building CmdOpen matches plain "open" via prefix strip; use CmdAtOpen
+        # so only |w@open|n matches building, and |wopen|n stays the IC door command.
+        from evennia.commands.default import building as default_building
+
+        self.remove(default_building.CmdOpen)
+        self.add(CmdAtOpen())
+        from commands.door_cmds import CmdOpenDoor, CmdCloseDoor, CmdVerify, CmdUnlockDoor
+
+        self.add(CmdOpenDoor())
+        self.add(CmdCloseDoor())
+        self.add(CmdVerify())
+        self.add(CmdUnlockDoor())
         # Replace Evennia's built-in `who` with our `@who`.
         try:
             from evennia.commands.default.account import CmdWho as DefaultCmdWho
@@ -290,7 +303,11 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdSneak())
         self.add(CmdSearch())
         self.add(CmdUnhide())
+        self.add(CmdFollow())
+        self.add(CmdShadow())
+        self.add(CmdEscort())
         self.add(CmdStopWalking())
+        self.add(CmdStop())
         self.add(CmdGo())
         self.add(CmdScavenge())
         self.add(CmdSkin())
@@ -362,6 +379,11 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdDropMoney())
         self.add(CmdShopList())
         self.add(CmdBuy())
+        self.add(CmdRent())
+        self.add(CmdPayRent())
+        self.add(CmdPush())
+        self.add(CmdProgramDoor())
+        self.add(CmdCheckDoor())
         self.add(CmdWire())
         self.add(CmdWireConfirm())
         self.add(CmdBankMenu())
@@ -404,7 +426,7 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdDesc())
         self.add(CmdSetAttr())
         self.add(CmdName())
-        self.add(CmdOpen())
+        self.add(CmdOpen())  # buopen
         self.add(CmdDestroy())
         self.add(CmdMatrixLink())
         self.add(CmdDoor())
@@ -487,6 +509,8 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         self.add(CmdShopItem())
         self.add(CmdSpawnBank())
         self.add(CmdTagBank())
+        self.add(CmdRentSet())
+        self.add(CmdGrantScript())
         self.add(CmdStaffSheet())
         self.add(CmdStaffSetStat())
         self.add(CmdStaffSetSkill())

@@ -46,28 +46,40 @@ class CmdTrust(Command):
         else:
             person_str = args
 
+        # Resolve the target and require them to be present in the same room.
+        name_key = person_str.strip().lower()
+        trusted = _resolve_recog_to_character(caller, name_key)
+        loc = getattr(caller, "location", None)
+        if not trusted or trusted == caller:
+            caller.msg(f"|rYou don't recognize anyone as '{person_str}'. Recog them first.|n")
+            return
+        if not loc or getattr(trusted, "location", None) is not loc:
+            try:
+                tname = trusted.get_display_name(caller) if hasattr(trusted, "get_display_name") else trusted.key
+            except Exception:
+                tname = person_str
+            caller.msg(f"|r{tname} needs to be here with you to grant trust.|n")
+            return
+
         ok, msg = grant_trust(caller, person_str, category=category)
         if not ok:
             caller.msg(f"|r{msg}|n")
             return
 
-        name_key = person_str.strip().lower()
         if category:
             caller.msg(f"|gYou now trust {person_str} to |w{category.lower()}|g.|n")
         else:
             caller.msg(f"|gYou now trust {person_str} |wcompletely|g.|n")
 
-        trusted = _resolve_recog_to_character(caller, name_key)
-        if trusted and trusted != caller:
-            cn = (
-                caller.get_display_name(trusted)
-                if hasattr(caller, "get_display_name")
-                else caller.key
-            )
-            if category:
-                trusted.msg(f"|x{cn} now trusts you to: {category.lower()}.|n")
-            else:
-                trusted.msg(f"|x{cn} now trusts you completely.|n")
+        cn = (
+            caller.get_display_name(trusted)
+            if hasattr(caller, "get_display_name")
+            else caller.key
+        )
+        if category:
+            trusted.msg(f"|x{cn} now trusts you to: {category.lower()}.|n")
+        else:
+            trusted.msg(f"|x{cn} now trusts you completely.|n")
 
 
 class CmdUntrust(Command):

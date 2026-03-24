@@ -89,6 +89,14 @@ class Exit(ObjectParent, DefaultExit):
         direction = direction_str or (self.key or "away").strip()
         new_norm = normalize_move_direction(direction) if normalize_move_direction else None
 
+        # Escort intercept: if this person is being escorted, let their escort lead first.
+        try:
+            from world.rpg.follow import handle_escort_move
+            if handle_escort_move(traversing_object, new_norm or direction):
+                return
+        except Exception:
+            pass
+
         # Queue further steps while a staggered walk is already counting down.
         if is_staggered_walk_pending and is_staggered_walk_pending(traversing_object) and append_walk_queue:
             append_walk_queue(traversing_object, new_norm)

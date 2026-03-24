@@ -1,5 +1,5 @@
 """
-Combat commands: CmdAttack, CmdStop, CmdFlee, CmdStance, CmdGrapple, CmdLetGo, CmdResist, CmdExecute, _combat_caller.
+Combat commands: CmdAttack, CmdFlee, CmdStance, CmdGrapple, CmdLetGo, CmdResist, CmdExecute, _combat_caller.
 """
 
 import random
@@ -272,56 +272,6 @@ class CmdGrapplingAttack(Command):
             start_grapple_strike_ticker(caller, target)
         else:
             caller.msg("|r%s|n" % msg)
-
-
-class CmdStop(Command):
-    """
-    Stop your attack swings against someone; you stay engaged (range, cover) until they stop too.
-    When neither of you is pressing an attack anymore, the fight ends for both.
-    Usage: stop attacking [target]
-    """
-    key = "stop"
-    aliases = ["cease"]
-    locks = "cmd:all()"
-    help_category = "Combat"
-
-    def func(self):
-        caller = self.caller
-        args = (self.args or "").strip()
-        from world.combat import stop_combat_ticker, _get_combat_target
-
-        # No arguments: stop attacking your current combat target, if any.
-        if not args:
-            current = _get_combat_target(caller)
-            if not current:
-                caller.msg("You're not in combat.")
-                return
-            stop_combat_ticker(caller, current)
-            return
-
-        # Expect "attacking [name]" if arguments are given.
-        if not args.lower().startswith("attacking"):
-            caller.msg("Usage: stop attacking [name]")
-            return
-
-        # Strip off the word "attacking" and any following whitespace to get an optional name.
-        target_name = args[len("attacking"):].strip()
-
-        # "stop attacking" with no name: fall back to current combat target.
-        if not target_name:
-            current = _get_combat_target(caller)
-            if not current:
-                caller.msg("You're not in combat.")
-                return
-            stop_combat_ticker(caller, current)
-            return
-
-        # "stop attacking <name>": look up that target and stop only your attacks on them.
-        target = caller.search(target_name)
-        if not target:
-            return
-
-        stop_combat_ticker(caller, target)
 
 
 class CmdFlee(Command):

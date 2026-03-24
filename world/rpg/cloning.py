@@ -157,6 +157,10 @@ def apply_clone_snapshot(character, snapshot):
     faction_data = snapshot.get("factions") or {}
     if faction_data:
         from world.rpg.factions import get_faction
+        from world.rpg.factions.membership import (
+            _is_plausible_faction_join_ts,
+            ensure_faction_join_timestamp,
+        )
 
         faction_ranks = {}
         faction_joined = {}
@@ -166,9 +170,13 @@ def apply_clone_snapshot(character, snapshot):
                 continue
             character.tags.add(fdata["tag"], category=fdata["tag_category"])
             faction_ranks[faction_key] = finfo.get("rank", fdata.get("default_rank", 1))
-            faction_joined[faction_key] = finfo.get("joined")
+            j = finfo.get("joined")
+            if _is_plausible_faction_join_ts(j):
+                faction_joined[faction_key] = float(j)
         character.db.faction_ranks = faction_ranks
         character.db.faction_joined = faction_joined
+        for fk in faction_ranks:
+            ensure_faction_join_timestamp(character, fk)
     character.db.faction_pay_collected = dict(snapshot.get("faction_pay_collected") or {})
 
     if "addictions" in snapshot:

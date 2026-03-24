@@ -1,5 +1,7 @@
 """
-EvMenu for faction registry terminals. IC terminal aesthetic; staff bypass.
+EvMenu for faction registry terminals. Leadership options require rank permission 3+ for
+players; Builder/Admin accounts bypass (full menu, remote target resolve, enlist without
+same-room).
 """
 
 from evennia.utils.ansi import strip_ansi
@@ -24,6 +26,7 @@ from world.rpg.factions.membership import (
     get_member_rank,
     get_member_permission,
     get_faction_roster,
+    ensure_faction_join_timestamp,
 )
 from world.rpg.factions.ranks import get_rank_name, get_max_rank, get_rank_pay
 from world.rpg.factions.pay import can_collect_pay, collect_pay
@@ -56,16 +59,28 @@ def _is_staff(caller):
     return False
 
 
+def _terminal_perm(caller, faction_key):
+    """In-character faction permission (rank only); staff account does not elevate."""
+    return get_member_permission(caller, faction_key, elevate_staff=False)
+
+
+def _terminal_leadership_ok(caller, faction_key):
+    """Leadership terminal features: rank permission 3+, or staff bypass."""
+    if _is_staff(caller):
+        return True
+    return _terminal_perm(caller, faction_key) >= 3
+
+
 def _terminal_fdata(terminal):
     key = getattr(getattr(terminal, "db", None), "faction_key", None)
     return get_faction(key) if key else None
 
 
 def _format_joined_ago(character, faction_key):
-    joined = (character.db.faction_joined or {}).get(faction_key)
-    if not joined:
+    ts = ensure_faction_join_timestamp(character, faction_key)
+    if ts is None:
         return "—"
-    return naturaltime(joined)
+    return naturaltime(ts)
 
 
 def _pay_status_line(caller, fdata):
@@ -141,7 +156,6 @@ def node_terminal_main(caller, raw_string, **kwargs):
         options = [{"key": "q", "desc": "Disconnect", "goto": "node_terminal_exit"}]
         return text, options
 
-    perm = get_member_permission(caller, fdata["key"])
     rank = get_member_rank(caller, fdata["key"])
     rname = get_rank_name(fdata["ranks"], rank) if rank else "—"
     text = (
@@ -164,20 +178,17 @@ def node_terminal_main(caller, raw_string, **kwargs):
         options.append(opts)
         n += 1
 
+    lead_ok = _terminal_leadership_ok(caller, fdata["key"])
     add_opt("Collect pay", "node_collect_pay")
-    if perm >= 3 or staff:
+    if lead_ok:
         add_opt("View roster", "node_view_roster", roster_page=0)
     add_opt("View own record", "node_own_record")
 
-    if perm >= 3 or staff:
+    if lead_ok:
         add_opt("Enlist new member", "node_enlist")
-    if perm >= 3 or staff:
         add_opt("Promote member", "node_promote_pick")
-    if perm >= 3 or staff:
         add_opt("Demote member", "node_demote_pick")
-    if perm >= 3 or staff:
         add_opt("Discharge member", "node_discharge_pick")
-    if perm >= 3 or staff:
         add_opt("Set rank (leader)", "node_setrank_pick_name")
 
     options.append({"key": "q", "desc": "Disconnect", "goto": "node_terminal_exit"})
@@ -212,8 +223,7 @@ def node_view_roster(caller, raw_string, **kwargs):
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3 and not _is_staff(caller):
+    if not _terminal_leadership_ok(caller, fdata["key"]):
         caller.msg("|rAccess denied. Leadership clearance required.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
@@ -304,7 +314,7 @@ def node_own_record(caller, raw_string, **kwargs):
 
 
 def _resolve_target_name(caller, name, terminal, remote_ok):
-    """Resolve a character by key/name in room, or dbref if remote_ok (staff)."""
+    """Resolve a character by key/name in room, or by dbref if remote_ok (staff)."""
     name = strip_ansi(name or "").strip()
     if not name:
         return None
@@ -379,8 +389,7 @@ def node_enlist(caller, raw_string, **kwargs):
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3 and not _is_staff(caller):
+    if not _terminal_leadership_ok(caller, fdata["key"]):
         caller.msg("|rAccess denied. Insufficient clearance.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
@@ -476,11 +485,10 @@ def node_enlist_confirm(caller, raw_string, **kwargs):
 
 def _can_promote_to(caller, fdata, target, new_rank):
     """Return (ok, err_msg)."""
-    staff = _is_staff(caller)
-    if staff:
+    if _is_staff(caller):
         return True, None
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3:
+    perm_ic = _terminal_perm(caller, fdata["key"])
+    if perm_ic < 3:
         return False, "Insufficient clearance. Leadership only."
     op_rank = get_member_rank(caller, fdata["key"])
     if new_rank >= op_rank:
@@ -490,11 +498,10 @@ def _can_promote_to(caller, fdata, target, new_rank):
 
 def _can_affect_rank(caller, fdata, target_rank, discharge=False):
     """Whether caller may change/discharge someone at target_rank."""
-    staff = _is_staff(caller)
-    if staff:
+    if _is_staff(caller):
         return True, None
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3:
+    perm_ic = _terminal_perm(caller, fdata["key"])
+    if perm_ic < 3:
         return False, "Insufficient clearance. Leadership only."
     op_rank = get_member_rank(caller, fdata["key"])
     if target_rank >= op_rank:
@@ -507,8 +514,7 @@ def node_promote_pick(caller, raw_string, **kwargs):
     fdata = _terminal_fdata(terminal)
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3 and not _is_staff(caller):
+    if not _terminal_leadership_ok(caller, fdata["key"]):
         caller.msg("|rAccess denied.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
@@ -625,8 +631,7 @@ def node_demote_pick(caller, raw_string, **kwargs):
     fdata = _terminal_fdata(terminal)
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3 and not _is_staff(caller):
+    if not _terminal_leadership_ok(caller, fdata["key"]):
         caller.msg("|rAccess denied.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
@@ -727,8 +732,7 @@ def node_discharge_pick(caller, raw_string, **kwargs):
     fdata = _terminal_fdata(terminal)
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3 and not _is_staff(caller):
+    if not _terminal_leadership_ok(caller, fdata["key"]):
         caller.msg("|rAccess denied.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
@@ -826,8 +830,7 @@ def node_setrank_pick_name(caller, raw_string, **kwargs):
     fdata = _terminal_fdata(terminal)
     if not fdata:
         return node_terminal_main(caller, raw_string, terminal=terminal)
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3 and not _is_staff(caller):
+    if not _terminal_leadership_ok(caller, fdata["key"]):
         caller.msg("|rAccess denied. Leader clearance required.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
@@ -888,8 +891,7 @@ def node_setrank_pick_rank(caller, raw_string, **kwargs):
     if not fdata or not target:
         return node_terminal_main(caller, raw_string, terminal=terminal)
 
-    perm = get_member_permission(caller, fdata["key"])
-    if perm < 3 and not _is_staff(caller):
+    if not _terminal_leadership_ok(caller, fdata["key"]):
         caller.msg("|rAccess denied. Leader clearance required.|n")
         return node_terminal_main(caller, raw_string, terminal=terminal)
 

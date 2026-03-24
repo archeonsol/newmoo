@@ -31,6 +31,10 @@ STEALTH_SAFE_COMMANDS = frozenset(
         "inv",
         "unhide",
         "hide",
+        "follow",
+        "shadow",
+        "stop",
+        "cease",
     }
 )
 

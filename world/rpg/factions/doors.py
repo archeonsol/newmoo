@@ -46,6 +46,22 @@ def _resolve_door_pair_exit(exit_obj):
     return pair
 
 
+def exit_direction_word(exit_obj):
+    """Compass-style word for messages: exit key/alias (e.g. south, north)."""
+    if not exit_obj:
+        return "the exit"
+    k = (getattr(exit_obj, "key", None) or "").strip().lower()
+    if k:
+        return k
+    try:
+        als = exit_obj.aliases.all() if hasattr(exit_obj.aliases, "all") else []
+        if als:
+            return (als[0] or "").strip().lower() or "the exit"
+    except Exception:
+        pass
+    return "the exit"
+
+
 def sync_door_pair(exit_obj, open_state):
     """Sync the paired exit to the same open/closed state."""
     pair = _resolve_door_pair_exit(exit_obj)
@@ -53,9 +69,11 @@ def sync_door_pair(exit_obj, open_state):
         pair.db.door_open = bool(open_state)
         pair_loc = pair.location
         if pair_loc and hasattr(pair_loc, "msg_contents"):
-            door_name = getattr(pair.db, "door_name", None) or "door"
+            direction = exit_direction_word(pair)
             state = "opens" if open_state else "closes"
-            pair_loc.msg_contents(f"The {door_name} {state} from the other side.")
+            pair_loc.msg_contents(
+                f"The door to the {direction} {state} from the other side."
+            )
 
 
 def auto_close_door(exit_id):
@@ -85,6 +103,76 @@ def schedule_door_auto_close(exit_obj, seconds):
 def schedule_bioscan_auto_close(exit_obj):
     sec = int(getattr(exit_obj.db, "bioscan_auto_close", None) or 8)
     schedule_door_auto_close(exit_obj, sec)
+
+
+# Seconds after submitting biometrics before the door opens (scan / actuator lag).
+BIOSCAN_VERIFY_DELAY = 4
+
+
+def complete_bioscan_verify_pass(caller_id, exit_id, pass_msg, door_name, direction_word):
+    """
+    Callback after verify: open door and notify room if the caller is still at the exit.
+    """
+    res_c = search_object(f"#{caller_id}")
+    res_e = search_object(f"#{exit_id}")
+    if not res_c or not res_e:
+        return
+    caller = res_c[0]
+    ex = res_e[0]
+    if not getattr(ex.db, "bioscan", None):
+        return
+    if getattr(ex.db, "door_open", None):
+        return
+    if caller.location != ex.location:
+        caller.msg("You moved away from the scanner; verification aborts.")
+        return
+    ex.db.door_open = True
+    sync_door_pair(ex, True)
+    pm = pass_msg or "Bioscan accepted."
+    dn = door_name or "bioscan door"
+    dw = (direction_word or "the exit").strip() or "the exit"
+    caller.msg(f"|g{pm}|n")
+    loc = caller.location
+    if loc:
+        loc.msg_contents(
+            "The {dn} to the {dir} opens for {name}.",
+            exclude=caller,
+            mapping={"name": caller, "dn": dn, "dir": dw},
+            from_obj=caller,
+        )
+    schedule_bioscan_auto_close(ex)
+
+
+def complete_bioscan_verify_fail(
+    caller_id, exit_id, fail_msg, door_name, direction_word, sound_fail
+):
+    """
+    Callback after verify (failed scan): notify caller and optionally the room.
+    """
+    res_c = search_object(f"#{caller_id}")
+    res_e = search_object(f"#{exit_id}")
+    if not res_c or not res_e:
+        return
+    caller = res_c[0]
+    ex = res_e[0]
+    if not getattr(ex.db, "bioscan", None):
+        return
+    if caller.location != ex.location:
+        caller.msg("You moved away from the scanner; verification aborts.")
+        return
+    fm = fail_msg or "Bioscan rejected."
+    dn = door_name or "bioscan door"
+    dw = (direction_word or "the exit").strip() or "the exit"
+    caller.msg(f"|r{fm}|n")
+    if sound_fail:
+        loc = caller.location
+        if loc:
+            loc.msg_contents(
+                "The {dn} to the {dir} buzzes — access denied for {name}.",
+                exclude=caller,
+                mapping={"name": caller, "dn": dn, "dir": dw},
+                from_obj=caller,
+            )
 
 
 def has_key(character, key_tag):

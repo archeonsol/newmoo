@@ -91,12 +91,43 @@ def _norm_key(name):
     return (name or "").strip().lower()
 
 
+def _coerce_trust_category_iterable(iterable):
+    """Turn an iterable of category tokens into a normalized set of strings."""
+    out = set()
+    for x in iterable:
+        if x is None:
+            continue
+        if isinstance(x, str):
+            nk = _norm_key(x)
+            if nk:
+                out.add(nk)
+        else:
+            try:
+                out.add(_norm_key(str(x)))
+            except Exception:
+                pass
+    return out
+
+
 def _entry_to_set(entry):
-    if isinstance(entry, list):
-        return set(entry)
-    if isinstance(entry, set):
-        return set(entry)
-    return set()
+    """
+    Normalize trust bucket values to a set of lowercase category strings.
+    Evennia may persist sets as tuples or as `_SaverSet` (not isinstance(..., set)).
+    """
+    if entry is None:
+        return set()
+    if isinstance(entry, str):
+        nk = _norm_key(entry)
+        return {nk} if nk else set()
+    if isinstance(entry, (dict, bytes)):
+        return set()
+    if isinstance(entry, (list, tuple, set, frozenset)):
+        return _coerce_trust_category_iterable(entry)
+    # Evennia `_SaverSet`: iterable via __iter__ but not a built-in set
+    try:
+        return _coerce_trust_category_iterable(entry)
+    except TypeError:
+        return set()
 
 
 def _helmet_recog_names(character):
