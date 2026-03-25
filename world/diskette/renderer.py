@@ -14,10 +14,10 @@ Board layout (columns 1-6 left-to-right, rows A-F top-to-bottom):
    └───────────────────────┘
 
 Symbols (3 chars each):
-  |_|  — player 1 (P1)
-  |x|  — player 1 with own disc on same tile
-  (_)  — player 2 (P2)
-  (o)  — player 2 with own disc on same tile
+  [_]  — player 1, unarmed (disc in flight)
+  [x]  — player 1, armed (holding disc)
+  ( )  — player 2, unarmed (disc in flight)
+  (o)  — player 2, armed (holding disc)
    x   — P1 disc in flight (no player)
    o   — P2 disc in flight (no player)
        — empty (3 spaces)
@@ -65,9 +65,9 @@ def render_board(board: DisketteBoard) -> str:
             d2_here = d2.in_flight and d2.pos == tile
 
             if p1_here:
-                sym = "|x|" if d1_here else "|_|"
+                sym = "[x]" if board.armed[p1.id] else "[_]"
             elif p2_here:
-                sym = "(o)" if d2_here else "(_)"
+                sym = "(o)" if board.armed[p2.id] else "( )"
             elif d1_here:
                 sym = " x "
             elif d2_here:
