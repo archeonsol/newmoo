@@ -226,7 +226,7 @@ class DisketteGame:
                 p.msg("|y5 seconds remaining to submit your action.|n")
 
     def _send_board(self):
-        board_text = render_board(self.board)
+        board_text = render_board(self.board, scores=self.scores, round_num=self.round_num)
         self.interior.msg_contents(board_text, stadium=False)
 
     def _broadcast(self, text, stadium=True):

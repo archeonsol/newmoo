@@ -42,7 +42,7 @@ def _build_row(cells: list[str]) -> str:
     return " ".join(cells)
 
 
-def render_board(board: DisketteBoard) -> str:
+def render_board(board: DisketteBoard, scores: dict = None, round_num: int = None) -> str:
     p1, p2 = board.players
 
     d1 = board.discs[p1.id]
@@ -85,6 +85,22 @@ def render_board(board: DisketteBoard) -> str:
             lines.append(_SEPARATOR_ROW)
 
     lines.append(_BORDER_BOTTOM)
+
+    # Sidebar: attach player/score info to the right of rows A, B, C
+    if scores is not None:
+        s1 = scores.get(p1.id, 0)
+        s2 = scores.get(p2.id, 0)
+        sidebar = [
+            f"   |w[x]|n {p1.key}  {s1}",
+            f"   |w(o)|n {p2.key}  {s2}",
+        ]
+        if round_num is not None:
+            sidebar.append(f"   Round {round_num}")
+        # Row A is index 2, row B is index 4, row C is index 6
+        sidebar_indices = [2, 4, 6]
+        for i, extra in zip(sidebar_indices, sidebar):
+            lines[i] = lines[i] + extra
+
     return "\n".join(lines)
 
 
