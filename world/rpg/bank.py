@@ -618,7 +618,8 @@ def node_wire_confirm(caller, raw_string, **kwargs):
     raw = raw_string.strip().lower()
 
     if raw in ("yes", "y", "confirm", "1"):
-        from world.utils import get_containing_room, room_has_network_coverage
+        from world.utils import get_containing_room
+        from world.network_utils import room_has_network_coverage
         room = get_containing_room(caller)
         if not room_has_network_coverage(room, include_matrix_nodes=True):
             text = "\n".join([

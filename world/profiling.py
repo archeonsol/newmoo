@@ -1,9 +1,6 @@
 """
 Performance profiling for the server.
 
-ProfilingScript - global zero-interval storage script that accumulates metrics.
-Helper functions used by commands/base_cmds.py and global scripts.
-
 Always-on metrics (no flag needed):
   - Command rate (rolling 1-minute, 10s bucket-based — O(1) write)
   - Script tick durations (one time.monotonic() per tick — negligible)
@@ -14,12 +11,13 @@ Opt-in timing (requires @profiling/timing):
   - Per-command DB query count (requires settings.DEBUG = True)
 
 Budgets are calibrated for 300 concurrent users (~7 cmds/user/min peak).
+
+All state is module-level (ephemeral — cleared on reload by design).
+Baselines are reset in at_server_startstop.at_server_start() each boot.
 """
 
 import time
 from contextlib import contextmanager
-
-from evennia.scripts.scripts import DefaultScript
 
 
 # ---------------------------------------------------------------------------
@@ -39,34 +37,31 @@ _SAMPLES_CAP = 100  # ms_samples list is capped at this many entries per command
 
 
 # ---------------------------------------------------------------------------
-# Module-level script cache — same pattern as world/staff_pending.py
+# Module-level storage (replaces script.ndb.* — same semantics, no DB overhead)
 # ---------------------------------------------------------------------------
-_SCRIPT = None
+_cmd_rate_buckets: dict = {}
+_cmd_counts: dict = {}
+_script_ticks: dict = {}
+_object_counts: dict = {}
 
-
-def get_profiling_script():
-    global _SCRIPT
-    if _SCRIPT is None:
-        from evennia import search_script
-        results = search_script("profiling")
-        _SCRIPT = results[0] if results else None
-    return _SCRIPT
+_timing_enabled: bool = False
+_start_time: float = 0.0
+_script_count_baseline: int = 0
+_rss_baseline_kb: int = 0
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def is_timing_enabled():
-    script = get_profiling_script()
-    return bool(script and script.ndb.timing_enabled)
+def is_timing_enabled() -> bool:
+    return _timing_enabled
 
 
-def get_cmd_rate_1min(script):
+def get_cmd_rate_1min() -> int:
     """Rolling 1-minute command count using 10-second buckets."""
-    buckets = script.ndb.cmd_rate_buckets or {}
     now_bucket = int(time.time() // 10)
-    return sum(v for k, v in buckets.items() if now_bucket - k <= 6)
+    return sum(v for k, v in _cmd_rate_buckets.items() if now_bucket - k <= 6)
 
 
 def get_p95(samples):
@@ -84,26 +79,20 @@ def get_p95(samples):
 
 def record_command_start(cmd):
     """
-    Called from Command.at_pre_cmd (and CmdLook.at_pre_cmd / CmdGet.at_pre_cmd).
+    Called from Command.at_pre_cmd.
 
     Always: increments the rolling rate bucket.
     If timing enabled: stamps _prof_start and _prof_queries on the command instance.
     """
+    global _cmd_rate_buckets
     try:
-        script = get_profiling_script()
-        if not script:
-            return
-
-        # Always-on: O(1) bucket write
         bucket = int(time.time() // 10)
-        buckets = script.ndb.cmd_rate_buckets or {}
-        buckets[bucket] = buckets.get(bucket, 0) + 1
+        _cmd_rate_buckets[bucket] = _cmd_rate_buckets.get(bucket, 0) + 1
         # Trim entries older than 8 buckets (80s) to bound memory
         cutoff = bucket - 7
-        script.ndb.cmd_rate_buckets = {k: v for k, v in buckets.items() if k >= cutoff}
+        _cmd_rate_buckets = {k: v for k, v in _cmd_rate_buckets.items() if k >= cutoff}
 
-        # Opt-in timing
-        if script.ndb.timing_enabled:
+        if _timing_enabled:
             cmd._prof_start = time.monotonic()
             try:
                 from django.db import connection
@@ -116,19 +105,16 @@ def record_command_start(cmd):
 
 def record_command_end(cmd):
     """
-    Called from Command.at_post_cmd (and CmdLook / CmdGet equivalents).
+    Called from Command.at_post_cmd.
 
     Records elapsed ms and query count if timing was stamped by record_command_start.
     No-op if timing is off or command was blocked before func() ran.
     """
+    global _cmd_counts
     start = getattr(cmd, '_prof_start', None)
     if start is None:
         return
     try:
-        script = get_profiling_script()
-        if not script:
-            return
-
         elapsed_ms = (time.monotonic() - start) * 1000
 
         try:
@@ -138,8 +124,7 @@ def record_command_end(cmd):
             queries = 0
 
         key = getattr(cmd, 'key', None) or 'unknown'
-        counts = script.ndb.cmd_counts or {}
-        entry = counts.get(key)
+        entry = _cmd_counts.get(key)
         if entry is None:
             entry = {
                 "calls": 0,
@@ -159,8 +144,7 @@ def record_command_end(cmd):
         if len(samples) > _SAMPLES_CAP:
             entry["ms_samples"] = samples[-_SAMPLES_CAP:]
 
-        counts[key] = entry
-        script.ndb.cmd_counts = counts
+        _cmd_counts[key] = entry
     except Exception:
         pass
 
@@ -171,19 +155,16 @@ def record_command_end(cmd):
 
 def snapshot_object_counts(counts_dict):
     """
-    Merge counts_dict into ndb.object_counts on the profiling script.
+    Merge counts_dict into _object_counts.
 
     Call this at the end of cleanup script runs with counts derived from
     querysets already evaluated during the cleanup — no extra DB queries.
 
     counts_dict: e.g. {"MatrixNode": 42, "Handset": 17}
     """
+    global _object_counts
     try:
-        script = get_profiling_script()
-        if script:
-            existing = script.ndb.object_counts or {}
-            existing.update(counts_dict)
-            script.ndb.object_counts = existing
+        _object_counts.update(counts_dict)
     except Exception:
         pass
 
@@ -207,53 +188,27 @@ def timed_tick(script_key, interval_s):
             with timed_tick("stamina_regen", self.interval):
                 stamina_regen_all()
     """
+    global _script_ticks
     start = time.monotonic()
     try:
         yield
     finally:
         elapsed_ms = (time.monotonic() - start) * 1000
         try:
-            script = get_profiling_script()
-            if script:
-                ticks = script.ndb.script_ticks or {}
-                entry = ticks.get(script_key)
-                if entry is None:
-                    entry = {
-                        "calls": 0,
-                        "total_ms": 0.0,
-                        "max_ms": 0.0,
-                        "last_ms": 0.0,
-                        "interval_s": interval_s,
-                    }
-                entry["calls"] += 1
-                entry["total_ms"] += elapsed_ms
-                if elapsed_ms > entry["max_ms"]:
-                    entry["max_ms"] = elapsed_ms
-                entry["last_ms"] = elapsed_ms
-                ticks[script_key] = entry
-                script.ndb.script_ticks = ticks
+            entry = _script_ticks.get(script_key)
+            if entry is None:
+                entry = {
+                    "calls": 0,
+                    "total_ms": 0.0,
+                    "max_ms": 0.0,
+                    "last_ms": 0.0,
+                    "interval_s": interval_s,
+                }
+            entry["calls"] += 1
+            entry["total_ms"] += elapsed_ms
+            if elapsed_ms > entry["max_ms"]:
+                entry["max_ms"] = elapsed_ms
+            entry["last_ms"] = elapsed_ms
+            _script_ticks[script_key] = entry
         except Exception:
             pass
-
-
-# ---------------------------------------------------------------------------
-# ProfilingScript
-# ---------------------------------------------------------------------------
-
-class ProfilingScript(DefaultScript):
-    """
-    Global zero-interval storage script for profiling data.
-
-    All metrics live on ndb (ephemeral — discarded on reload by design).
-    Baselines are reset in at_server_startstop.at_server_start() each boot.
-
-    Pattern: same as PCNoteStorage in typeclasses/scripts.py.
-    """
-
-    def at_script_creation(self):
-        self.key = "profiling"
-        self.desc = "Server performance profiling storage"
-        self.interval = 0
-        self.repeats = 0
-        self.persistent = True
-        self.autodelete = False

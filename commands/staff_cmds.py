@@ -2409,30 +2409,24 @@ class CmdProfiling(Command):
 
     def func(self):
         caller = self.caller
-        from world.profiling import get_profiling_script, BUDGETS
-
-        script = get_profiling_script()
-        if not script:
-            caller.msg("|rProfiler script not found. Try @reload or check at_server_start.|n")
-            return
+        import world.profiling as _prof
 
         if "timing" in self.switches:
-            self._toggle_timing(caller, script)
+            self._toggle_timing(caller, _prof)
             return
 
         if "reset" in self.switches:
-            script.ndb.cmd_counts = {}
-            script.ndb.cmd_rate_buckets = {}
-            script.ndb.script_ticks = {}
+            _prof._cmd_counts = {}
+            _prof._cmd_rate_buckets = {}
+            _prof._script_ticks = {}
             caller.msg("|gProfiler aggregates cleared.|n Baselines retained.")
             return
 
-        self._show(caller, script)
+        self._show(caller, _prof)
 
-    def _toggle_timing(self, caller, script):
-        current = bool(script.ndb.timing_enabled)
-        new_state = not current
-        script.ndb.timing_enabled = new_state
+    def _toggle_timing(self, caller, _prof):
+        new_state = not _prof._timing_enabled
+        _prof._timing_enabled = new_state
         if new_state:
             try:
                 from django.conf import settings
@@ -2450,14 +2444,14 @@ class CmdProfiling(Command):
                 pass
             caller.msg("|yTiming disabled.|n settings.DEBUG restored to False.")
 
-    def _show(self, caller, script):
+    def _show(self, caller, _prof):
         import time
         import sys
         from world.profiling import get_cmd_rate_1min, get_p95, BUDGETS
         from world.ui_utils import fade_rule
 
-        timing = bool(script.ndb.timing_enabled)
-        start_time = script.ndb.start_time or time.time()
+        timing = _prof._timing_enabled
+        start_time = _prof._start_time or time.time()
         uptime_s = int(time.time() - start_time)
         h, m = divmod(uptime_s // 60, 60)
         try:
@@ -2476,7 +2470,7 @@ class CmdProfiling(Command):
         # --- Always-on ---
         caller.msg("|w[Always-On]|n")
 
-        rate = get_cmd_rate_1min(script)
+        rate = get_cmd_rate_1min()
         budget_rate = BUDGETS["cmd_rate_per_min"]
         rate_status = "|gOK|n" if rate <= budget_rate else "|rOVER|n"
         caller.msg(f"  Cmd rate (1m):   {rate:<6}  budget: {budget_rate}/min   {rate_status}")
@@ -2484,7 +2478,7 @@ class CmdProfiling(Command):
         try:
             from evennia.scripts.models import ScriptDB
             scount = ScriptDB.objects.count()
-            baseline = script.ndb.script_count_baseline or scount
+            baseline = _prof._script_count_baseline or scount
             sdelta = scount - baseline
             if sdelta == 0:
                 s_status = "|gOK|n"
@@ -2499,7 +2493,7 @@ class CmdProfiling(Command):
         try:
             import resource as _res
             rss_raw = _res.getrusage(_res.RUSAGE_SELF).ru_maxrss
-            baseline_raw = script.ndb.rss_baseline_kb or rss_raw
+            baseline_raw = _prof._rss_baseline_kb or rss_raw
             # macOS: ru_maxrss is bytes; Linux: kilobytes
             divisor = (1024 * 1024) if sys.platform == "darwin" else 1024
             rss_mb = rss_raw / divisor
@@ -2512,7 +2506,7 @@ class CmdProfiling(Command):
 
         # --- Object counts (cached from cleanup cycles) ---
         caller.msg("\n|w[Object Counts]|n  |x(updated each cleanup cycle)|n")
-        obj_counts = script.ndb.object_counts or {}
+        obj_counts = _prof._object_counts
         if not obj_counts:
             caller.msg("  |yNo snapshot yet — waiting for first cleanup cycle.|n")
         else:
@@ -2521,7 +2515,7 @@ class CmdProfiling(Command):
 
         # --- Script ticks ---
         caller.msg("\n|w[Script Ticks]|n")
-        ticks = script.ndb.script_ticks or {}
+        ticks = _prof._script_ticks
         if not ticks:
             caller.msg("  |yNo tick data yet — waiting for first script cycle.|n")
         else:
@@ -2542,7 +2536,7 @@ class CmdProfiling(Command):
         if not timing:
             caller.msg("  |yOFF — use @profiling/timing to enable.|n")
         else:
-            counts = script.ndb.cmd_counts or {}
+            counts = _prof._cmd_counts
             if not counts:
                 caller.msg("  |yNo data yet — run some commands first.|n")
             else:

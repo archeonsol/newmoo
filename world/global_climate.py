@@ -5,7 +5,7 @@ for street room descriptions (see typeclasses.rooms.Room street mode).
 Time-of-day defaults to real UTC (see utc_time_phase); staff can switch to a fixed
 phase with @climate time <phase> or re-enable UTC with @climate time auto.
 
-Storage: persistent Script key GLOBAL_CLIMATE_KEY (typeclasses.scripts.GlobalClimateScript).
+Storage: ServerConfig keys CLIMATE_* (replaces GlobalClimateScript).
 """
 
 from __future__ import annotations
@@ -19,12 +19,24 @@ try:
 except ImportError:
     _ARROW_AVAILABLE = False
 
-# Must match GlobalClimateScript.key / at_server_start
-GLOBAL_CLIMATE_KEY = "global_climate"
-
 WEATHERS = ("rain", "sun", "fog", "snow")
 TIMES = ("dusk", "night", "morning", "afternoon", "evening")
 DISTRICTS = ("slums", "guild", "bourgeois", "elite")
+
+_KEY_WEATHER = "CLIMATE_WEATHER"
+_KEY_TIME_OF_DAY = "CLIMATE_TIME_OF_DAY"
+_KEY_TIME_AUTO_UTC = "CLIMATE_TIME_AUTO_UTC"
+_KEY_LINE_OVERRIDES = "CLIMATE_LINE_OVERRIDES"
+
+
+def _get(key, default=None):
+    from evennia.server.models import ServerConfig
+    return ServerConfig.objects.conf(key, default=default)
+
+
+def _set(key, value):
+    from evennia.server.models import ServerConfig
+    ServerConfig.objects.conf(key, value)
 
 
 def utc_time_phase(dt: Optional[datetime] = None) -> str:
@@ -55,13 +67,6 @@ def utc_time_phase(dt: Optional[datetime] = None) -> str:
     return "night"
 
 
-def _get_script():
-    from evennia import search_script
-
-    found = search_script(GLOBAL_CLIMATE_KEY)
-    return found[0] if found else None
-
-
 def normalize_district_key(city_level: Any) -> str:
     """Map room db.city_level (or similar) to a climate district key."""
     if not city_level:
@@ -76,70 +81,53 @@ def normalize_district_key(city_level: Any) -> str:
 
 def get_global_weather() -> str:
     """Active global weather key (rain, sun, fog, snow)."""
-    scr = _get_script()
-    if not scr:
-        return "fog"
-    w = getattr(scr.db, "weather", None) or "fog"
+    w = _get(_KEY_WEATHER, default="fog")
     return w if w in WEATHERS else "fog"
 
 
 def get_time_auto_utc() -> bool:
     """When True (default), time-of-day follows real UTC via utc_time_phase()."""
-    scr = _get_script()
-    if not scr:
-        return True
-    return getattr(scr.db, "time_auto_utc", True)
+    v = _get(_KEY_TIME_AUTO_UTC, default=True)
+    return bool(v) if v is not None else True
 
 
 def get_global_time_of_day() -> str:
     """Active global time-of-day key: live UTC phase when auto, else stored manual value."""
-    scr = _get_script()
-    if not scr:
+    if get_time_auto_utc():
         return utc_time_phase()
-    if getattr(scr.db, "time_auto_utc", True):
-        return utc_time_phase()
-    t = getattr(scr.db, "time_of_day", None) or "morning"
+    t = _get(_KEY_TIME_OF_DAY, default=None)
     return t if t in TIMES else "morning"
 
 
 def set_global_weather(weather: str) -> bool:
-    scr = _get_script()
-    if not scr:
-        return False
     w = str(weather).strip().lower()
     if w not in WEATHERS:
         raise ValueError("invalid weather")
-    scr.db.weather = w
+    _set(_KEY_WEATHER, w)
     return True
 
 
 def set_global_time_of_day(time_of_day: str) -> bool:
     """Set a fixed narrative time and disable UTC automation."""
-    scr = _get_script()
-    if not scr:
-        return False
     t = str(time_of_day).strip().lower()
     if t not in TIMES:
         raise ValueError("invalid time")
-    scr.db.time_of_day = t
-    scr.db.time_auto_utc = False
+    _set(_KEY_TIME_OF_DAY, t)
+    _set(_KEY_TIME_AUTO_UTC, False)
     return True
 
 
 def set_time_auto_utc(enabled: bool) -> bool:
     """
-    Enable or disable UTC-driven time. When enabling, refreshes db.time_of_day snapshot.
-    When disabling, freezes db.time_of_day to the current UTC phase.
+    Enable or disable UTC-driven time. When enabling, refreshes stored time_of_day snapshot.
+    When disabling, freezes time_of_day to the current UTC phase.
     """
-    scr = _get_script()
-    if not scr:
-        return False
     if enabled:
-        scr.db.time_auto_utc = True
-        scr.db.time_of_day = utc_time_phase()
+        _set(_KEY_TIME_AUTO_UTC, True)
+        _set(_KEY_TIME_OF_DAY, utc_time_phase())
     else:
-        scr.db.time_of_day = utc_time_phase()
-        scr.db.time_auto_utc = False
+        _set(_KEY_TIME_OF_DAY, utc_time_phase())
+        _set(_KEY_TIME_AUTO_UTC, False)
     return True
 
 
@@ -227,9 +215,8 @@ _WEATHER_OPEN_BY_DISTRICT: Dict[str, Dict[str, str]] = {
 
 def _compose_default_line(district: str, weather: str, time_of_day: str) -> str:
     """
-    Template-based ambient line (plain text, no color codes). Staff can override per cell on the script.
+    Template-based ambient line (plain text, no color codes). Staff can override per cell.
     """
-    # Short district anchors (second sentence)
     place = {
         "slums": "the cramped streets and leaking neon",
         "guild": "foundries and loading bays",
@@ -248,7 +235,6 @@ def _compose_default_line(district: str, weather: str, time_of_day: str) -> str:
         "evening": "evening brings a slow exhale, commuters and drifters trading places in the flow",
     }.get(time_of_day, "time slips past in the city's rhythm")
 
-    # Two clear sentences: weather/opening, then district + time beat (avoid "unrealOver").
     first = w_open.rstrip(".")
     return f"{first}. Over {place}, {t_close}."
 
@@ -263,12 +249,9 @@ def get_ambient_weather_line(district_key: Optional[str] = None) -> str:
     tod = get_global_time_of_day()
     key = _override_key(dist, weather, tod)
 
-    scr = _get_script()
-    overrides: Dict[str, str] = {}
-    if scr:
-        raw = getattr(scr.db, "line_overrides", None)
-        if isinstance(raw, dict):
-            overrides = raw
+    overrides = _get(_KEY_LINE_OVERRIDES, default={})
+    if not isinstance(overrides, dict):
+        overrides = {}
 
     if key in overrides and (overrides[key] or "").strip():
         return str(overrides[key]).strip()
@@ -291,13 +274,13 @@ def set_line_override(district: str, weather: str, time_of_day: str, text: str) 
     t = str(time_of_day).strip().lower()
     if w not in WEATHERS or t not in TIMES:
         raise ValueError("invalid weather or time")
-    scr = _get_script()
-    if not scr:
-        raise RuntimeError("global climate script missing")
-    if not isinstance(getattr(scr.db, "line_overrides", None), dict):
-        scr.db.line_overrides = {}
     key = _override_key(d, w, t)
-    scr.db.line_overrides[key] = (text or "").strip()
+    overrides = _get(_KEY_LINE_OVERRIDES, default={})
+    if not isinstance(overrides, dict):
+        overrides = {}
+    overrides = dict(overrides)
+    overrides[key] = (text or "").strip()
+    _set(_KEY_LINE_OVERRIDES, overrides)
     return key
 
 
@@ -306,9 +289,9 @@ def clear_line_override(district: str, weather: str, time_of_day: str) -> None:
     w = str(weather).strip().lower()
     t = str(time_of_day).strip().lower()
     key = _override_key(d, w, t)
-    scr = _get_script()
-    if not scr or not isinstance(getattr(scr.db, "line_overrides", None), dict):
+    overrides = _get(_KEY_LINE_OVERRIDES, default={})
+    if not isinstance(overrides, dict):
         return
-    overrides: Dict = dict(scr.db.line_overrides)
+    overrides = dict(overrides)
     overrides.pop(key, None)
-    scr.db.line_overrides = overrides
+    _set(_KEY_LINE_OVERRIDES, overrides)

@@ -1,114 +1,36 @@
 """
 Scripts
 
-Scripts are powerful jacks-of-all-trades. They have no in-game
-existence and can be used to represent persistent game systems in some
-circumstances. Scripts can also have a time component that allows them
-to "fire" regularly or a limited number of times.
+Global ticking scripts for game-wide periodic systems. Each script owns its
+own registration via ensure() — at_server_start calls Script.ensure() for
+each, which creates the script if absent and is a no-op if it already exists.
 
-There is generally no "tree" of Scripts inheriting from each other.
-Rather, each script tends to inherit from the base Script class and
-just overloads its hooks to have it perform its function.
-
+Data storage that previously lived in scripts (StaffPendingScript,
+PCNoteStorage, GlobalClimateScript, ProfilingScript) has been moved to its
+proper home: Django models (world.models) and ServerConfig.
 """
 
-from evennia.scripts.scripts import DefaultScript
 import time
+from evennia.scripts.scripts import DefaultScript
 
 
 class Script(DefaultScript):
-    """
-    This is the base TypeClass for all Scripts. Scripts describe
-    all entities/systems without a physical existence in the game world
-    that require database storage (like an economic system or
-    combat tracker). They
-    can also have a timer/ticker component.
-
-    A script type is customized by redefining some or all of its hook
-    methods and variables.
-
-    * available properties (check docs for full listing, this could be
-      outdated).
-
-     key (string) - name of object
-     name (string)- same as key
-     aliases (list of strings) - aliases to the object. Will be saved
-              to database as AliasDB entries but returned as strings.
-     dbref (int, read-only) - unique #id-number. Also "id" can be used.
-     date_created (string) - time stamp of object creation
-     permissions (list of strings) - list of permission strings
-
-     desc (string)      - optional description of script, shown in listings
-     obj (Object)       - optional object that this script is connected to
-                          and acts on (set automatically by obj.scripts.add())
-     interval (int)     - how often script should run, in seconds. <0 turns
-                          off ticker
-     start_delay (bool) - if the script should start repeating right away or
-                          wait self.interval seconds
-     repeats (int)      - how many times the script should repeat before
-                          stopping. 0 means infinite repeats
-     persistent (bool)  - if script should survive a server shutdown or not
-     is_active (bool)   - if script is currently running
-
-    * Handlers
-
-     locks - lock-handler: use locks.add() to add new lock strings
-     db - attribute-handler: store/retrieve database attributes on this
-                        self.db.myattr=val, val=self.db.myattr
-     ndb - non-persistent attribute handler: same as db but does not
-                        create a database entry when storing data
-
-    * Helper methods
-
-     create(key, **kwargs)
-     start() - start script (this usually happens automatically at creation
-               and obj.script.add() etc)
-     stop()  - stop script, and delete it
-     pause() - put the script on hold, until unpause() is called. If script
-               is persistent, the pause state will survive a shutdown.
-     unpause() - restart a previously paused script. The script will continue
-                 from the paused timer (but at_start() will be called).
-     time_until_next_repeat() - if a timed script (interval>0), returns time
-                 until next tick
-
-    * Hook methods (should also include self as the first argument):
-
-     at_script_creation() - called only once, when an object of this
-                            class is first created.
-     is_valid() - is called to check if the script is valid to be running
-                  at the current time. If is_valid() returns False, the running
-                  script is stopped and removed from the game. You can use this
-                  to check state changes (i.e. an script tracking some combat
-                  stats at regular intervals is only valid to run while there is
-                  actual combat going on).
-      at_start() - Called every time the script is started, which for persistent
-                  scripts is at least once every server start. Note that this is
-                  unaffected by self.delay_start, which only delays the first
-                  call to at_repeat().
-      at_repeat() - Called every self.interval seconds. It will be called
-                  immediately upon launch unless self.delay_start is True, which
-                  will delay the first call of this method by self.interval
-                  seconds. If self.interval==0, this method will never
-                  be called.
-      at_pause()
-      at_stop() - Called as the script object is stopped and is about to be
-                  removed from the game, e.g. because is_valid() returned False.
-      at_script_delete()
-      at_server_reload() - Called when server reloads. Can be used to
-                  save temporary variables you want should survive a reload.
-      at_server_shutdown() - called at a full server shutdown.
-      at_server_start()
-
-    """
-
+    """Base typeclass for all project scripts."""
     pass
 
 
 class StaminaRegenScript(Script):
     """
     Global stamina regen: every STAMINA_REGEN_INTERVAL seconds, tick all
-    in-world characters. Created and started from at_server_start.
+    in-world characters.
     """
+
+    @classmethod
+    def ensure(cls):
+        from evennia.scripts.models import ScriptDB
+        if not ScriptDB.objects.filter(db_key="stamina_regen").exists():
+            from evennia import create_script
+            create_script(cls)
 
     def at_script_creation(self):
         from world.rpg.stamina import STAMINA_REGEN_INTERVAL
@@ -127,8 +49,15 @@ class StaminaRegenScript(Script):
 class BleedingTickScript(Script):
     """
     Global bleeding tick: every BLEEDING_TICK_INTERVAL seconds, apply one bleed
-    drain to all in-world characters with bleeding_level > 0 (in or out of combat).
+    drain to all in-world characters with bleeding_level > 0.
     """
+
+    @classmethod
+    def ensure(cls):
+        from evennia.scripts.models import ScriptDB
+        if not ScriptDB.objects.filter(db_key="bleeding_tick").exists():
+            from evennia import create_script
+            create_script(cls)
 
     def at_script_creation(self):
         from world.medical import BLEEDING_TICK_INTERVAL
@@ -144,50 +73,15 @@ class BleedingTickScript(Script):
             bleeding_tick_all()
 
 
-class StaffPendingScript(Script):
-    """
-    Global storage for staff approval queue (custom sdesc terms, future: name changes, etc.).
-    db.pending = list of job dicts. Created once at server start.
-    """
-
-    def at_script_creation(self):
-        from world.staff_pending import PENDING_SCRIPT_KEY
-        self.key = PENDING_SCRIPT_KEY
-        self.interval = 0
-        self.repeats = 0
-        self.persistent = True
-        self.db.pending = []
-
-
-class GlobalClimateScript(Script):
-    """
-    Global weather + time-of-day for street-room ambient prose (per-district matrix + overrides).
-    db.weather, db.time_of_day, db.time_auto_utc (bool: follow real UTC when True),
-    db.line_overrides (dict: \"district:weather:time\" -> text).
-    """
-
-    def at_script_creation(self):
-        from world.global_climate import GLOBAL_CLIMATE_KEY, TIMES, WEATHERS, utc_time_phase
-
-        self.key = GLOBAL_CLIMATE_KEY
-        self.interval = 0
-        self.repeats = 0
-        self.persistent = True
-        w = getattr(self.db, "weather", None)
-        self.db.weather = w if w in WEATHERS else "fog"
-        if getattr(self.db, "time_auto_utc", None) is None:
-            self.db.time_auto_utc = True
-        t = getattr(self.db, "time_of_day", None)
-        if t not in TIMES:
-            self.db.time_of_day = utc_time_phase()
-        if not isinstance(getattr(self.db, "line_overrides", None), dict):
-            self.db.line_overrides = {}
-
-
 class AddictionWithdrawalScript(Script):
-    """
-    Every 30 minutes: addiction withdrawal onset, recovery steps, echoes.
-    """
+    """Every 30 minutes: addiction withdrawal onset, recovery steps, echoes."""
+
+    @classmethod
+    def ensure(cls):
+        from evennia.scripts.models import ScriptDB
+        if not ScriptDB.objects.filter(db_key="addiction_withdrawal").exists():
+            from evennia import create_script
+            create_script(cls)
 
     def at_script_creation(self):
         self.key = "addiction_withdrawal"
@@ -198,7 +92,6 @@ class AddictionWithdrawalScript(Script):
     def at_repeat(self):
         from world.profiling import timed_tick
         from world.alchemy.addiction import tick_online_characters
-
         with timed_tick("addiction_withdrawal", self.interval):
             tick_online_characters()
 
@@ -209,6 +102,13 @@ class HandsetMessageCleanupScript(Script):
 
     Runs on a timer so simply viewing menus won't delete messages.
     """
+
+    @classmethod
+    def ensure(cls):
+        from evennia.scripts.models import ScriptDB
+        if not ScriptDB.objects.filter(db_key="handset_message_cleanup").exists():
+            from evennia import create_script
+            create_script(cls)
 
     def at_script_creation(self):
         self.key = "handset_message_cleanup"
@@ -228,7 +128,6 @@ class HandsetMessageCleanupScript(Script):
         except Exception:
             return
 
-        # Only look at handset typeclass objects.
         qs = ObjectDB.objects.filter(db_typeclass_path="typeclasses.matrix.devices.handsets.Handset")
         for obj in qs:
             try:
@@ -243,7 +142,6 @@ class HandsetMessageCleanupScript(Script):
                     continue
                 t = entry.get("t", None)
                 if t is None:
-                    # Unknown age/legacy entry: drop during cleanup.
                     continue
                 try:
                     if float(t) >= cutoff:
@@ -257,26 +155,7 @@ class HandsetMessageCleanupScript(Script):
         snapshot_object_counts({"Handset": len(qs)})
 
 
-# Matrix scripts
-from typeclasses.matrix.scripts import MatrixCleanupScript, MatrixConnectionScript
-
-# typeclasses/scripts.py
-
-from evennia import DefaultScript
-
-class PCNoteStorage(DefaultScript):
-    """
-    A persistent, silent script that holds all PC notes.
-    It does not tick. It just acts as a database table.
-    """
-    def at_script_creation(self):
-        self.key = "pc_note_storage"
-        self.desc = "Stores all PC notes globally."
-        self.persistent = True
-
-        self.interval = 0       # Do not tick
-        self.repeats = 0        # Do not repeat
-        self.autodelete = False # NEVER delete yourself
-
-        self.db.notes = []
-        self.db.next_id = 1
+# Re-export so existing DB records with the alias typeclass path
+# "typeclasses.scripts.MatrixCleanupScript" can still be deserialized.
+# Remove once _migrate_matrix_script_paths() has run on the live server.
+from typeclasses.matrix.scripts import MatrixCleanupScript, MatrixConnectionScript  # noqa: F401, E402
