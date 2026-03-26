@@ -11,7 +11,7 @@ Router Access Menu:
 
 from evennia.utils.evmenu import EvMenu
 from evennia.utils import logger, delay
-from world.utils import get_networked_devices, get_router_access_points
+from world.network_utils import get_networked_devices, get_router_access_points
 
 
 def router_main_menu(caller, raw_string, **kwargs):

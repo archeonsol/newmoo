@@ -6,7 +6,8 @@ Mixins providing shared functionality for Matrix-related classes.
 NetworkedMixin - Provides Matrix connectivity for both objects and items
 """
 
-from world.utils import get_containing_room, room_has_network_coverage
+from world.utils import get_containing_room
+from world.network_utils import room_has_network_coverage
 from .matrix_id import MatrixIdMixin
 
 

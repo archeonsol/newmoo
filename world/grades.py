@@ -37,12 +37,12 @@ STAT_GRADE_ADJECTIVES = {
         "I": "Interesting", "H": "Honorable", "G": "Gracious", "F": "Fabulous",
         "E": "Engaging", "D": "Dignified", "C": "Charming", "B": "Beautiful", "A": "Arresting",
     },
-        "intelligence": {
+    "intelligence": {
         "U": "Unintelligent", "T": "Thick", "S": "Shallow", "R": "Rote",
         "Q": "Quizzical", "P": "Primitive", "O": "Obtuse", "N": "Naive",
         "M": "Middling", "L": "Lummox", "K": "Knowing", "J": "Jaded",
         "I": "Informed", "H": "Headful", "G": "Gifted", "F": "Foresighted",
-        "E": "Erudite", "D": "Discerning", "C": "Cerebral", "B": "Brilliant", "A": "Astute",
+        "E": "Erudite", "D": "Discerning", "C": "Cerebral", "B": "Brilliant", "A": "Analytical",
     },
     "agility": {
         "U": "Unsteady", "T": "Tense", "S": "Stiff", "R": "Rigid",

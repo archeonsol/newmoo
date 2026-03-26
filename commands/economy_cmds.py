@@ -664,7 +664,8 @@ class CmdWire(Command):
             return
 
         # Signal check
-        from world.utils import get_containing_room, room_has_network_coverage
+        from world.utils import get_containing_room
+        from world.network_utils import room_has_network_coverage
         room = get_containing_room(caller)
         if not room_has_network_coverage(room, include_matrix_nodes=True):
             caller.msg(
