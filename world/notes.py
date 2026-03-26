@@ -111,5 +111,5 @@ def staff_mark_read(account, note_id: int) -> None:
 def staff_unread_notes(account) -> List[Dict[str, Any]]:
     from world.models import PCNote
     read = staff_read_ids(account)
-    qs = PCNote.objects.filter(account_id__isnull=False, char_id__isnull=False)
+    qs = PCNote.objects.filter(account_id__isnull=False)
     return [_note_to_dict(n) for n in qs if n.pk not in read]

@@ -155,5 +155,7 @@ class HandsetMessageCleanupScript(Script):
         snapshot_object_counts({"Handset": len(qs)})
 
 
-# Matrix scripts
+# Re-export so existing DB records with the alias typeclass path
+# "typeclasses.scripts.MatrixCleanupScript" can still be deserialized.
+# Remove once _migrate_matrix_script_paths() has run on the live server.
 from typeclasses.matrix.scripts import MatrixCleanupScript, MatrixConnectionScript  # noqa: F401, E402
