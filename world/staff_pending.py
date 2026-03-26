@@ -2,50 +2,22 @@
 Staff pending approvals: a reusable foundation for player requests that require
 staff approval (custom sdesc gender terms, future: name changes, etc.).
 
-- Pending jobs are stored on a global Script (staff_pending).
+- Pending jobs are stored in the PendingJob Django model.
 - When a job is added, a message is sent to the staff_pending channel so staff see it.
 - Staff use the @pending command to list, approve, or deny.
 - Each job type has a resolver that applies the change (or not) and notifies the player.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
-# Script key and channel alias used by this system
-PENDING_SCRIPT_KEY = "staff_pending"
+# Channel alias used by this system
 STAFF_PENDING_CHANNEL_ALIAS = "staff_pending"
-
-
-def _get_script():
-    """Return the staff_pending Script, or None if not created yet."""
-    from evennia import search_script
-    scripts = search_script(PENDING_SCRIPT_KEY)
-    return scripts[0] if scripts else None
-
-
-def _get_pending_list():
-    """Return the list of pending job dicts; initializes to [] if missing."""
-    script = _get_script()
-    if not script:
-        return []
-    pending = getattr(script.db, "pending", None)
-    if pending is None:
-        script.db.pending = []
-        return []
-    return list(pending)
-
-
-def _save_pending(pending_list):
-    """Persist the pending list to the Script."""
-    script = _get_script()
-    if script:
-        script.db.pending = pending_list
 
 
 def _notify_staff_channel(job):
     """Send a notification to the staff pending channel so staff see new requests."""
     from evennia import create_channel, search_channel
-    # Search by key or alias
     channels = search_channel(STAFF_PENDING_CHANNEL_ALIAS)
     if not channels:
         channel = create_channel(
@@ -56,7 +28,6 @@ def _notify_staff_channel(job):
         )
     else:
         channel = list(channels)[0] if hasattr(channels, "__iter__") else channels
-    # Format a one-line summary
     summary = _format_job_summary(job)
     if summary:
         try:
@@ -66,7 +37,7 @@ def _notify_staff_channel(job):
 
 
 def _format_job_summary(job):
-    """One-line human-readable summary for channel and list. Uses character name and short id."""
+    """One-line human-readable summary for channel and list. job is a dict."""
     job_type = job.get("type") or "unknown"
     full_id = job.get("id", "")
     short_id = full_id[:8] if len(full_id) >= 8 else full_id
@@ -75,13 +46,12 @@ def _format_job_summary(job):
     if req_id is not None:
         from evennia import search_object
         objs = search_object("#%s" % req_id)
-        if objs:
-            try:
-                obj = objs[0]
-            except (TypeError, IndexError):
-                obj = None
-            if obj is not None:
-                requester_name = obj.get_display_name(None) if hasattr(obj, "get_display_name") else getattr(obj, "key", str(obj))
+        try:
+            obj = objs[0] if objs else None
+        except (TypeError, IndexError):
+            obj = None
+        if obj is not None:
+            requester_name = obj.get_display_name(None) if hasattr(obj, "get_display_name") else getattr(obj, "key", str(obj))
     payload = job.get("payload") or {}
     if job_type == "sdesc_gender_term":
         term = payload.get("term", "?")
@@ -89,68 +59,88 @@ def _format_job_summary(job):
     return "[Pending %s] %s: type=%s (use |w@pending approve %s|n or |w@pending deny %s|n)." % (short_id, requester_name, job_type, short_id, short_id)
 
 
+def _job_to_dict(job):
+    """Convert a PendingJob instance to the legacy dict format used by resolvers."""
+    return {
+        "id": job.job_id,
+        "type": job.job_type,
+        "requester_id": job.requester_id,
+        "payload": job.payload,
+        "created": job.created_at.isoformat() if job.created_at else "",
+        "meta": job.meta,
+    }
+
+
 def add_pending(job_type, requester, payload, **meta):
     """
     Add a pending job. requester is the Character (or Object) requesting.
 
-    Returns (job_id, True) on success, or (None, False) if storage unavailable.
+    Returns (job_id, True) on success, or (None, False) on error.
     """
-    script = _get_script()
-    if not script:
+    from world.models import PendingJob
+    requester_id = getattr(requester, "id", None)
+    if not requester_id:
         return None, False
     job_id = uuid.uuid4().hex
-    requester_id = getattr(requester, "id", None) or getattr(requester, "dbref", None)
-    job = {
+    try:
+        PendingJob.objects.create(
+            job_id=job_id,
+            job_type=job_type,
+            requester_id=requester_id,
+            payload=dict(payload),
+            meta=dict(meta),
+        )
+    except Exception:
+        return None, False
+    _notify_staff_channel({
         "id": job_id,
         "type": job_type,
         "requester_id": requester_id,
         "payload": dict(payload),
-        "created": datetime.utcnow().isoformat() + "Z",
-        "meta": dict(meta),
-    }
-    pending = _get_pending_list()
-    pending.append(job)
-    _save_pending(pending)
-    _notify_staff_channel(job)
+    })
     return job_id, True
 
 
 def get_pending(job_type=None):
     """Return list of pending job dicts, optionally filtered by job_type."""
-    pending = _get_pending_list()
+    from world.models import PendingJob
+    qs = PendingJob.objects.all()
     if job_type:
-        pending = [j for j in pending if j.get("type") == job_type]
-    return pending
+        qs = qs.filter(job_type=job_type)
+    return [_job_to_dict(j) for j in qs]
 
 
 def get_by_id(job_id):
-    """Return the job dict with the given id (full hex or short 8-char prefix), or None. If multiple match by prefix, returns first."""
+    """Return the job dict with the given id (full hex or 8-char prefix), or None."""
     if not job_id:
         return None
+    from world.models import PendingJob
     job_id = job_id.strip().lower()
-    for j in _get_pending_list():
-        jid = (j.get("id") or "")
-        if jid == job_id or (len(job_id) <= 8 and jid.startswith(job_id)):
-            return j
-    return None
+    try:
+        job = PendingJob.objects.filter(job_id__startswith=job_id).first()
+        return _job_to_dict(job) if job else None
+    except Exception:
+        return None
 
 
 def resolve(job_id, approved, staff_member):
     """
     Resolve a pending job: approve or deny. Runs the type-specific handler,
-    removes the job from the list, and returns (success, message).
+    removes the job from the DB, and returns (success, message).
     """
-    job = get_by_id(job_id)
-    if not job:
+    from world.models import PendingJob
+    job_id = (job_id or "").strip().lower()
+    try:
+        job_obj = PendingJob.objects.filter(job_id__startswith=job_id).first()
+    except Exception:
+        job_obj = None
+    if not job_obj:
         return False, "No pending job with that id."
-    handler = _RESOLVERS.get(job.get("type"))
+    job = _job_to_dict(job_obj)
+    handler = _RESOLVERS.get(job_obj.job_type)
     if not handler:
-        return False, "Unknown job type: %s." % job.get("type")
-    # Remove from list first so we don't double-process (use full id from job)
-    full_id = job.get("id")
-    pending = _get_pending_list()
-    pending = [j for j in pending if j.get("id") != full_id]
-    _save_pending(pending)
+        return False, "Unknown job type: %s." % job_obj.job_type
+    job_obj.delete()
     return handler(job, approved, staff_member)
 
 

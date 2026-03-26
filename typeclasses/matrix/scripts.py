@@ -24,6 +24,13 @@ class MatrixCleanupScript(DefaultScript):
     by MatrixConnectionScript, which runs every 10 seconds.
     """
 
+    @classmethod
+    def ensure(cls):
+        from evennia.scripts.models import ScriptDB
+        if not ScriptDB.objects.filter(db_key="matrix_cleanup").exists():
+            from evennia import create_script
+            create_script(cls)
+
     def at_script_creation(self):
         """Called when script is first created."""
         self.key = "matrix_cleanup"
@@ -141,6 +148,13 @@ class MatrixConnectionScript(DefaultScript):
     Runs every few seconds and validates active connections on dive rigs and
     teleop rigs. Disconnects any connections that have become invalid.
     """
+
+    @classmethod
+    def ensure(cls):
+        from evennia.scripts.models import ScriptDB
+        if not ScriptDB.objects.filter(db_key="matrix_connection_check").exists():
+            from evennia import create_script
+            create_script(cls)
 
     def at_script_creation(self):
         """Called when script is first created."""
