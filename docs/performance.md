@@ -78,6 +78,8 @@ A zero-interval Script has the overhead of the typeclass system, attribute seria
 **Correct replacements:**
 - `StaffPendingScript` → `PendingJob` Django model (`world/models.py`)
 - `PCNoteStorage` → `PCNote` Django model (`world/models.py`)
+
+When adding or changing a model in `world/models.py`: run `evennia makemigrations world` and **commit the generated migration file** alongside the model change. `migrate` runs automatically on `@reload` — other devs don't need to do anything beyond pulling and reloading.
 - `GlobalClimateScript` → `ServerConfig` keys (`CLIMATE_*`)
 - `ProfilingScript` → module-level dicts in `world/profiling.py`
 

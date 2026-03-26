@@ -6,9 +6,9 @@ as a makeshift database:
   - PendingJob: replaces StaffPendingScript (was a pickled list in db.pending)
   - PCNote: replaces PCNoteStorage (was a pickled list in db.notes)
 
-After adding or changing models here, run:
-    evennia makemigrations world
-    evennia migrate
+After adding or changing models here:
+    evennia makemigrations world   ← required; commit the generated file
+    evennia migrate                ← optional; at_server_start runs this automatically on @reload
 """
 
 from django.db import models
