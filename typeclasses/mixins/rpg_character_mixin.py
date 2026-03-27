@@ -42,6 +42,12 @@ class RPGCharacterMixin:
         else:
             value = base_display
         value += self._get_surge_stat_modifier(stat_name)
+        # The following modifiers are applied outside the BuffHandler deliberately.
+        # They are transient machine-state effects tied to cyberware overload incidents
+        # or combat outcomes (not player-consumable items or installations). They use
+        # db timestamp flags rather than buff entries because they do not need to appear
+        # in buff inspection output and do not survive server restarts by design.
+        # New permanent or player-visible effects should use BuffHandler instead.
         # Olfactory booster overload in harsh smell-heavy environments.
         if stat_name == "perception" and self._is_olfactory_overload_room():
             value -= 8

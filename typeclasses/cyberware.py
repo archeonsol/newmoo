@@ -54,7 +54,12 @@ class CyberwareBase(DefaultObject):
     buff_class = None
     body_mods = {}
     armor_values = {}  # {damage_type: protection_score} for passive resistance
-    vulnerabilities = {}  # {"arc": 0.0, ...}
+    # Arc-damage vulnerability scalar. {"arc": 0.15} means +15% incoming arc damage.
+    # Character.get_arc_vulnerability() reads this field as a FALLBACK — if the
+    # cyberware has a buff_class, the buff class's vulnerabilities field takes
+    # precedence. Define arc values on the buff class (cyberware_buffs.py) rather
+    # than here unless the cyberware has no buff_class.
+    vulnerabilities = {}
     # Deterministic combat durability routing:
     # - "armor":      loses chrome_hp when it absorbs incoming damage.
     # - "collateral": loses chrome_hp from organ-trauma collateral on its body part.

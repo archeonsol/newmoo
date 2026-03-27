@@ -21,13 +21,21 @@ class _CyberBuffMeta(type):
     Build Evennia ``Mod`` lists from ``stat_mods`` / ``skill_mods`` on each
     cyberware buff class. BuffHandler only applies ``check()`` modifiers for
     buffs with non-empty ``mods`` (see traits / get_by_stat in the contrib).
+
+    Set ``_skip_meta_mods = True`` on a subclass to opt out of auto-mod
+    building (e.g. for marker buffs with no mechanical stats yet, or for
+    buffs whose mods are managed manually).
     """
 
     def __new__(mcs, name, bases, namespace, **kwds):
         cls = super().__new__(mcs, name, bases, namespace)
-        if name in ("_CyberBuff", "RetractableClawsBuff"):
+        # Skip the base class itself and any class that explicitly opts out.
+        if namespace.get("_skip_meta_mods"):
             return cls
-        if not any(getattr(b, "__name__", None) == "_CyberBuff" for b in bases):
+        # Only build mods for direct subclasses of _CyberBuff. _CyberBuff carries
+        # _skip_meta_mods in its own __dict__ as a sentinel; its subclasses do not
+        # inherit it into their own __dict__, so this check identifies the base precisely.
+        if not any("_skip_meta_mods" in getattr(b, "__dict__", {}) for b in bases):
             return cls
         stat_mods = namespace.get("stat_mods") or {}
         skill_mods = namespace.get("skill_mods") or {}
@@ -43,10 +51,19 @@ class _CyberBuffMeta(type):
 
 class _CyberBuff(GameBuffBase, metaclass=_CyberBuffMeta):
     # Evennia contrib: duration -1 is permanent (see BaseBuff in contrib).
+    # _skip_meta_mods = True marks this base class so the metaclass does not
+    # attempt to build mods for it. Subclasses do NOT inherit this sentinel
+    # value — they each receive their own mods from stat_mods / skill_mods.
+    _skip_meta_mods = True
     duration = -1
     tickrate = 0
     stat_mods = {}
     skill_mods = {}
+    # Arc-damage vulnerability scalar. Read by Character.get_arc_vulnerability():
+    # when a cyberware object has a buff_class, the buff class's vulnerabilities
+    # take precedence over the cyberware object's own vulnerabilities field.
+    # Keep values in sync with the corresponding CyberwareBase subclass in
+    # cyberware_catalog.py if that subclass also sets vulnerabilities.
     vulnerabilities = {}
 
 
@@ -162,6 +179,9 @@ class SubdermalPlatingBuff(_CyberBuff):
 
 
 class DermalWeaveBuff(_CyberBuff):
+    # No stat_mods yet. Planned: passive bleed/wound-severity resistance.
+    # BuffHandler.traits filters this out of check() until mods are added —
+    # presence is tracked via db.cyberware in the meantime.
     key = "dermal_weave"
     name = "Dermal Weave"
     flavor = "Reactive woven reinforcement under skin."
@@ -295,6 +315,8 @@ class TargetingReticleBuff(_CyberBuff):
 
 
 class SubvocalCommBuff(_CyberBuff):
+    # No stat_mods yet. Planned: silent-communication capability flag / social skill bonus.
+    # BuffHandler.traits filters this out of check() until mods are added.
     key = "subvocal_comm"
     name = "Subvocal Communicator"
     flavor = "Silent transmit micro-actuation."
@@ -382,6 +404,8 @@ class ChromeThroatBuff(_CyberBuff):
 
 
 class ChromeStomachBuff(_CyberBuff):
+    # No stat_mods yet. Planned: toxin/drug metabolism modifier.
+    # BuffHandler.traits filters this out of check() until mods are added.
     key = "chrome_stomach"
     name = "Chrome Stomach"
     flavor = "Synthetic digestion chamber."
@@ -389,6 +413,8 @@ class ChromeStomachBuff(_CyberBuff):
 
 
 class ChromeSpleenBuff(_CyberBuff):
+    # No stat_mods yet. Planned: immune response / infection resistance modifier.
+    # BuffHandler.traits filters this out of check() until mods are added.
     key = "chrome_spleen"
     name = "Chrome Spleen"
     flavor = "Synthetic spleen unit."

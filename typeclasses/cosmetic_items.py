@@ -61,7 +61,12 @@ class EyelinerBuff(GameBuffBase):
     mods = [Mod(stat="charisma_display", modifier="add", value=2)]
 
 
-# Register buff classes on world.buffs so pickle can resolve them.
+# MIGRATION SHIM — safe to remove once no live database has buff rows with the
+# path "world.buffs.<Name>". These classes were previously defined in world/buffs.py
+# before being moved here. Their canonical pickle path is now
+# "typeclasses.cosmetic_items.<ClassName>" (set automatically by Python because
+# that is the module they are defined in). The aliases below exist only so that
+# old db.buffs entries that still carry the "world.buffs.*" path can unpickle.
 try:
     import world.buffs as _buffs_module
     for _cls in (LipstickBuff, NailPolishBuff, EyeShadowBuff, EyelinerBuff):

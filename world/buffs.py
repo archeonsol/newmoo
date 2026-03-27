@@ -48,10 +48,19 @@ class GameBuffBase(BaseBuff):
         except Exception:
             row = None
         if isinstance(row, dict):
+            dirty = False
             for name, empty in (("mods", []), ("stat_mods", {}), ("skill_mods", {})):
                 class_val = getattr(type(self), name, empty)
                 if row.get(name) == empty and class_val != empty:
                     row.pop(name, None)
+                    dirty = True
+            # row is a plain dict; mutating it does not trigger _BuffCacheDict._persist.
+            # Write it back explicitly so the clean version reaches the database.
+            if dirty:
+                try:
+                    self.handler.buffcache[self.buffkey] = row
+                except Exception:
+                    pass
 
 
 class PerfumeBuff(GameBuffBase):
@@ -121,6 +130,14 @@ def build_drug_buff_class(drug_key, suffix, display_name, duration_seconds, stat
         },
     )
     # BuffHandler persists buffcache; pickle must resolve the class on this module.
+    # KNOWN LIMITATION: if apply_drug calls this factory with potency-scaled values at
+    # runtime, the module-level name is overwritten with the scaled class. After a server
+    # restart, _register_all_drug_buff_classes() reinstalls the baseline class under the
+    # same name before db.buffs is unpickled. Any character who had an active drug buff
+    # during the restart will silently revert to the unscaled effect.
+    # Fixing this properly requires storing potency in the buff row rather than baking
+    # it into the class. Until then, the regression is bounded to rare restart windows
+    # and the effect expires naturally within the buff's duration anyway.
     setattr(_THIS_MODULE, cls_name, cls)
     return cls
 
