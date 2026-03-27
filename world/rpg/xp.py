@@ -74,13 +74,6 @@ def get_stat_cost(stored_level):
     return round(level_cost, 3)
 
 
-# Aliases for existing callers
-get_skill_cost_for_next_level = get_skill_cost
-get_stat_cost_for_next_level = get_stat_cost
-xp_cost_for_skill_level = get_skill_cost
-xp_cost_for_stat_level = get_stat_cost
-
-
 def total_xp_for_skill(level):
     """Total cumulative XP to reach skill level (0-150)."""
     return get_skill_cumulative_xp(level)
@@ -180,7 +173,7 @@ def get_xp_cost_stat(character, stat_key):
     cap = _stat_cap_level(character, stat_key)
     if cur >= cap or cur >= MAX_STAT_LEVEL:
         return None, None
-    cost = get_stat_cost_for_next_level(cur)
+    cost = get_stat_cost(cur)
     return (round(cost, 3), None) if cost is not None else (None, None)
 
 
@@ -190,7 +183,7 @@ def get_xp_cost_skill(character, skill_key):
     cap = _skill_cap_level(character, skill_key)
     if cur >= cap or cur >= MAX_LEVEL:
         return None, None
-    cost = get_skill_cost_for_next_level(cur)
+    cost = get_skill_cost(cur)
     return (round(cost, 3), None) if cost is not None else (None, None)
 
 

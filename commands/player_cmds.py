@@ -49,8 +49,6 @@ class CmdXp(Command):
         from world.rpg.xp import (
             get_xp_cost_stat,
             get_xp_cost_skill,
-            xp_cost_for_stat_level,
-            xp_cost_for_skill_level,
             _stat_level,
             _skill_level,
             _stat_cap_level,
