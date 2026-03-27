@@ -881,6 +881,10 @@ class CmdRecog(Command):
             # *current* visible description (sdesc) before recog is applied.
             before = get_character_sdesc_for_viewer(target, caller)
             old_perm = caller.recog.get(target) if hasattr(caller, "recog") else None
+            # Warn if the name is already in use for a different person.
+            existing_owner = caller.recog.get_by_name(name_part) if hasattr(caller, "recog") else None
+            if existing_owner and existing_owner != target:
+                caller.msg("|y(Note: you already use '%s' for someone else. Both will now share that name — consider using 'forget' first.)|n" % name_part)
             caller.recog.add(target, name_part)
             if old_perm and old_perm.strip().lower() != name_part.strip().lower():
                 from world.rpg.trust import migrate_trust_rename

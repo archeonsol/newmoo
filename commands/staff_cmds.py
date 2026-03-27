@@ -38,15 +38,15 @@ class CmdStaffSheet(Command):
         target = caller.search(args, global_search=True)
         if not target:
             return
-        if not hasattr(target, "db") or not hasattr(target.db, "stats"):
+        if not hasattr(target, "db") or not hasattr(target, "trait_stats"):
             caller.msg("That is not a character with a sheet.")
             return
         from world.rpg.chargen import STAT_KEYS
         from world.skills import SKILL_KEYS, SKILL_DISPLAY_NAMES
         from world.levels import get_stat_grade, get_skill_grade
         _db = target.db
-        stats = _db.stats or {}
-        skills = _db.skills or {}
+        stats = {k: target.get_stat_level(k) for k in STAT_KEYS}
+        skills = {k: target.get_skill_level(k) for k in SKILL_KEYS}
         try:
             hp_str = "{} / {}".format(target.hp, target.max_hp)
             st_str = "{} / {}".format(target.stamina, target.max_stamina)
@@ -134,9 +134,6 @@ class CmdStaffSetStat(Command):
         except ValueError:
             caller.msg("Value must be a number (0-300).")
             return
-        if not target.db.stats:
-            target.db.stats = {}
-        target.db.stats[stat_key] = value
         from world.rpg.trait_sync import sync_single_stat
         sync_single_stat(target, stat_key, value)
         caller.msg("|g{}'s {} set to {}.|n".format(target.name, stat_key, value))
@@ -181,9 +178,6 @@ class CmdStaffSetSkill(Command):
         except ValueError:
             caller.msg("Value must be a number (0-150).")
             return
-        if not target.db.skills:
-            target.db.skills = {}
-        target.db.skills[skill_key] = value
         from world.rpg.trait_sync import sync_single_skill
         sync_single_skill(target, skill_key, value)
         label = SKILL_DISPLAY_NAMES.get(skill_key, skill_key)
@@ -1647,23 +1641,16 @@ class CmdNpc(Command):
         from world.skills import SKILL_KEYS
         from world.rpg.chargen import STAT_KEYS
         if attr in STAT_KEYS:
-            if not hasattr(target.db, "stats") or target.db.stats is None:
-                target.db.stats = {}
             clamped_stat = max(0, min(300, value))
-            target.db.stats[attr] = clamped_stat
             from world.rpg.trait_sync import sync_single_stat
             sync_single_stat(target, attr, clamped_stat)
-            caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, target.db.stats[attr]))
+            caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, clamped_stat))
             return
         if attr in SKILL_KEYS:
-            if not hasattr(target.db, "skills") or target.db.skills is None:
-                from world.skills import SKILL_KEYS as SK
-                target.db.skills = {k: 0 for k in SK}
             clamped_skill = max(0, min(150, value))
-            target.db.skills[attr] = clamped_skill
             from world.rpg.trait_sync import sync_single_skill
             sync_single_skill(target, attr, clamped_skill)
-            caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, target.db.skills[attr]))
+            caller.msg("|g%s's %s is now %s.|n" % (target.name, attr, clamped_skill))
             return
         caller.msg("|rUnknown attribute. Use a stat (%s) or skill (e.g. evasion, medicine).|n" % ", ".join(STAT_KEYS))
 

@@ -6,7 +6,6 @@ hidden and others see only their sdesc until they remove it.
 
 # Attribute keys
 RECOG_REF2RECOG = "_recog_ref2recog"
-RECOG_OBJ2RECOG = "_recog_obj2recog"
 # Temporary recog while the target is masked/helmeted (overlays normal recog for as long as
 # their face is hidden, without overwriting the underlying "true" recog).
 HELMET_RECOG_REF2RECOG = "_helmet_recog_ref2recog"
@@ -50,6 +49,14 @@ class RecogHandler:
         key = "#%s" % oid
         return self._cache.get(key)
 
+    def get_by_name(self, name):
+        """Return the character this viewer has mapped to recog name (case-insensitive), or None."""
+        name_lower = (name or "").strip().lower()
+        for obj, recog_str in self._obj2recog.items():
+            if recog_str.strip().lower() == name_lower:
+                return obj
+        return None
+
     def add(self, other_char, recog_string, max_length=60):
         """Set this character's recog for other_char. Returns the string stored."""
         if other_char is None or other_char == self.obj:
@@ -83,6 +90,28 @@ class RecogHandler:
     def all(self):
         """Return dict {recog_string: other_char} for listing."""
         return {v: k for k, v in self._obj2recog.items()}
+
+    def cleanup_dead_entries(self):
+        """
+        Remove entries for characters that no longer exist in the database.
+        Called on character login to prevent unbounded accumulation of dead refs.
+        """
+        try:
+            from evennia.utils.utils import dbref_to_obj
+            from evennia.objects.models import ObjectDB
+        except Exception:
+            return
+        dead_keys = [
+            key for key in list(self._cache)
+            if key.startswith("#") and dbref_to_obj(key, ObjectDB, raise_errors=False) is None
+        ]
+        if not dead_keys:
+            return
+        ref2 = self.obj.attributes.get(RECOG_REF2RECOG, default={}) or {}
+        for key in dead_keys:
+            del self._cache[key]
+            ref2.pop(key, None)
+        self.obj.attributes.add(RECOG_REF2RECOG, ref2)
 
 
 def get_character_sdesc_for_viewer(character, viewer):

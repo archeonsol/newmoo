@@ -183,20 +183,18 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
     @lazy_property
     def trait_stats(self):
         """
-        TraitHandler for stats (0-300 stored) and stat caps.
-        Key: db_attribute_key="trait_stats" avoids collision with legacy db.stats dict.
+        TraitHandler for stats (0-300 stored) and stat caps. Authoritative store.
         Read via character.trait_stats["strength"].base (stored 0-300).
-        Effective display value still flows through get_display_stat() -> xp._stat_level().
+        Effective display value flows through get_display_stat() -> xp._stat_level().
         """
         return TraitHandler(self, db_attribute_key="trait_stats", db_attribute_category="traits")
 
     @lazy_property
     def trait_skills(self):
         """
-        TraitHandler for skills (0-150 stored = display).
-        Key: db_attribute_key="trait_skills" avoids collision with legacy db.skills dict.
+        TraitHandler for skills (0-150 stored = display). Authoritative store.
         Read via character.trait_skills["unarmed"].base (stored 0-150).
-        Effective value still flows through get_skill_level() -> xp._skill_level().
+        Effective value flows through get_skill_level() -> xp._skill_level().
         """
         return TraitHandler(self, db_attribute_key="trait_skills", db_attribute_category="traits")
 
@@ -238,25 +236,11 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         """Called only once, when the character is first created."""
         super().at_object_creation()
 
-        # --- SPECIAL: levels 0-300 (letter displayed by tier; 300 = A)
-        self.db.stats = {
-            "strength": 0,
-            "perception": 0,
-            "endurance": 0,
-            "charisma": 0,
-            "intelligence": 0,
-            "agility": 0,
-            "luck": 0,
-        }
-
-        # --- SKILLS: levels 0-150; canonical list in world.skills
-        from world.skills import SKILL_KEYS
-        self.db.skills = {sk: 0 for sk in SKILL_KEYS}
-
-        # --- TRAIT MIRRORS: authoritative storage post-migration; xp.py reads these first.
+        # --- TRAITS: authoritative stat/skill storage; xp.py reads exclusively from these.
         # Stats: static traits, base=0-300, cap traits stored alongside as "cap_<key>".
         # Skills: static traits, base=0-150.
         from world.rpg.chargen import STAT_KEYS
+        from world.skills import SKILL_KEYS
         from world.levels import MAX_STAT_LEVEL, MAX_LEVEL
         for _sk in STAT_KEYS:
             self.trait_stats.add(_sk, _sk.title(), trait_type="static", base=0)
@@ -808,9 +792,8 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
         # If needs_chargen is True but character clearly already completed chargen (stale/corrupted flag),
         # e.g. after puppet-switching, avoid forcing them back into the pipeline.
         if getattr(self.db, "needs_chargen", False):
-            stats = getattr(self.db, "stats", None)
             priority = getattr(self.db, "stat_priority_order", None)
-            if priority or (stats and any((v or 0) for v in stats.values())):
+            if priority or any(self.get_stat_level(k) > 0 for k in ("strength", "agility")):
                 self.db.needs_chargen = False
             else:
                 from world.rpg.chargen import start_cinematic_chargen
@@ -828,6 +811,13 @@ class Character(MatrixIdMixin, RoleplayMixin, MedicalMixin, RPGCharacterMixin, F
             # Rig will validate connection and redirect to avatar if still valid
             if rig.validate_and_reconnect(self):
                 return  # Successfully redirected to avatar
+
+        # Lazy cleanup: remove stale recog entries for deleted characters.
+        try:
+            if hasattr(self, "recog"):
+                self.recog.cleanup_dead_entries()
+        except Exception as err:
+            logger.log_trace("characters.at_post_puppet recog cleanup: %s" % err)
 
         # Normal post-puppet: grant pending XP, personal line, room wake-up (not Evennia's "entered the game")
         from world.rpg.xp import grant_pending_xp

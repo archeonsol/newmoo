@@ -57,12 +57,9 @@ def _cardiovascular_resistance(character, organ_damage=None):
     Heart trauma lowers resistance (bleeds worsen).
     """
     try:
-        from world.levels import level_to_effective_grade, letter_to_level_range, MAX_STAT_LEVEL
-        end = (character.db.stats or {}).get("endurance", 0)
-        if isinstance(end, str):
-            lo, hi = letter_to_level_range(end.upper(), MAX_STAT_LEVEL)
-            end = (lo + hi) // 2
-        val = level_to_effective_grade(end if isinstance(end, int) else 0, MAX_STAT_LEVEL)
+        from world.levels import level_to_effective_grade, MAX_STAT_LEVEL
+        end = character.get_stat_level("endurance") if hasattr(character, "get_stat_level") else 0
+        val = level_to_effective_grade(end, MAX_STAT_LEVEL)
         base = 1.0 - (val - 5) * 0.02
     except Exception:
         base = 1.0

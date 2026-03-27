@@ -42,12 +42,13 @@ class RPGCharacterMixin:
         else:
             value = base_display
         value += self._get_surge_stat_modifier(stat_name)
-        # The following modifiers are applied outside the BuffHandler deliberately.
-        # They are transient machine-state effects tied to cyberware overload incidents
-        # or combat outcomes (not player-consumable items or installations). They use
-        # db timestamp flags rather than buff entries because they do not need to appear
-        # in buff inspection output and do not survive server restarts by design.
-        # New permanent or player-visible effects should use BuffHandler instead.
+        # The following modifiers are applied outside BuffHandler deliberately.
+        # Pattern: transient machine-state effects tied to cyberware hardware incidents
+        # (overloads, debuffs from specific implants). They use db timestamp flags because:
+        #   1. They do not need to appear in buff inspection output.
+        #   2. They are intentionally cleared on server restart.
+        # New permanent or player-visible effects should use BuffHandler (buffs.check()) instead.
+        # New hardware incident debuffs belong here, following the same pattern.
         # Olfactory booster overload in harsh smell-heavy environments.
         if stat_name == "perception" and self._is_olfactory_overload_room():
             value -= 8
@@ -87,7 +88,7 @@ class RPGCharacterMixin:
         return 0
 
     def _get_surge_stat_modifier(self, stat_name):
-        """Apply adrenal pump active/crash stat modifiers and crash stamina hit."""
+        """Return adrenal pump active/crash stat modifier. Pure read — no state mutation."""
         if stat_name not in ("strength", "agility"):
             return 0
         now = time.time()
@@ -100,16 +101,34 @@ class RPGCharacterMixin:
             if active_until > now:
                 return 10
             if crash_until > now:
+                return -8
+        return 0
+
+    def _maybe_apply_surge_crash(self):
+        """
+        Apply the one-time crash stamina hit when the adrenal pump enters crash phase.
+
+        Called explicitly from roll_check() before stats are read. Keeping this
+        separate from the getter ensures get_display_stat() is a pure read — the
+        crash still fires on the first roll after a server restart mid-surge, but
+        never as a side effect of a display or inspection call.
+        """
+        now = time.time()
+        from typeclasses.cyberware_catalog import AdrenalPump
+        for cw in (getattr(self.db, "cyberware", None) or []):
+            if not isinstance(cw, AdrenalPump) or bool(getattr(cw.db, "malfunctioning", False)):
+                continue
+            active_until = float(getattr(cw.db, "surge_active_until", 0.0) or 0.0)
+            crash_until = float(getattr(cw.db, "surge_crash_until", 0.0) or 0.0)
+            if active_until <= now and crash_until > now:
                 # One-time crash stamina drop on entering crash phase.
                 if not bool(getattr(cw.db, "surge_crash_applied", False)):
                     cur = int(getattr(self.db, "current_stamina", 0) or 0)
                     self.db.current_stamina = max(0, cur - 30)
                     cw.db.surge_crash_applied = True
-                return -8
-            # Cleanup stale crash marker once cycle has ended.
-            if bool(getattr(cw.db, "surge_crash_applied", False)):
+            elif crash_until <= now and bool(getattr(cw.db, "surge_crash_applied", False)):
+                # Cleanup stale crash marker once cycle has ended.
                 cw.db.surge_crash_applied = False
-        return 0
 
     def _is_olfactory_overload_room(self):
         room = getattr(self, "location", None)
@@ -157,9 +176,17 @@ class RPGCharacterMixin:
         - Final result is compared directly in opposed checks (attack vs parry/evasion).
 
         final_result = random(0, skill_level) + sum(relevant_stats) + modifier - difficulty
+
+        Note: the returned success tier (Critical/Full/Marginal/Failure) reflects execution
+        quality — roll relative to skill ceiling — independent of modifier and difficulty.
+        Those only shift final_result. Opposed-check callers compare final_result directly;
+        uncontested callers use the tier.
         """
         if isinstance(stat_list, str):
             stat_list = [stat_list]
+
+        # Apply one-time state transitions before reading stats (e.g. adrenal pump crash penalty).
+        self._maybe_apply_surge_crash()
 
         # 1. STAT STRENGTH: sum of relevant display stats
         total_display = sum(self.get_display_stat(s) for s in stat_list)

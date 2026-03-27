@@ -8,12 +8,10 @@ class NPC(Character):
         super().at_object_creation()
         self.db.is_npc = True
         # Stats 0-300, skills 0-150: random low-mid range.
-        # Build both dicts in one pass each, then write once and sync traits together.
-        _stats = {stat: random.randint(30, 140) for stat in (self.db.stats or {})}
-        _skills = {skill: random.randint(15, 70) for skill in (self.db.skills or {})}
-        self.db.stats = _stats
-        self.db.skills = _skills
-
+        from world.rpg.chargen import STAT_KEYS
+        from world.skills import SKILL_KEYS
+        _stats = {stat: random.randint(30, 140) for stat in STAT_KEYS}
+        _skills = {skill: random.randint(15, 70) for skill in SKILL_KEYS}
         from world.rpg.trait_sync import sync_stats_to_traits, sync_skills_to_traits
         sync_stats_to_traits(self, _stats)
         sync_skills_to_traits(self, _skills)

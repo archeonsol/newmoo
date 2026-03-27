@@ -53,12 +53,11 @@ class CmdStats(Command):
                 return
             data_source = controlling_char
 
-        if not getattr(data_source, "db", None) or not hasattr(data_source.db, "stats"):
+        if not getattr(data_source, "db", None) or not hasattr(data_source, "trait_stats"):
             caller.msg("Puppet a character to view your sheet.")
             return
 
         _db = data_source.db
-        skills = _db.skills or {}
         race_key = (getattr(_db, "race", None) or "human").lower()
         if race_key == "splicer":
             animal = (getattr(_db, "splicer_animal", None) or "unknown").title()
@@ -154,7 +153,7 @@ class CmdStats(Command):
             try:
                 base_skill_levels[key] = int(_skill_level(data_source, key))
             except Exception:
-                base_skill_levels[key] = int((skills.get(key, 0) or 0))
+                base_skill_levels[key] = 0
 
         effective_skill_levels = {}
         for key in SKILL_KEYS:
@@ -162,10 +161,10 @@ class CmdStats(Command):
                 effective_skill_levels[key] = int(
                     data_source.get_skill_level(key)
                     if hasattr(data_source, "get_skill_level")
-                    else (skills.get(key, 0) or 0)
+                    else 0
                 )
             except Exception:
-                effective_skill_levels[key] = base_skill_levels.get(key, int((skills.get(key, 0) or 0)))
+                effective_skill_levels[key] = base_skill_levels.get(key, 0)
 
         skill_label_width = 24
         for key in SKILL_KEYS:

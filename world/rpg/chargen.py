@@ -575,8 +575,6 @@ def node_apply_priority_order(caller, raw_string, **kwargs):
     caller.db.stat_priority_order = order
     _caps  = _compute_stat_caps(order)
     _stats = _randomize_stats(order)
-    caller.db.stat_caps = _caps
-    caller.db.stats     = _stats
     from world.rpg.trait_sync import sync_stats_to_traits
     sync_stats_to_traits(caller, _stats, _caps)
 
@@ -589,8 +587,8 @@ def node_apply_priority_order(caller, raw_string, **kwargs):
     return text, options
 
 def node_stats(caller, raw_string="", **kwargs):
-    stats = caller.db.stats or {}
-    
+    stats = {k: caller.get_stat_level(k) for k in STAT_KEYS}
+
     text_body = (
         "|xThe Rite reads, not assigns. These are not figures the system invented. "
         "This is what you've already become, rendered back to you.|n"
@@ -603,7 +601,6 @@ def node_stats(caller, raw_string="", **kwargs):
     return text, options
 
 def node_skills_intro(caller, raw_string="", **kwargs):
-    caller.db.skills                       = caller.db.skills or {}
     caller.db.chargen_mark_tier_index      = 0
     caller.db.chargen_mark_tier_picks_left = MARKS_LADDER[0][0]
 
@@ -623,7 +620,6 @@ def node_skills_intro(caller, raw_string="", **kwargs):
 def node_skills(caller, raw_string="", **kwargs):
     tier_index = int(getattr(caller.db, "chargen_mark_tier_index",    0) or 0)
     picks_left = int(getattr(caller.db, "chargen_mark_tier_picks_left", 0) or 0)
-    skills     = caller.db.skills or {}
 
     if picks_left <= 0:
         tier_index += 1
@@ -645,8 +641,8 @@ def node_skills(caller, raw_string="", **kwargs):
         intro_text = ""
 
     ladder = _render_ladder(caller)
-    tbl    = _skill_table(skills)
-    
+    tbl    = _skill_table({k: caller.get_skill_level(k) for k in SKILL_KEYS})
+
     # Custom prompt instead of EvMenu options
     pick_num = count - picks_left + 1
     prompt_action = f"your job" if tier_label == "Job" else f"skill {pick_num} of {count}"
@@ -688,15 +684,12 @@ def node_apply_mark(caller, raw_string="", **kwargs):
         return node_skills(caller, raw_string, **kwargs)
 
     count, tier_level, tier_label = MARKS_LADDER[tier_index]
-    skills = dict(caller.db.skills or {})
-    cur    = skills.get(skill_key, 0) or 0
+    cur = caller.get_skill_level(skill_key)
 
     if cur >= tier_level:
         caller.msg("\n|r[!] That skill is already etched to this depth.|n\n")
         return node_skills(caller, raw_string, **kwargs)
 
-    skills[skill_key] = tier_level
-    caller.db.skills = skills
     from world.rpg.trait_sync import sync_single_skill
     sync_single_skill(caller, skill_key, tier_level)
     caller.db.chargen_mark_tier_picks_left = picks_left - 1
@@ -704,7 +697,7 @@ def node_apply_mark(caller, raw_string="", **kwargs):
 
 def node_skills_done(caller, raw_string="", **kwargs):
     ladder = _render_ladder(caller)
-    tbl    = _skill_table(caller.db.skills or {})
+    tbl    = _skill_table({k: caller.get_skill_level(k) for k in SKILL_KEYS})
 
     text_body = (
         "|xThe ladder is fixed. Your job, your hobbies, your basics — locked in blood-memory.\n"
@@ -869,8 +862,8 @@ def node_finish(caller, raw_string="", **kwargs):
             except Exception:
                 pass
 
-    stats         = caller.db.stats or {}
-    skills        = caller.db.skills or {}
+    stats         = {k: caller.get_stat_level(k) for k in STAT_KEYS}
+    skills        = {k: caller.get_skill_level(k) for k in SKILL_KEYS}
     race_key      = (getattr(caller.db, "race", None) or "human").lower()
     if race_key == "splicer":
         animal = (getattr(caller.db, "splicer_animal", None) or "unknown").title()

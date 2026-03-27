@@ -220,22 +220,9 @@ class CmdXp(Command):
                         # Determine grade-letter helper
                         get_grade_fn = get_stat_grade if sub == "stat" else get_skill_grade
 
-                        # SAFELY EXTRACT, MODIFY, AND FORCE-SAVE THE DICTIONARY
-                        existing = getattr(caller.db, db_key, None) or {}
-                        try:
-                            db_dict = dict(existing)
-                        except Exception:
-                            db_dict = {}
-
-                        # Stats: store raw 0-300 "stored_new" value; display = stored // 2 is derived.
-                        # Skills: stored = display = 0-150.
+                        # Stats: store raw 0-300; skills: stored = display = 0-150.
                         stored_new = int(new_val)
-                        db_dict[attr_key] = stored_new
 
-                        # Force the database to save
-                        setattr(caller.db, db_key, db_dict)
-
-                        # Mirror to TraitHandler
                         if sub == "stat":
                             from world.rpg.trait_sync import sync_single_stat
                             sync_single_stat(caller, attr_key, stored_new)

@@ -194,8 +194,6 @@ def apply_npc_template(npc, template_key, template=None):
         return False
     _stats = dict(template["stats"])
     _skills = dict(template["skills"])
-    npc.db.stats = _stats
-    npc.db.skills = _skills
     from world.rpg.trait_sync import sync_stats_to_traits, sync_skills_to_traits
     sync_stats_to_traits(npc, _stats)
     sync_skills_to_traits(npc, _skills)

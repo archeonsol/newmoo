@@ -65,10 +65,12 @@ def build_clone_snapshot(character):
     body_descriptions = {part: (raw_desc.get(part) or "") for part in natural_parts}
     from world.rpg.factions import get_character_factions
 
+    from world.rpg.chargen import STAT_KEYS
+    from world.skills import SKILL_KEYS
     snapshot = {
         "key": character.key,
-        "stats": dict(getattr(character.db, "stats", {}) or {}),
-        "skills": dict(getattr(character.db, "skills", {}) or {}),
+        "stats": {k: character.get_stat_level(k) for k in STAT_KEYS},
+        "skills": {k: character.get_skill_level(k) for k in SKILL_KEYS},
         "body_descriptions": body_descriptions,
         "race": race,
         "splicer_animal": getattr(character.db, "splicer_animal", None),
@@ -117,14 +119,11 @@ def apply_clone_snapshot(character, snapshot):
     character.key = snapshot.get("key", character.key)
     if "stats" in snapshot:
         _stats = dict(snapshot["stats"])
-        character.db.stats = _stats
         from world.rpg.trait_sync import sync_stats_to_traits
         sync_stats_to_traits(character, _stats)
     if "skills" in snapshot:
         from world.rpg.trait_sync import sync_skills_to_traits
-
         _skills = dict(snapshot["skills"])
-        character.db.skills = _skills
         sync_skills_to_traits(character, _skills)
     if "body_descriptions" in snapshot:
         character.db.body_descriptions = dict(snapshot["body_descriptions"])
